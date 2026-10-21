@@ -114,6 +114,8 @@ bool populate(Project &project)
         project.setVariableValue(docs[i], children, QString::fromLatin1(kids[i]));
     }
 
+    project.addDocumentSet(QObject::tr("Senza figli"), {docs[1], docs[2]});
+
     Memo memo;
     memo.targetType = MemoTarget::Project;
     memo.title = QObject::tr("Domanda di ricerca");

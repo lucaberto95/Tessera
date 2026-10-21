@@ -14,6 +14,14 @@ struct DocumentGroup {
     int position = 0;
 };
 
+// A named selection of documents across groups; a document can belong to several sets.
+struct DocumentSet {
+    qint64 id = 0;
+    QString name;
+    int position = 0;
+    QString uuid;
+};
+
 struct Document {
     qint64 id = 0;
     qint64 groupId = 0;
@@ -49,7 +57,7 @@ struct Segment {
     int length() const { return end - start; }
 };
 
-enum class MemoTarget { Project, Group, Document, Code, Segment };
+enum class MemoTarget { Project, Group, Document, Code, Segment, DocumentSet };
 
 struct Memo {
     qint64 id = 0;

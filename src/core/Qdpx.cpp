@@ -8,11 +8,13 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QSet>
+#include <QUuid>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 #include <QtCore/private/qzipreader_p.h>
 #include <QtCore/private/qzipwriter_p.h>
 
+#include <algorithm>
 #include <functional>
 #include <tuple>
 
@@ -78,6 +80,15 @@ QString fromQdpxValue(VariableType t, const QString &v)
     if (t == VariableType::Date)
         return v.left(10);
     return v;
+}
+
+// REFI-QDA has sets but no groups, so groups are exported as sets too. Their GUIDs derive from
+// this namespace and the group's index: other programs see ordinary GUIDs, Tessera recognizes them
+// on import and turns those sets back into groups.
+QString groupSetGuid(qsizetype index)
+{
+    static const QUuid ns(QStringLiteral("{6f1d4c2e-8a3b-4e5f-9c7d-2b1a0e9f8d34}"));
+    return QUuid::createUuidV5(ns, QString::number(index)).toString(QUuid::WithoutBraces);
 }
 
 } // namespace
@@ -240,9 +251,15 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     }
     w.writeEndElement(); // Sources
 
-    if (!memos.isEmpty()) {
+    // Memos of groups and sets travel as the set's Description: as notes nothing would refer to
+    // them, and an importer would add them again as project memos.
+    QList<Memo> notes;
+    for (const Memo &m : memos)
+        if (m.targetType != MemoTarget::Group && m.targetType != MemoTarget::DocumentSet)
+            notes << m;
+    if (!notes.isEmpty()) {
         w.writeStartElement(QStringLiteral("Notes"));
-        for (const Memo &m : memos) {
+        for (const Memo &m : notes) {
             w.writeStartElement(QStringLiteral("Note"));
             w.writeAttribute(QStringLiteral("guid"), m.uuid);
             w.writeAttribute(QStringLiteral("name"), m.title.isEmpty() ? QObject::tr("Memo") : m.title);
@@ -256,9 +273,10 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     }
 
     w.writeStartElement(QStringLiteral("Sets"));
-    for (const DocumentGroup &g : groups) {
+    for (int i = 0; i < groups.size(); ++i) {
+        const DocumentGroup &g = groups.at(i);
         w.writeStartElement(QStringLiteral("Set"));
-        w.writeAttribute(QStringLiteral("guid"), newUuid());
+        w.writeAttribute(QStringLiteral("guid"), groupSetGuid(i));
         w.writeAttribute(QStringLiteral("name"), g.name);
         const QList<Memo> groupMemos = memosFor(MemoTarget::Group, g.id);
         if (!groupMemos.isEmpty())
@@ -268,6 +286,19 @@ bool exportProject(const Project &project, const QString &path, QString *error)
                 continue;
             w.writeEmptyElement(QStringLiteral("MemberSource"));
             w.writeAttribute(QStringLiteral("targetGUID"), docGuid.value(d.id));
+        }
+        w.writeEndElement();
+    }
+    for (const DocumentSet &s : project.documentSets()) {
+        w.writeStartElement(QStringLiteral("Set"));
+        w.writeAttribute(QStringLiteral("guid"), s.uuid);
+        w.writeAttribute(QStringLiteral("name"), s.name);
+        const QList<Memo> setMemos = memosFor(MemoTarget::DocumentSet, s.id);
+        if (!setMemos.isEmpty())
+            w.writeTextElement(QStringLiteral("Description"), setMemos.first().body);
+        for (qint64 id : project.documentSetMembers(s.id)) {
+            w.writeEmptyElement(QStringLiteral("MemberSource"));
+            w.writeAttribute(QStringLiteral("targetGUID"), docGuid.value(id));
         }
         w.writeEndElement();
     }
@@ -330,6 +361,13 @@ struct PendingNote {
     QDateTime created;
 };
 
+struct PendingSet {
+    QString guid;
+    QString name;
+    QString description;
+    QStringList members; // source guids
+};
+
 struct Importer {
     Project &project;
     QZipReader &zip;
@@ -341,8 +379,8 @@ struct Importer {
     QHash<QString, std::pair<qint64, VariableType>> variables;
     QList<PendingSource> sources;
     QList<PendingNote> notes;
-    QList<std::pair<QString, QStringList>> sets; // name -> member source guids
-    QHash<QString, QString> setDescriptions;
+    QString origin; // Project/@origin, e.g. "Tessera 0.1.0"
+    QList<PendingSet> sets;
     QList<std::tuple<MemoTarget, QString, QString>> noteRefs; // target type, target guid, note guid
     QStringList projectNoteRefs;
     QStringList warnings;
@@ -516,20 +554,20 @@ struct Importer {
                 r.skipCurrentElement();
                 continue;
             }
-            const QString name = attr(QStringLiteral("name"));
-            QStringList members;
+            PendingSet set;
+            set.guid = attr(QStringLiteral("guid"));
+            set.name = attr(QStringLiteral("name"));
             while (r.readNextStartElement()) {
                 if (r.name() == QLatin1String("MemberSource")) {
-                    members << attr(QStringLiteral("targetGUID"));
+                    set.members << attr(QStringLiteral("targetGUID"));
                     r.skipCurrentElement();
                 } else if (r.name() == QLatin1String("Description")) {
-                    setDescriptions.insert(name, r.readElementText());
+                    set.description = r.readElementText();
                 } else {
                     r.skipCurrentElement();
                 }
             }
-            if (!members.isEmpty())
-                sets.append({name, members});
+            sets << set;
         }
     }
 
@@ -561,6 +599,7 @@ struct Importer {
             *error = QObject::tr("project.qde non contiene un elemento Project");
             return false;
         }
+        origin = attr(QStringLiteral("origin"));
         int topIndex = 0;
         while (r.readNextStartElement()) {
             const auto n = r.name();
@@ -680,29 +719,52 @@ struct Importer {
                 noteRefs.append({MemoTarget::Document, src.guid, note});
         }
 
-        // Sets -> document groups (a document goes to the first set that lists it).
+        // Sets exported from Tessera groups become groups again (a document goes to the first one
+        // that lists it). Every other set becomes a document set, except in files of Tessera 0.1.0:
+        // it exported only groups, with random GUIDs, while newer files always have at least one
+        // recognizable group.
+        QSet<QUuid> groupGuids;
+        for (qsizetype i = 0; i < sets.size(); ++i)
+            groupGuids.insert(QUuid(groupSetGuid(i)));
+        const bool onlyGroups =
+            origin.startsWith(QLatin1String("Tessera ")) &&
+            std::none_of(sets.cbegin(), sets.cend(), [&](const PendingSet &s) { return groupGuids.contains(QUuid(s.guid)); });
+        auto addSetMemo = [&](MemoTarget type, qint64 target, const PendingSet &set) {
+            if (set.description.isEmpty())
+                return;
+            Memo memo;
+            memo.targetType = type;
+            memo.targetId = target;
+            memo.title = set.name;
+            memo.body = set.description;
+            project.saveMemo(memo);
+        };
         QSet<QString> grouped;
-        for (const auto &[name, members] : sets) {
-            qint64 groupId = 0;
-            for (const QString &m : members) {
-                if (!docIds.contains(m) || grouped.contains(m))
-                    continue;
-                if (!groupId) {
-                    groupId = project.addGroup(name);
-                    if (setDescriptions.contains(name)) {
-                        Memo memo;
-                        memo.targetType = MemoTarget::Group;
-                        memo.targetId = groupId;
-                        memo.title = name;
-                        memo.body = setDescriptions.value(name);
-                        project.saveMemo(memo);
+        bool createdGroups = false;
+        for (const PendingSet &set : sets) {
+            if (onlyGroups || groupGuids.contains(QUuid(set.guid))) {
+                qint64 groupId = 0;
+                for (const QString &m : set.members) {
+                    if (!docIds.contains(m) || grouped.contains(m))
+                        continue;
+                    if (!groupId) {
+                        groupId = project.addGroup(set.name);
+                        createdGroups = true;
+                        addSetMemo(MemoTarget::Group, groupId, set);
                     }
+                    project.moveDocument(docIds.value(m), groupId);
+                    grouped.insert(m);
                 }
-                project.moveDocument(docIds.value(m), groupId);
-                grouped.insert(m);
+            } else {
+                QList<qint64> members;
+                for (const QString &m : set.members)
+                    if (docIds.contains(m))
+                        members << docIds.value(m);
+                const qint64 setId = project.addDocumentSet(set.name, members, set.guid);
+                addSetMemo(MemoTarget::DocumentSet, setId, set);
             }
         }
-        if (!sets.isEmpty() && project.documentsInGroup(defaultGroup).isEmpty())
+        if (createdGroups && project.documentsInGroup(defaultGroup).isEmpty())
             project.deleteGroup(defaultGroup);
 
         // Notes -> memos, attached to the objects that reference them.

@@ -49,7 +49,7 @@ Con `-platform offscreen` i test girano senza aprire finestre sullo schermo dell
 
 ```
 src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata da app e test)
-  Model.h        struct valore: DocumentGroup, Document, Code, Segment, Memo, Variable
+  Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, Memo, Variable
   Project        unica fonte di verità: file SQLite .tsra, CRUD, segnali, batch, undo/redo
   Importers      TXT/MD, DOCX, ODT (QZipReader privato + XML), RTF (parser proprio), PDF (QtPdf), HTML
   Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV
@@ -70,7 +70,7 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - **Salvataggio immediato.** Ogni metodo di `Project` scrive subito nel file; non esiste "Salva".
   "Salva una copia" usa `VACUUM INTO`.
 - **Segnali.** Dopo ogni scrittura `Project` emette `groupsChanged`, `documentsChanged`,
-  `codesChanged`, `segmentsChanged(docId|0)`, `memosChanged`, `variablesChanged`. Le viste si
+  `documentSetsChanged`, `codesChanged`, `segmentsChanged(docId|0)`, `memosChanged`, `variablesChanged`. Le viste si
   ricostruiscono da questi segnali; non modificano mai il proprio stato al posto del Project
   (es. il drop nel `CodeTree` imposta `IgnoreAction` e chiama `moveCode`).
 - **Batch.** `beginBatch()/commitBatch()` = una transazione, segnali rimandati al commit e **un solo
@@ -83,6 +83,15 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   scrive; dentro un batch vince la prima (la UI la imposta prima di `beginBatch`). Una nuova
   tabella va aggiunta all'elenco in `installUndoTriggers()`. Cronologia solo di sessione, max 200
   passi; azzerata dopo import QDPX e progetto d'esempio.
+- **Set di documenti** (`document_sets`, `document_set_members`, migrazione v2): riferimenti a
+  documenti di qualsiasi gruppo, un documento può stare in più set. Nel `DocumentTree` lo stesso
+  documento compare quindi più volte: l'attivazione è per documento e `syncDocumentCheckBoxes`
+  allinea tutte le sue caselle; `activeDocumentIds()` legge solo i gruppi.
+- **Gruppi e set in QDPX.** REFI-QDA ha solo i `<Set>`: i gruppi si esportano come set con GUID
+  derivati (UUID v5 da un namespace fisso + indice, `groupSetGuid()` in `Qdpx.cpp`) e all'import
+  tornano gruppi; ogni altro `<Set>` diventa un set di documenti. I file di Tessera 0.1.0 (nessun
+  GUID riconoscibile) vengono letti come solo gruppi. I memo di gruppi e set viaggiano nella
+  `Description` del set, non come `<Note>`.
 - **Posizioni nel testo** = indici UTF-16 (`QString`) nel testo semplice con `\n`. QDPX usa code
   point Unicode: convertire con `TextUtils` (test con emoji). In import QDPX i CRLF vengono
   normalizzati rimappando le posizioni.

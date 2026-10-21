@@ -139,6 +139,9 @@ void MainWindow::createActions()
         if (!name.isEmpty())
             m_project->addGroup(name);
     });
+    m_newDocumentSet = make(tr("Nuovo &set di documenti…"), [this] { m_documents->newDocumentSet(); });
+    m_documentSetFromActive = make(tr("Crea set dai documenti &attivi…"),
+                                   [this] { m_documents->newDocumentSetFromActive(); });
     m_variables = make(tr("&Variabili dei documenti…"), &MainWindow::showVariables);
 
     m_newCode = make(tr("&Nuovo codice…"), [this] { m_codes->newCode(0); }, QKeySequence(Qt::CTRL | Qt::Key_K));
@@ -199,6 +202,9 @@ void MainWindow::createMenus()
     docs->addAction(m_editText);
     docs->addSeparator();
     docs->addAction(m_variables);
+    docs->addSeparator();
+    docs->addAction(m_newDocumentSet);
+    docs->addAction(m_documentSetFromActive);
     docs->addSeparator();
     docs->addAction(tr("Attiva tutti i documenti"), this, [this] { m_documents->setAllActive(true); });
     docs->addAction(tr("Disattiva tutti i documenti"), this, [this] { m_documents->setAllActive(false); });
@@ -307,6 +313,7 @@ void MainWindow::connectProject()
         updateRetrieval();
         updateStats();
     });
+    connect(m_project, &Project::documentSetsChanged, m_documents, &DocumentTree::rebuild);
     connect(m_project, &Project::codesChanged, this, [this] {
         m_codes->rebuild();
         updateRetrieval();

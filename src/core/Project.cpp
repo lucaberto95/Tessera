@@ -172,6 +172,7 @@ QString memoTargetToString(MemoTarget t)
     case MemoTarget::Document: return QStringLiteral("document");
     case MemoTarget::Code: return QStringLiteral("code");
     case MemoTarget::Segment: return QStringLiteral("segment");
+    case MemoTarget::DocumentSet: return QStringLiteral("document_set");
     }
     return QStringLiteral("project");
 }
@@ -182,6 +183,7 @@ MemoTarget memoTargetFromString(const QString &s)
     if (s == QLatin1String("document")) return MemoTarget::Document;
     if (s == QLatin1String("code")) return MemoTarget::Code;
     if (s == QLatin1String("segment")) return MemoTarget::Segment;
+    if (s == QLatin1String("document_set")) return MemoTarget::DocumentSet;
     return MemoTarget::Project;
 }
 
@@ -344,6 +346,7 @@ void Project::emitAllChanged()
 {
     emit groupsChanged();
     emit documentsChanged();
+    emit documentSetsChanged();
     emit codesChanged();
     emit segmentsChanged(0);
     emit memosChanged();
@@ -364,7 +367,8 @@ bool Project::installUndoTriggers()
     if (!exec(QStringLiteral("CREATE TEMP TABLE IF NOT EXISTS undo_log (seq INTEGER PRIMARY KEY, stmt TEXT NOT NULL)")))
         return false;
     static const char *const tables[] = {"document_groups", "documents", "codes", "segments",
-                                         "memos", "variables", "variable_values"};
+                                         "memos", "variables", "variable_values",
+                                         "document_sets", "document_set_members"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -529,7 +533,18 @@ bool Project::initSchema()
 
 QList<Project::Migration> Project::builtInMigrations()
 {
-    return {};
+    return {
+        {2,
+         {// Document sets (issue #2).
+          QStringLiteral("CREATE TABLE document_sets ("
+                         " id INTEGER PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,"
+                         " uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE TABLE document_set_members ("
+                         " set_id INTEGER NOT NULL REFERENCES document_sets(id) ON DELETE CASCADE,"
+                         " document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,"
+                         " PRIMARY KEY (set_id, document_id))"),
+          QStringLiteral("CREATE INDEX idx_document_set_members_document ON document_set_members(document_id)")}},
+    };
 }
 
 int Project::schemaVersion() const
@@ -696,7 +711,8 @@ void Project::removeOrphanMemos()
         "(target_type = 'group' AND target_id NOT IN (SELECT id FROM document_groups)) OR "
         "(target_type = 'document' AND target_id NOT IN (SELECT id FROM documents)) OR "
         "(target_type = 'code' AND target_id NOT IN (SELECT id FROM codes)) OR "
-        "(target_type = 'segment' AND target_id NOT IN (SELECT id FROM segments))"));
+        "(target_type = 'segment' AND target_id NOT IN (SELECT id FROM segments)) OR "
+        "(target_type = 'document_set' AND target_id NOT IN (SELECT id FROM document_sets))"));
 }
 
 // ---------------------------------------------------------------- groups
@@ -743,6 +759,7 @@ bool Project::deleteGroup(qint64 id)
     }
     notify(&Project::groupsChanged);
     notify(&Project::documentsChanged);
+    notify(&Project::documentSetsChanged);
     notify(&Project::memosChanged);
     notifySegments(0);
     return commitBatch();
@@ -834,6 +851,7 @@ bool Project::deleteDocument(qint64 id)
     }
     removeOrphanMemos();
     notify(&Project::documentsChanged);
+    notify(&Project::documentSetsChanged);
     notify(&Project::memosChanged);
     notify(&Project::variablesChanged);
     notifySegments(id);
@@ -871,6 +889,102 @@ bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Seg
     notify(&Project::documentsChanged);
     notify(&Project::memosChanged);
     notifySegments(id);
+    return commitBatch();
+}
+
+// ---------------------------------------------------------------- document sets
+
+QList<DocumentSet> Project::documentSets() const
+{
+    QList<DocumentSet> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id, name, position, uuid FROM document_sets ORDER BY position, id"));
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toInt(), q.value(3).toString()});
+    return out;
+}
+
+QList<qint64> Project::documentSetMembers(qint64 setId) const
+{
+    QList<qint64> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT d.id FROM document_set_members m"
+                             " JOIN documents d ON d.id = m.document_id"
+                             " JOIN document_groups g ON g.id = d.group_id"
+                             " WHERE m.set_id = ? ORDER BY g.position, g.id, d.position, d.id"));
+    q.addBindValue(setId);
+    q.exec();
+    while (q.next())
+        out << q.value(0).toLongLong();
+    return out;
+}
+
+qint64 Project::addDocumentSet(const QString &name, const QList<qint64> &documentIds, const QString &uuid)
+{
+    setUndoLabel(tr("Nuovo set di documenti"));
+    beginBatch();
+    const qint64 id = insert(QStringLiteral("INSERT INTO document_sets(name, position, uuid) VALUES (?, ?, ?)"),
+                             {name, nextPosition(QStringLiteral("document_sets")), uuid.isEmpty() ? newUuid() : uuid});
+    if (!id || !addToDocumentSet(id, documentIds)) {
+        rollbackBatch();
+        return 0;
+    }
+    notify(&Project::documentSetsChanged);
+    return commitBatch() ? id : 0;
+}
+
+bool Project::renameDocumentSet(qint64 id, const QString &name)
+{
+    setUndoLabel(tr("Rinomina set"));
+    if (!exec(QStringLiteral("UPDATE document_sets SET name = ? WHERE id = ?"), {name, id}))
+        return false;
+    notify(&Project::documentSetsChanged);
+    return true;
+}
+
+// Only the set and its memo go away: the documents stay in their groups.
+bool Project::deleteDocumentSet(qint64 id)
+{
+    setUndoLabel(tr("Elimina set"));
+    beginBatch();
+    if (!exec(QStringLiteral("DELETE FROM document_sets WHERE id = ?"), {id})) {
+        rollbackBatch();
+        return false;
+    }
+    removeOrphanMemos();
+    notify(&Project::documentSetsChanged);
+    notify(&Project::memosChanged);
+    return commitBatch();
+}
+
+// Documents already in the set are skipped.
+bool Project::addToDocumentSet(qint64 setId, const QList<qint64> &documentIds)
+{
+    setUndoLabel(tr("Aggiungi al set"));
+    beginBatch();
+    for (qint64 documentId : documentIds) {
+        if (!exec(QStringLiteral("INSERT OR IGNORE INTO document_set_members(set_id, document_id) VALUES (?, ?)"),
+                  {setId, documentId})) {
+            rollbackBatch();
+            return false;
+        }
+    }
+    notify(&Project::documentSetsChanged);
+    return commitBatch();
+}
+
+bool Project::removeFromDocumentSet(qint64 setId, const QList<qint64> &documentIds)
+{
+    setUndoLabel(tr("Rimuovi dal set"));
+    beginBatch();
+    for (qint64 documentId : documentIds) {
+        if (!exec(QStringLiteral("DELETE FROM document_set_members WHERE set_id = ? AND document_id = ?"),
+                  {setId, documentId})) {
+            rollbackBatch();
+            return false;
+        }
+    }
+    notify(&Project::documentSetsChanged);
     return commitBatch();
 }
 
