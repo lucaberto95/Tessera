@@ -7,13 +7,39 @@ L'utente scrive in italiano: rispondi in italiano.
 
 ## Regole del progetto
 
-- **Progetto originale (clean room).** Non copiare codice, prompt, testi, icone, schemi o asset da
-  software QDA proprietari. Le funzionalità si progettano da zero; l'interoperabilità passa solo
-  dallo standard aperto REFI-QDA.
+- **Obiettivo: un'alternativa a MAXQDA con lo stesso modo di lavorare.** Funzioni, flussi e
+  organizzazione dell'interfaccia ricalcano MAXQDA: ogni issue GitHub ha una sezione "Riferimento
+  MAXQDA". Codice, prompt AI, testi, icone e altri asset restano nostri: non si copiano da MAXQDA
+  né da altri software proprietari. Interoperabilità tramite REFI-QDA e, in futuro, l'import
+  diretto dei progetti `.mqda` (issue #51).
 - Testi dell'interfaccia **in italiano** dentro `tr()`; identificatori, commenti e messaggi di
   commit **in inglese**. Stile: quello del codice esistente (Qt naming, `m_` per i membri,
   `QStringLiteral`, commenti brevi che spiegano il perché).
 - Ogni modifica deve lasciare verdi i test (`tessera_tests`, `tessera_ui_tests`).
+
+## Flusso di lavoro: un ramo e una pull request per ogni issue
+
+- **Mai commit diretti su `main`.** Ogni modifica passa da un ramo e da una pull request.
+- **Una issue = un ramo = una PR.** Il ramo si chiama `issue-<numero>-<descrizione-breve>` (es.
+  `issue-2-set-documenti`) e parte da `main` aggiornato. Le modifiche che non appartengono a una
+  issue (documentazione, script) vanno in un ramo dedicato (es. `docs/...`) con la sua PR.
+- Non mescolare più issue nello stesso ramo. Se una issue dipende da un'altra non ancora unita,
+  il suo ramo parte da quello della issue da cui dipende e la PR usa quel ramo come base (PR
+  "impilata"); quando la PR di base viene unita e il suo ramo cancellato, GitHub sposta la base
+  su `main`.
+- Prima di aprire o aggiornare una PR: build e test verdi. La descrizione della PR dice cosa
+  cambia, come è stato verificato e cosa resta da provare, e chiude la issue con `Closes #<numero>`.
+- **Il merge lo decide l'utente**: si unisce solo quando l'utente dice che la PR è a posto.
+- Per un ramo rimasto indietro rispetto a `main`: `git merge main` nel ramo (niente force push).
+
+## Questo file (CLAUDE.md)
+
+- **CLAUDE.md va aggiornato a ogni modifica** che cambia architettura, convenzioni, comandi, regole,
+  insidie o prossimi passi, nello stesso ramo e nella stessa PR della modifica.
+- Si può aggiornare sui rami delle singole issue; con il merge della PR l'aggiornamento **deve
+  rientrare in `main`**. Nei conflitti su questo file si tengono le informazioni di entrambi i rami.
+- Se manca, va ricreato con queste sezioni: regole, flusso di lavoro, comandi, architettura,
+  concetti chiave, insidie, rilasci.
 
 ## Comandi
 
@@ -109,15 +135,15 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 
 ## Rilasci
 
-1. Aggiornare `project(Tessera VERSION x.y.z)` in `CMakeLists.txt`.
-2. `build.cmd Release`, eseguire i test, `deploy.cmd zip`.
-3. Commit + tag `vx.y.z`, push, poi
+1. In un ramo `release/x.y.z` con PR: aggiornare `project(Tessera VERSION x.y.z)` in `CMakeLists.txt`.
+2. Dopo il merge, su `main` aggiornato: `build.cmd Release`, eseguire i test, `deploy.cmd zip`.
+3. Tag `vx.y.z` su `main`, push del tag, poi
    `gh release create vx.y.z dist\Tessera-x.y.z-win64.zip -R lucaberto95/Tessera --title ... --notes ...`.
 
 Repository: https://github.com/lucaberto95/Tessera (privato), branch `main`.
 
-## Idee per i prossimi passi
+## Prossimi passi
 
-Codifica di aree in PDF/immagini; audio/video con trascrizione e timestamp; confronto tra
-codificatori (kappa); set di documenti e filtri per variabile nel recupero; ricerca dentro il
-documento aperto; importazione variabili CSV con tipi; installer (MSIX/Inno Setup) e icona dell'app.
+Le funzionalità da fare sono le issue GitHub #1–#49 e #51, raccolte nella Roadmap (#50) con area,
+priorità e ordine consigliato. Ogni issue descrive comportamento atteso, note di implementazione,
+criteri di accettazione e il riferimento alla funzione equivalente di MAXQDA.
