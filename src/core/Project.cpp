@@ -1,5 +1,6 @@
 #include "core/Project.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QSet>
@@ -8,6 +9,7 @@
 #include <QUuid>
 #include <QtDebug>
 
+#include <algorithm>
 namespace {
 
 QString isoNow() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs); }
@@ -78,6 +80,20 @@ const char *const kSchema[] = {
     " variable_id INTEGER NOT NULL REFERENCES variables(id) ON DELETE CASCADE,"
     " value TEXT NOT NULL DEFAULT '', PRIMARY KEY (document_id, variable_id))",
 };
+
+// "<name> (backup v1).tsra", or "<name> (backup v1 2).tsra" if that already exists.
+QString migrationBackupPathFor(const QString &path, int version)
+{
+    const QFileInfo info(path);
+    for (int n = 1;; ++n) {
+        const QString suffix = n == 1 ? QStringLiteral(" (backup v%1)").arg(version)
+                                      : QStringLiteral(" (backup v%1 %2)").arg(version).arg(n);
+        const QString candidate =
+            info.dir().filePath(info.completeBaseName() + suffix + QLatin1Char('.') + info.suffix());
+        if (!QFile::exists(candidate))
+            return candidate;
+    }
+}
 
 Document readDocument(const QSqlQuery &q)
 {
@@ -356,8 +372,9 @@ bool Project::installUndoTriggers()
         q.exec(QStringLiteral("PRAGMA main.table_info(%1)").arg(t));
         while (q.next())
             columns << q.value(1).toString();
+        // Tables added by later migrations are absent when tests simulate an older schema.
         if (columns.isEmpty())
-            return fail(QStringLiteral("table_info(%1) failed").arg(t));
+            continue;
 
         QStringList sets, names, values;
         for (const QString &c : columns) {
@@ -496,12 +513,67 @@ bool Project::initSchema()
             return false;
         }
     }
-    exec(QStringLiteral("INSERT INTO meta(key, value) VALUES ('schema_version', ?)"), {SchemaVersion});
+    exec(QStringLiteral("INSERT INTO meta(key, value) VALUES ('schema_version', ?)"), {BaseSchemaVersion});
     exec(QStringLiteral("INSERT INTO meta(key, value) VALUES ('created_at', ?)"), {isoNow()});
     exec(QStringLiteral("INSERT INTO meta(key, value) VALUES ('created_by', ?)"), {m_author});
     exec(QStringLiteral("INSERT INTO meta(key, value) VALUES ('project_uuid', ?)"), {newUuid()});
     exec(QStringLiteral("INSERT INTO document_groups(name, position) VALUES (?, 0)"), {tr("Documenti")});
     return m_db.commit();
+}
+
+// ---------------------------------------------------------------- schema migrations
+//
+// To change the schema, append a Migration with the next version number (one SQL statement per
+// entry); never edit kSchema or a migration that has been released. A new table must also be added to installUndoTriggers();
+// new columns of existing tables are picked up automatically.
+
+QList<Project::Migration> Project::builtInMigrations()
+{
+    return {};
+}
+
+int Project::schemaVersion() const
+{
+    int version = BaseSchemaVersion;
+    for (const Migration &m : m_migrations)
+        version = qMax(version, m.toVersion);
+    return version;
+}
+
+// Runs before foreign keys are enabled, so a migration can rebuild a table (create, copy, drop,
+// rename) without the drop cascading to the rows that reference it. All pending migrations form
+// one transaction: if any fails, the file stays at its previous version.
+bool Project::applyMigrations(int fromVersion)
+{
+    QList<Migration> pending;
+    for (const Migration &m : m_migrations)
+        if (m.toVersion > fromVersion)
+            pending << m;
+    if (pending.isEmpty())
+        return true;
+    std::sort(pending.begin(), pending.end(),
+              [](const Migration &a, const Migration &b) { return a.toVersion < b.toVersion; });
+
+    if (!m_db.transaction())
+        return fail(m_db.lastError().text());
+    bool ok = true;
+    for (const Migration &m : pending) {
+        for (const QString &stmt : m.statements)
+            ok = ok && exec(stmt);
+        ok = ok && exec(QStringLiteral("UPDATE meta SET value = ? WHERE key = 'schema_version'"), {m.toVersion});
+    }
+    if (ok) {
+        QSqlQuery check(m_db);
+        if (!check.exec(QStringLiteral("PRAGMA foreign_key_check")))
+            ok = fail(check.lastError().text());
+        else if (check.next())
+            ok = fail(tr("la tabella %1 contiene riferimenti non validi").arg(check.value(0).toString()));
+    }
+    if (ok && !m_db.commit())
+        ok = fail(m_db.lastError().text());
+    if (!ok)
+        m_db.rollback();
+    return ok;
 }
 
 bool Project::create(const QString &path)
@@ -513,8 +585,8 @@ bool Project::create(const QString &path)
     m_db.setDatabaseName(path);
     if (!m_db.open())
         return fail(m_db.lastError().text());
-    exec(QStringLiteral("PRAGMA foreign_keys = ON"));
-    if (!initSchema() || !installUndoTriggers()) {
+    if (!initSchema() || !applyMigrations(BaseSchemaVersion)
+        || !exec(QStringLiteral("PRAGMA foreign_keys = ON")) || !installUndoTriggers()) {
         const QString err = m_lastError;
         close();
         return fail(err);
@@ -538,12 +610,30 @@ bool Project::open(const QString &path)
         close();
         return fail(tr("%1 non è un progetto Tessera").arg(QFileInfo(path).fileName()));
     }
-    if (version.toInt() > SchemaVersion) {
+    const int fileVersion = version.toInt();
+    if (fileVersion > schemaVersion()) {
         close();
         return fail(tr("Il progetto è stato creato con una versione più recente di Tessera"));
     }
-    exec(QStringLiteral("PRAGMA foreign_keys = ON"));
-    if (!installUndoTriggers()) {
+    if (fileVersion < schemaVersion()) {
+        const QString backup = migrationBackupPathFor(path, fileVersion);
+        if (!exec(QStringLiteral("VACUUM INTO ?"), {backup})) {
+            const QString err = m_lastError;
+            close();
+            return fail(tr("Impossibile creare la copia di sicurezza prima di aggiornare il progetto: %1").arg(err));
+        }
+        if (!applyMigrations(fileVersion)) {
+            const QString err = m_lastError;
+            close();
+            QFile::remove(backup); // the original is untouched, so the copy is not needed
+            return fail(tr("Impossibile aggiornare il progetto alla versione %1: %2\n"
+                           "Il file non è stato modificato.")
+                            .arg(schemaVersion())
+                            .arg(err));
+        }
+        m_migrationBackup = backup;
+    }
+    if (!exec(QStringLiteral("PRAGMA foreign_keys = ON")) || !installUndoTriggers()) {
         const QString err = m_lastError;
         close();
         return fail(err);
@@ -566,6 +656,7 @@ void Project::close()
     m_db = QSqlDatabase();
     QSqlDatabase::removeDatabase(m_connection);
     m_path.clear();
+    m_migrationBackup.clear();
     m_batchDepth = 0;
     m_pendingSignals.clear();
     m_pendingSegmentDocs.clear();

@@ -90,8 +90,16 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   cambiamento e adatta i segmenti in memoria (`TextUtils::adjustSegmentsForEdit`); al salvataggio
   `Project::updateDocumentText` scrive testo e segmenti insieme (un passo di undo). Durante la
   modifica Ctrl+Z appartiene all'editor e le azioni Annulla/Ripeti sono disattivate.
-- **Schema** in `Project.cpp` (`kSchema`), versione in `meta.schema_version` (`SchemaVersion = 1`).
-  Cambiando lo schema: alzare la versione e aggiungere una migrazione in `open()`.
+- **Schema e migrazioni.** `kSchema` in `Project.cpp` è la versione 1 e non si modifica più. Ogni
+  cambio di schema è una `Migration { toVersion, statements }` aggiunta a
+  `Project::builtInMigrations()`: una sola istruzione SQL per voce, numeri di versione crescenti,
+  mai modificare una migrazione già rilasciata. `create()` applica kSchema + tutte le migrazioni;
+  `open()` rifiuta file più nuovi, salva una copia `"<nome> (backup vN).tsra"` con `VACUUM INTO` e
+  applica le migrazioni mancanti in **una transazione** (con `PRAGMA foreign_key_check` prima del
+  commit). Le migrazioni girano con le foreign key **disattivate** (per ricostruire tabelle senza
+  cascate) e prima dei trigger di undo. Una tabella nuova va aggiunta a `installUndoTriggers()`
+  (che salta le tabelle assenti, per i test che simulano schemi vecchi); le colonne nuove sono già
+  coperte. Nei test, `setMigrations()` simula versioni vecchie e future.
 
 ### Insidie già incontrate
 

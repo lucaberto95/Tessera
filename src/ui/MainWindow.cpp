@@ -18,6 +18,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -411,6 +412,12 @@ bool MainWindow::openProject(const QString &path)
         return false;
     }
     addRecent(m_project->filePath());
+    if (!m_project->migrationBackupPath().isEmpty()) {
+        QMessageBox::information(this, tr("Progetto aggiornato"),
+                                 tr("Il progetto è stato aggiornato al formato di questa versione di Tessera.\n"
+                                    "Una copia del file originale è stata salvata in:\n%1")
+                                     .arg(QDir::toNativeSeparators(m_project->migrationBackupPath())));
+    }
     statusBar()->showMessage(tr("Progetto aperto: %1").arg(m_project->filePath()), 5000);
     return true;
 }
