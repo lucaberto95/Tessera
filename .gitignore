@@ -1,0 +1,12 @@
+# Build output
+build/
+dist/
+out/
+.vs/
+CMakeUserPresets.json
+*.user
+
+# Project files created while testing the app
+*.tsra
+*.tsra-journal
+*.qdpx
