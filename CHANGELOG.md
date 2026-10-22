@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.8.0] - 2026-10-22 — Co-occorrenze dei codici (#13)
+Commit `4ea4eba`
+
+- Nuovo modulo `Cooccurrence`: matrice codici × codici con criterio di sovrapposizione dei segmenti, vicinanza (paragrafi o caratteri) o stesso documento; valori come numero di co-occorrenze o indice di Jaccard; diagonale = frequenze.
+- Finestra *Co-occorrenze dei codici…* (menu Analisi) con heatmap ed esportazione CSV/HTML. Il doppio clic su una cella mostra i passaggi nel pannello Segmenti.
+- Mappa dei codici (layout force-directed riproducibile) con soglia sugli archi ed esportazione PNG/SVG.
+
 ## [0.7.0] - 2026-10-22 — Attivazione per valori delle variabili (#3)
 Commit `71fb2ed`
 
