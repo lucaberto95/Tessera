@@ -2,7 +2,14 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
-## [0.20.0] - 2026-10-22 — Sintesi per documento × codice e tabelle riassuntive (#14)
+## [0.21.0] - 2026-10-22 — Unione di progetti (#22)
+Commit `06012e9`
+
+- «Unisci un altro progetto…» (menu Progetto): si sceglie un `.tsra` o un `.qdpx` (letto da una copia, l'originale non si tocca nemmeno se di uno schema più vecchio) e un riepilogo a secco mostra documenti, codici, codifiche, memo, collegamenti, sintesi, variabili, set e dizionari nuovi, già presenti o in conflitto. Tutta l'unione è un solo passo di annulla.
+- Riconoscimento: documenti per `uuid` e poi nome + impronta del contenuto (testo e byte di PDF/immagini), codici per `uuid` e poi percorso, segmenti per documento, codice e posizione (testo, area o tempo). Rifare l'unione non aggiunge nulla.
+- Conflitti: un documento con testo diverso si importa come copia «nome (copia di file)» con le sue codifiche, oppure si salta; memo, commenti di codifica e sintesi diversi sullo stesso elemento si concatenano con un separatore con autore e data. Opzione «Importa le codifiche di» un solo autore (con i documenti e i codici necessari).
+- Autori e date originali di codifiche, memo, collegamenti e sintesi si conservano (`Project::setProvenance`). Il nome utente si chiede al primo avvio.
+- Non incluso: scelta elemento per elemento nel riepilogo; le variabili con valori diversi tengono quello del proprio progetto.## [0.20.0] - 2026-10-22 — Sintesi per documento × codice e tabelle riassuntive (#14)
 Commit `d1efc95`
 
 - «Griglia delle sintesi…» (menu Analisi): finestra a tre pannelli con la matrice documenti × codici (numero di segmenti, colore del codice, icona dove c'è una sintesi), i segmenti della cella selezionata (anche aree PDF/immagine) e l'editor della sintesi, che si salva da solo dopo una pausa, al cambio di cella, alla chiusura e quando la finestra perde il fuoco. Scrivere una sintesi è un solo passo di annulla (le modifiche consecutive della stessa sintesi si fondono).
