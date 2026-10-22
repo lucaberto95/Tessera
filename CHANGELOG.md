@@ -2,6 +2,23 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.9.1] - 2026-10-22 — Correzioni di sicurezza e bachi
+Commit `a918403`
+
+Sicurezza:
+- Import QDPX: rifiutati i percorsi di rete (`\\server\...`) delle fonti esterne fuori dalla cartella del file, che su Windows inviano l'hash NTLM dell'utente; limite di 200 livelli per i codici annidati.
+- Nomi, testi e valori importati sono mostrati come testo semplice in tooltip, etichette e messaggi, ed escapati nei grafici: come HTML potevano far caricare file da `<img src>`.
+- Export CSV: le celle che Excel eseguirebbe come formule (`= + - @`) hanno un apostrofo davanti.
+- I trigger di annulla/ripeti quotano i nomi delle colonne letti dal file di progetto.
+- Import ODT: limite al numero di spazi ripetuti.
+
+Bachi:
+- Salvando il testo modificato di un documento non si perdono più le codifiche aggiunte nel frattempo da altre parti (codifica automatica, pannello Segmenti).
+- I segmenti fuori dal testo sono rifiutati; la codifica automatica salta i risultati di una ricerca diventati vecchi.
+- Import ODT: gli spazi ripetuti (`text:c`) non sono più ridotti a uno.
+- Export QDPX atomico (il file esistente si perde solo a scrittura riuscita); import con GUID ripetuti o posizioni negative gestito.
+- I nomi che contengono `%1`, `%2`… non vengono più alterati nell'export HTML, nei messaggi e in *Codici in variabili*.
+
 ## [0.9.0] - 2026-10-22 — Statistiche e tabelle incrociate (#21)
 Commit `2b9fcb9`, `5ae8955`
 
