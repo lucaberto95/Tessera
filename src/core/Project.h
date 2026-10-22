@@ -154,6 +154,11 @@ public:
     bool setSegmentComment(qint64 id, const QString &comment);
     bool setSegmentWeight(qint64 id, int weight);
     bool setSegmentCode(qint64 id, qint64 codeId);
+    // Restores who wrote an item and when (the add methods stamp the current user and time); used when
+    // merging projects. For summaries `when` is the modification time; for memos `modified` is the other one.
+    enum class Provenance { Segment, Link, Memo, Summary };
+    bool setProvenance(Provenance kind, qint64 id, const QString &author, const QDateTime &when,
+                       const QDateTime &modified = {});
     QHash<qint64, int> segmentCountByCode() const;
     QHash<qint64, int> segmentCountByDocument() const;
     QHash<qint64, QHash<qint64, int>> segmentCountByCodeAndDocument() const; // code -> document -> count

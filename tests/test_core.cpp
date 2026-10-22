@@ -3,6 +3,7 @@
 #include "core/Exporters.h"
 #include "core/Images.h"
 #include "core/Importers.h"
+#include "core/Merge.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
@@ -3602,6 +3603,335 @@ private slots:
                 const QRectF b(centres[j] - QPointF(sizes[j].width() / 2, sizes[j].height() / 2), sizes[j]);
                 QVERIFY2(!a.intersects(b), qPrintable(QString("%1 and %2 overlap").arg(i).arg(j)));
             }
+    }
+
+    // ---- merging projects (issue #22)
+
+    // Two coders start from the same project and work apart.
+private:
+    struct Pair {
+        QString a, b;
+        qint64 docA = 0, docB = 0;
+    };
+    Pair makeCoders(const QString &tag)
+    {
+        Pair pr;
+        pr.a = path(tag + "-anna.tsra");
+        pr.b = path(tag + "-bruno.tsra");
+        Project base;
+        base.setAuthor("Anna");
+        base.create(pr.a);
+        const qint64 g = base.groups().first().id;
+        const qint64 doc = base.addDocument(g, "Intervista", "Il lavoro da remoto cambia tutto. Seconda frase.");
+        const qint64 tema = base.addCode(0, "Tema", Qt::red);
+        const qint64 sub = base.addCode(tema, "Sotto", Qt::blue);
+        base.addSegment(doc, tema, 0, 5);
+        base.addSegment(doc, sub, 9, 15, 0, "originale");
+        Memo m;
+        m.targetType = MemoTarget::Code;
+        m.targetId = tema;
+        m.title = "Tema";
+        m.body = "Memo di Anna";
+        base.saveMemo(m);
+        base.saveCopyAs(pr.b);
+        return pr;
+    }
+
+    static int countOf(const Merge::Report &r) { return r.changes(); }
+
+private slots:
+    void mergeTwoCoders()
+    {
+        const Pair pr = makeCoders("two");
+        // Bruno's copy: a duplicate coding, a new one, a different comment on a shared one, a new code, a memo.
+        {
+            Project b;
+            b.setAuthor("Bruno");
+            QVERIFY(b.open(pr.b));
+            const qint64 doc = b.documents().first().id;
+            const qint64 tema = b.findCode(0, "Tema");
+            const qint64 sub = b.findCode(tema, "Sotto");
+            b.addSegment(doc, tema, 0, 5);                      // same coding as Anna's
+            b.addSegment(doc, tema, 20, 32, 2, "di Bruno");     // new
+            b.setSegmentComment(b.segments({doc}, {sub}).first().id, "secondo parere"); // other comment, same place
+            const qint64 nuovo = b.addCode(tema, "Nuovo", Qt::green);
+            b.addSegment(doc, nuovo, 34, 40);
+            Memo m = b.memoFor(MemoTarget::Code, tema);
+            m.body = "Memo di Bruno";
+            b.saveMemo(m);
+            Memo extra;
+            extra.targetType = MemoTarget::Document;
+            extra.targetId = doc;
+            extra.body = "Su tutta l'intervista";
+            b.saveMemo(extra);
+            b.addLink(doc, 0, 5, doc, 20, 32, "legame");
+            const qint64 age = b.addVariable("Età", VariableType::Integer);
+            b.setVariableValue(doc, age, "41");
+            b.setSummary(doc, tema, "Sintesi di Bruno");
+            b.addDocument(b.groups().first().id, "Seconda intervista", "Un altro testo da codificare.");
+            b.addDocumentSet("Gruppo di lavoro", {doc});
+        }
+
+        Project a;
+        a.setAuthor("Anna");
+        QVERIFY(a.open(pr.a));
+        const QByteArray fileBefore = fileHash(pr.a);
+        Q_UNUSED(fileBefore);
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(pr.b, &error), qPrintable(error));
+        QCOMPARE(src.authors(), (QStringList{"Anna", "Bruno"}));
+
+        const int segsBefore = a.allSegments(true).size();
+        const Merge::Report dry = Merge::analyze(a, src, {});
+        QVERIFY(dry.ok);
+        QCOMPARE(a.allSegments(true).size(), segsBefore); // a dry run writes nothing
+        QCOMPARE(dry.documentsPresent, 1);
+        QCOMPARE(dry.documentsNew, 1);
+        QCOMPARE(dry.codesPresent, 2);
+        QCOMPARE(dry.codesNew, 1);
+        QCOMPARE(dry.segmentsDuplicate, 1);
+        QCOMPARE(dry.segmentsNew, 2);
+        QCOMPARE(dry.segmentsConflict, 1);
+        QCOMPARE(dry.memosMerged, 1);
+        QCOMPARE(dry.memosNew, 1);
+        QCOMPARE(dry.linksNew, 1);
+        QCOMPARE(dry.summariesNew, 1);
+        QCOMPARE(dry.variablesNew, 1);
+        QCOMPARE(dry.variableValuesSet, 1);
+        QCOMPARE(dry.setsNew, 1);
+
+        const int docsBefore = a.documents().size();
+        const int codesBefore = a.codes().size();
+        const Merge::Report r = Merge::apply(a, src, {});
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.segmentsNew, dry.segmentsNew);
+        QCOMPARE(r.segmentsConflict, dry.segmentsConflict);
+        QCOMPARE(r.memosMerged, dry.memosMerged);
+        QCOMPARE(a.documents().size(), docsBefore + 1);
+        QCOMPARE(a.codes().size(), codesBefore + 1);
+        QCOMPARE(a.allSegments(true).size(), segsBefore + 2);
+
+        // No duplicates, and Bruno's work keeps his name.
+        const qint64 doc = a.documents().first().id;
+        const qint64 tema = a.findCode(0, "Tema");
+        const QList<Segment> onTema = a.segments({doc}, {tema});
+        QCOMPARE(onTema.size(), 2);
+        bool foundBruno = false;
+        for (const Segment &s : onTema)
+            if (s.start == 20) {
+                foundBruno = true;
+                QCOMPARE(s.author, QString("Bruno"));
+                QCOMPARE(s.weight, 2);
+                QCOMPARE(s.comment, QString("di Bruno"));
+            }
+        QVERIFY(foundBruno);
+        QCOMPARE(a.findCode(tema, "Nuovo") > 0, true);
+        const qint64 sub = a.findCode(tema, "Sotto");
+        const Segment shared = a.segments({doc}, {sub}).first();
+        QVERIFY(shared.comment.contains("originale") && shared.comment.contains("secondo parere"));
+        // Two different memos on the same code are concatenated, with the author in the separator.
+        const Memo cm = a.memoFor(MemoTarget::Code, tema);
+        QVERIFY(cm.body.contains("Memo di Anna") && cm.body.contains("Memo di Bruno"));
+        QVERIFY(cm.body.contains("Bruno"));
+        QCOMPARE(a.memoFor(MemoTarget::Document, doc).body, QString("Su tutta l'intervista"));
+        QCOMPARE(a.memoFor(MemoTarget::Document, doc).author, QString("Bruno"));
+        QCOMPARE(a.links().size(), 1);
+        QCOMPARE(a.links().first().author, QString("Bruno"));
+        QCOMPARE(a.summary(doc, tema).body, QString("Sintesi di Bruno"));
+        QCOMPARE(a.summary(doc, tema).author, QString("Bruno"));
+        QCOMPARE(a.variableValue(doc, a.variables().first().id), QString("41"));
+        QCOMPARE(a.documentSetMembers(a.documentSets().first().id), QList<qint64>{doc});
+
+        // Merging again finds nothing to add.
+        const Merge::Report again = Merge::apply(a, src, {});
+        QVERIFY(again.ok);
+        QCOMPARE(countOf(again), 0);
+
+        // The whole merge was one undo step (the second one changed nothing).
+        QVERIFY(a.canUndo());
+        QVERIFY(a.undo());
+        QCOMPARE(a.allSegments(true).size(), segsBefore);
+        QCOMPARE(a.documents().size(), docsBefore);
+        QCOMPARE(a.codes().size(), codesBefore);
+        QCOMPARE(a.memoFor(MemoTarget::Code, tema).body, QString("Memo di Anna"));
+        QVERIFY(a.links().isEmpty());
+        QVERIFY(a.variables().isEmpty());
+        QVERIFY(a.documentSets().isEmpty());
+        QCOMPARE(a.summary(doc, tema).id, qint64(0));
+        QCOMPARE(a.segments({doc}, {sub}).first().comment, QString("originale"));
+        QVERIFY(a.redo());
+        QCOMPARE(a.allSegments(true).size(), segsBefore + 2);
+    }
+
+    void mergeTextConflict()
+    {
+        const Pair pr = makeCoders("conflict");
+        {
+            Project b;
+            b.setAuthor("Bruno");
+            QVERIFY(b.open(pr.b));
+            const qint64 doc = b.documents().first().id;
+            const qint64 tema = b.findCode(0, "Tema");
+            b.addSegment(doc, tema, 20, 32);
+            QVERIFY(b.updateDocumentText(doc, b.documentText(doc) + " Aggiunta di Bruno.", b.segmentsForDocument(doc),
+                                         b.links()));
+        }
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(pr.b, &error), qPrintable(error));
+
+        {   // Skip: the document and its codings stay out.
+            Project a;
+            QVERIFY(a.open(pr.a));
+            Merge::Options skip;
+            skip.onTextConflict = Merge::TextConflict::Skip;
+            const Merge::Report r = Merge::apply(a, src, skip);
+            QVERIFY(r.ok);
+            QCOMPARE(r.documentsConflict, 1);
+            QCOMPARE(r.documentsSkipped, 1);
+            QCOMPARE(r.conflictDocuments, QStringList{"Intervista"});
+            QCOMPARE(a.documents().size(), 1);
+            QCOMPARE(a.allSegments().size(), 2);
+            QVERIFY(r.segmentsSkipped > 0);
+        }
+        // Import as a copy: the original is untouched, the copy carries Bruno's text and codings.
+        Project a;
+        QVERIFY(a.open(pr.a));
+        const QString originalText = a.documentText(a.documents().first().id);
+        const Merge::Report r = Merge::apply(a, src, {});
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.documentsCopied, 1);
+        QCOMPARE(a.documents().size(), 2);
+        QCOMPARE(a.documentText(a.documents().first().id), originalText);
+        const Document copy = a.documents().last();
+        QVERIFY(copy.name.startsWith("Intervista (copia di"));
+        QVERIFY(a.documentText(copy.id).endsWith("Aggiunta di Bruno."));
+        QVERIFY(copy.uuid != a.documents().first().uuid);
+        QCOMPARE(a.segmentsForDocument(copy.id).size(), 3);
+        QCOMPARE(a.segmentsForDocument(a.documents().first().id).size(), 2);
+        // A second merge recognises the copy.
+        const Merge::Report again = Merge::apply(a, src, {});
+        QCOMPARE(countOf(again), 0);
+        QCOMPARE(a.documents().size(), 2);
+    }
+
+    void mergeOnlyAuthor()
+    {
+        const Pair pr = makeCoders("author");
+        {
+            Project b;
+            b.setAuthor("Bruno");
+            QVERIFY(b.open(pr.b));
+            const qint64 doc = b.documents().first().id;
+            const qint64 tema = b.findCode(0, "Tema");
+            const qint64 nuovo = b.addCode(0, "Solo di Bruno", Qt::green);
+            b.addSegment(doc, nuovo, 34, 40);
+            b.setAuthor("Carla");
+            b.addSegment(doc, tema, 20, 32);
+            b.addCode(0, "Inutile", Qt::gray);
+            b.addDictionary("Dizionario");
+        }
+        Project a;
+        QVERIFY(a.open(pr.a));
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(pr.b, &error), qPrintable(error));
+        QCOMPARE(src.authors(), (QStringList{"Anna", "Bruno", "Carla"}));
+        Merge::Options o;
+        o.onlyAuthor = "Bruno";
+        const Merge::Report r = Merge::apply(a, src, o);
+        QVERIFY(r.ok);
+        QCOMPARE(r.segmentsNew, 1);
+        QCOMPARE(r.segmentsFiltered, 3); // Anna's two (also in Bruno's copy) and Carla's
+        QVERIFY(a.findCode(0, "Solo di Bruno") > 0);
+        QCOMPARE(a.findCode(0, "Inutile"), qint64(0)); // codes nobody used with that author stay out
+        QVERIFY(a.dictionaries().isEmpty());
+        QCOMPARE(a.allSegments().size(), 3);
+    }
+
+    void mergeMediaAndOlderSchemas()
+    {
+        const QByteArray pdfBytes = makePdf({{"Primo paragrafo"}, {"Pagina due"}});
+        const QByteArray png = encodeImage(twoColorImage(100, 60), "PNG");
+        const QString fileB = path("media-b.tsra");
+        {
+            Project b;
+            b.setMigrations(Project::builtInMigrations().mid(0, 7)); // schema 8 file, like an older Tessera
+            QVERIFY(b.create(fileB));
+            b.setAuthor("Bruno");
+            const qint64 g = b.groups().first().id;
+            const qint64 pdf = b.addPdfDocument(g, "Rapporto", pdfBytes, "Primo paragrafo\fPagina due");
+            const qint64 img = b.addImageDocument(b.addGroup("Foto"), "Scatto", png);
+            const qint64 a = b.addCode(0, "A", Qt::red);
+            b.addAreaSegment(pdf, a, 2, 72, 90, 200, 120, 3, "nota", {}, "Pagina due");
+            b.addAreaSegment(img, a, 0, 10, 5, 60, 40);
+        }
+        const QByteArray before = fileHash(fileB);
+        Project a;
+        QVERIFY(a.create(path("media-a.tsra")));
+        a.setAuthor("Anna");
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(fileB, &error), qPrintable(error));
+        QCOMPARE(fileHash(fileB), before);                 // the original is neither upgraded nor backed up
+        QCOMPARE(fileVersion(fileB), 8);
+        QVERIFY(!QFileInfo::exists(path("media-b (backup v8).tsra")));
+        const Merge::Report r = Merge::apply(a, src, {});
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.documentsNew, 2);
+        QCOMPARE(r.segmentsNew, 2);
+        QCOMPARE(a.documents().size(), 2);
+        const Document pdf = a.documents().first();
+        QCOMPARE(pdf.kind, DocumentKind::Pdf);
+        QCOMPARE(a.documentData(pdf.id), pdfBytes);
+        QCOMPARE(a.documentText(pdf.id), QString("Primo paragrafo\fPagina due"));
+        const QList<Segment> areas = a.segmentsForDocument(pdf.id, true);
+        QCOMPARE(areas.size(), 1);
+        QCOMPARE(areas.first().areaText, QString("Pagina due"));
+        QCOMPARE(areas.first().author, QString("Bruno"));
+        QCOMPARE(a.groups().size(), 2); // the default group matched by name, "Foto" created
+        QCOMPARE(countOf(Merge::apply(a, src, {})), 0);
+        QVERIFY(a.undo());
+        QVERIFY(a.documents().isEmpty());
+        QVERIFY(a.allSegments(true).isEmpty());
+        QVERIFY(a.documentData(pdf.id).isEmpty());
+    }
+
+    void mergeFromQdpxAndFailures()
+    {
+        const Pair pr = makeCoders("qdpx");
+        {
+            Project b;
+            b.setAuthor("Bruno");
+            QVERIFY(b.open(pr.b));
+            const qint64 doc = b.documents().first().id;
+            b.addSegment(doc, b.findCode(0, "Tema"), 20, 32, 0, "da qdpx");
+        }
+        {
+            Project b;
+            QVERIFY(b.open(pr.b));
+            QString err;
+            QVERIFY2(Qdpx::exportProject(b, path("coders.qdpx"), &err), qPrintable(err));
+        }
+        Project a;
+        QVERIFY(a.open(pr.a));
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(path("coders.qdpx"), &error), qPrintable(error));
+        const Merge::Report r = Merge::apply(a, src, {});
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.documentsPresent, 1);
+        QCOMPARE(r.segmentsNew, 1);
+        QCOMPARE(r.segmentsDuplicate, 2);
+        QCOMPARE(a.documents().size(), 1);
+        QCOMPARE(a.allSegments().size(), 3);
+
+        Merge::Source bad;
+        writeFile("not-a-project.tsra", "this is not sqlite");
+        QVERIFY(!bad.load(path("not-a-project.tsra"), &error));
+        QVERIFY(!error.isEmpty());
+        QVERIFY(!bad.load(path("missing.tsra"), &error));
     }
 };
 

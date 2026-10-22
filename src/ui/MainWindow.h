@@ -22,6 +22,9 @@ public:
     // Opens the first document and activates all codes, so every panel shows content.
     void showOverview();
     void reopenLastProject();
+    // First launch: asks the name recorded as author of codings and memos (the merge of projects tells
+    // people's work apart by it). Does nothing once a name has been saved.
+    void askUserNameOnFirstRun();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -42,6 +45,7 @@ private:
     void closeProject();
     void saveCopyAs();
     void importQdpx();
+    void mergeProject();
     void exportQdpx();
     void exportProjectXlsx();
     void newExampleProject();
@@ -90,6 +94,7 @@ private:
     QAction *m_saveCopy = nullptr;
     QAction *m_closeProject = nullptr;
     QAction *m_importQdpx = nullptr;
+    QAction *m_mergeProject = nullptr;
     QAction *m_exportQdpx = nullptr;
     QAction *m_exportProjectXlsx = nullptr;
     QAction *m_example = nullptr;

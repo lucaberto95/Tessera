@@ -66,6 +66,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   Images         (`Images::`) suffissi/lettura file immagine, `crop` di un'area, miniature, PNG, `areaLabel`
   Pdfs           (`Pdfs::`) `Doc` (PDF da memoria: testo di pagina, `select` tra due punti, `textInArea`, `render`,
                  `cropArea`), `readFile`, `pageTexts/joinPages/pageOfOffset` (pagine separate da `\f`)
+  Merge          unione di un altro progetto (#22): Source (copia privata di un .tsra o import di un .qdpx), nalyze (prova a secco) e pply (un batch = un passo di annulla), Report`r
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/: .txt, .pdf, immagini)
   Xlsx           lettore (fogli, stringhe condivise/inline, date dai formati) e scrittore `writeWorkbook(Sheet...)`
   Survey         import di sondaggi (.xlsx/.csv): ruoli colonna, un documento per rispondente, variabili tipizzate
@@ -175,6 +176,17 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   dopo `flush()`). Le sintesi **non** vanno nel QDPX (REFI-QDA non ha un elemento adatto): si esportano da "Tabelle riassuntive"
   in Excel/CSV/HTML. Le conferme di eliminazione di codici e documenti citano le sintesi che si perderebbero.
 
+- **Unione di progetti** (#22, Merge.*): legge l'altro progetto con un secondo Project su una **copia** in cartella temporanea
+  (aprirlo potrebbe migrarlo e lasciare un backup accanto al file; un .qdpx è importato in un progetto temporaneo) e scrive nel
+  progetto aperto solo con l'API pubblica di Project, quindi trigger di undo e segnali funzionano da soli. Chiavi: documenti per
+  uuid, poi nome + impronta SHA-1 di tipo/testo/byte; codici per uuid, poi percorso; segmenti per (documento, codice, posizione/
+  area/tempo); gruppi, variabili, set, dizionari e tabelle riassuntive per uuid/nome. Documento con stesso uuid ma contenuto diverso =
+  conflitto: copia «<nome> (copia di <file>)» (riconosciuta alle unioni successive) oppure saltato con le sue codifiche. Memo, commenti
+  dei segmenti e sintesi in conflitto si **concatenano** con «— autore, data —» (idempotente: se il testo c'è già non si ripete). Con
+  onlyAuthor si importano solo codifiche/memo/collegamenti/sintesi di quell'autore, con i documenti, codici e set che servono.
+  Project::setProvenance ripristina autore e data originali (le dd* mettono utente e ora correnti). Nella prova a secco gli id
+  di ciò che non esiste ancora sono negativi. Le tabelle nuove vanno gestite anche in Merger (Merge.cpp). Il nome utente
+  (QSettings user/name) si chiede al primo avvio (MainWindow::askUserNameOnFirstRun, non nei test).
 ### Insidie già incontrate
 
 - Una `QString` nulla va in SQL come NULL: `bindAll()` la converte in `''` (colonne NOT NULL).
@@ -234,7 +246,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 Aggiornare questo elenco quando una issue viene chiusa.
 

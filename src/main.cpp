@@ -48,6 +48,9 @@ int main(int argc, char *argv[])
         window.reopenLastProject();
     }
 
+    if (!parser.isSet(screenshotOption))
+        window.askUserNameOnFirstRun();
+
     if (parser.isSet(screenshotOption)) {
         window.resize(1400, 860);
         const QString out = parser.value(screenshotOption);

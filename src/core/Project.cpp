@@ -1660,6 +1660,27 @@ bool Project::setSegmentCode(qint64 id, qint64 codeId)
     return true;
 }
 
+// The add methods stamp the current user and time; merging projects needs the original ones back.
+bool Project::setProvenance(Provenance kind, qint64 id, const QString &author, const QDateTime &when,
+                            const QDateTime &modified)
+{
+    const QString stamp = when.isValid() ? when.toUTC().toString(Qt::ISODateWithMs) : QString();
+    switch (kind) {
+    case Provenance::Segment:
+        return exec(QStringLiteral("UPDATE segments SET author = ?, created_at = ? WHERE id = ?"), {author, stamp, id});
+    case Provenance::Link:
+        return exec(QStringLiteral("UPDATE links SET author = ?, created_at = ? WHERE id = ?"), {author, stamp, id});
+    case Provenance::Summary:
+        return exec(QStringLiteral("UPDATE summaries SET author = ?, modified_at = ? WHERE id = ?"),
+                    {author, stamp, id});
+    case Provenance::Memo:
+        return exec(QStringLiteral("UPDATE memos SET author = ?, created_at = ?, modified_at = ? WHERE id = ?"),
+                    {author, stamp,
+                     modified.isValid() ? modified.toUTC().toString(Qt::ISODateWithMs) : stamp, id});
+    }
+    return false;
+}
+
 QHash<qint64, int> Project::segmentCountByCode() const
 {
     QHash<qint64, int> out;

@@ -18,6 +18,7 @@
 #include "ui/MatrixDialog.h"
 #include "ui/MemoDialog.h"
 #include "ui/MemoManager.h"
+#include "ui/MergeDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
@@ -30,6 +31,7 @@
 #include <QBuffer>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDialogButtonBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QWheelEvent>
@@ -99,6 +101,47 @@ private:
     }
 
 private slots:
+    void mergeDialogShowsReportAndOptions()
+    {
+        const QString fileA = m_dir.filePath("merge-a.tsra"), fileB = m_dir.filePath("merge-b.tsra");
+        Project a;
+        a.setAuthor("Anna");
+        QVERIFY(a.create(fileA));
+        const qint64 doc = a.addDocument(a.groups().first().id, "Testo", "Una frase da codificare bene.");
+        const qint64 code = a.addCode(0, "Tema", Qt::red);
+        a.addSegment(doc, code, 0, 3);
+        QVERIFY(a.saveCopyAs(fileB));
+        {
+            Project b;
+            b.setAuthor("Bruno");
+            QVERIFY(b.open(fileB));
+            b.addSegment(doc, b.findCode(0, "Tema"), 4, 9);
+        }
+        Merge::Source source;
+        QString error;
+        QVERIFY2(source.load(fileB, &error), qPrintable(error));
+        MergeDialog dialog(&a, &source);
+        auto *text = dialog.findChild<QPlainTextEdit *>();
+        QVERIFY(text);
+        QVERIFY(text->toPlainText().contains("Codifiche"));
+        QCOMPARE(dialog.report().segmentsNew, 1);
+        QCOMPARE(dialog.options().onlyAuthor, QString());
+        const auto combos = dialog.findChildren<QComboBox *>();
+        QCOMPARE(combos.size(), 2);
+        combos[0]->setCurrentIndex(combos[0]->findText("Anna")); // only Anna's: nothing new
+        QCOMPARE(dialog.options().onlyAuthor, QString("Anna"));
+        QCOMPARE(dialog.report().segmentsNew, 0);
+        QVERIFY(text->toPlainText().contains("Non c'è nulla"));
+        QVERIFY(dialog.findChild<QDialogButtonBox *>());
+        for (QPushButton *b : dialog.findChildren<QPushButton *>())
+            if (b->text() == "Unisci")
+                QVERIFY(!b->isEnabled());
+        combos[0]->setCurrentIndex(0);
+        for (QPushButton *b : dialog.findChildren<QPushButton *>())
+            if (b->text() == "Unisci")
+                QVERIFY(b->isEnabled());
+        QCOMPARE(a.allSegments().size(), 1); // nothing was written by looking
+    }
     void initTestCase()
     {
         m_project = new Project(this);

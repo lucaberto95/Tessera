@@ -25,6 +25,7 @@ qt_add_library(tessera_core STATIC
     src/core/Cooccurrence.h src/core/Cooccurrence.cpp
     src/core/Stats.h src/core/Stats.cpp
     src/core/Summaries.h src/core/Summaries.cpp
+    src/core/Merge.h src/core/Merge.cpp
     src/core/VariableFilter.h src/core/VariableFilter.cpp
     src/core/Xlsx.h src/core/Xlsx.cpp
     src/core/Survey.h src/core/Survey.cpp
@@ -61,6 +62,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/StatsDialog.h src/ui/StatsDialog.cpp
     src/ui/SummaryGridDialog.h src/ui/SummaryGridDialog.cpp
     src/ui/SummaryTablesDialog.h src/ui/SummaryTablesDialog.cpp
+    src/ui/MergeDialog.h src/ui/MergeDialog.cpp
     src/ui/VariableFilterDialog.h src/ui/VariableFilterDialog.cpp
     src/ui/SurveyImportDialog.h src/ui/SurveyImportDialog.cpp
     src/ui/DictionaryDialog.h src/ui/DictionaryDialog.cpp

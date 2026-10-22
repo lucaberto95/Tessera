@@ -2,6 +2,7 @@
 #include "core/DemoProject.h"
 #include "core/Exporters.h"
 #include "core/Images.h"
+#include "core/Merge.h"
 #include "core/Importers.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
@@ -17,6 +18,7 @@
 #include "ui/SummaryGridDialog.h"
 #include "ui/SummaryTablesDialog.h"
 #include "ui/MatrixDialog.h"
+#include "ui/MergeDialog.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/LinksDialog.h"
@@ -137,6 +139,7 @@ void MainWindow::createActions()
     m_saveCopy = make(tr("Salva una &copia come…"), &MainWindow::saveCopyAs, QKeySequence::SaveAs);
     m_closeProject = make(tr("&Chiudi progetto"), &MainWindow::closeProject);
     m_importQdpx = make(tr("Importa progetto &QDPX (REFI-QDA)…"), &MainWindow::importQdpx, {}, false);
+    m_mergeProject = make(tr("&Unisci un altro progetto…"), &MainWindow::mergeProject);
     m_exportQdpx = make(tr("&Esporta come QDPX (REFI-QDA)…"), &MainWindow::exportQdpx);
     m_exportProjectXlsx = make(tr("Esporta tutto il progetto in E&xcel…"), &MainWindow::exportProjectXlsx);
     m_example = make(tr("Crea progetto di &esempio…"), &MainWindow::newExampleProject, {}, false);
@@ -220,6 +223,7 @@ void MainWindow::createMenus()
     project->addAction(m_closeProject);
     project->addSeparator();
     project->addAction(m_importQdpx);
+    project->addAction(m_mergeProject);
     project->addAction(m_exportQdpx);
     project->addAction(m_exportProjectXlsx);
     project->addSeparator();
@@ -598,6 +602,36 @@ void MainWindow::importQdpx()
     m_project->clearUndoHistory(); // the import is the starting point of the new project
     addRecent(m_project->filePath());
     Ui::showInfo(this, tr("Importa QDPX"), report);
+}
+
+void MainWindow::mergeProject()
+{
+    const QString path = Ui::openFileName(this, tr("Unisci un altro progetto"),
+                                          tr("Progetti Tessera e REFI-QDA (*.tsra *.qdpx);;Tutti i file (*)"));
+    if (path.isEmpty())
+        return;
+    m_view->commitEdits();
+    Merge::Source source;
+    QString error;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const bool loaded = source.load(path, &error);
+    QApplication::restoreOverrideCursor();
+    if (!loaded) {
+        Ui::showError(this, tr("Impossibile leggere il progetto:\n%1").arg(error));
+        return;
+    }
+    MergeDialog dialog(m_project, &source, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const Merge::Report report = Merge::apply(*m_project, source, dialog.options());
+    QApplication::restoreOverrideCursor();
+    if (!report.ok) {
+        Ui::showError(this, tr("Unione non riuscita (il progetto non è stato modificato):\n%1").arg(report.error));
+        return;
+    }
+    Ui::showInfo(this, tr("Unione completata"),
+                 MergeDialog::reportText(report, true) + tr("\n\nL'unione si può annullare con Modifica ▸ Annulla."));
 }
 
 void MainWindow::exportQdpx()
@@ -1010,6 +1044,21 @@ void MainWindow::setUserName()
         return;
     m_project->setAuthor(name);
     QSettings().setValue(QStringLiteral("user/name"), name);
+}
+
+void MainWindow::askUserNameOnFirstRun()
+{
+    QSettings settings;
+    if (settings.contains(QStringLiteral("user/name")))
+        return;
+    const QString name = Ui::askText(this, tr("Benvenuto in Tessera"),
+                                     tr("Come ti chiami? Il nome viene registrato come autore di codifiche e memo "
+                                        "e permette di distinguere il lavoro di ciascuno quando si uniscono i progetti."),
+                                     m_project->author());
+    // Cancelling keeps the default name; the question is not asked again (Impostazioni ▸ Nome utente).
+    if (!name.isEmpty())
+        m_project->setAuthor(name);
+    settings.setValue(QStringLiteral("user/name"), m_project->author());
 }
 
 void MainWindow::about()
