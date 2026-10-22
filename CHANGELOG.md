@@ -2,6 +2,16 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.12.0] - 2026-10-22 — Import di dati di sondaggio da Excel/CSV (#33)
+Commit `92fa2f0`
+
+- Nuovo comando «Importa dati di sondaggio (Excel/CSV)…» nel menu Documenti: legge un questionario da `.xlsx` (primo foglio) o `.csv`, una riga per rispondente.
+- Anteprima delle colonne: ognuna si segna come ID rispondente, variabile (con il tipo proposto, modificabile; le variabili già esistenti tengono il loro tipo), risposta aperta o da ignorare; i ruoli sono proposti in base a intestazioni e contenuto.
+- Ogni rispondente diventa un documento in un nuovo gruppo: ogni risposta aperta è un paragrafo preceduto dalla domanda ed è codificata con un codice che ha il nome della domanda (riusato se esiste già). Le altre colonne diventano variabili tipizzate del documento.
+- Le risposte vuote si saltano, i rispondenti senza risposte aperte non creano documenti; i valori non compatibili con il tipo sono segnalati. Tutto l'import è un solo passo di annulla.
+- Nuovo lettore XLSX senza librerie esterne: stringhe condivise e inline, numeri, valori sì/no, date e ore dai formati numerici (anche il sistema di date 1904).
+- Non incluso: la modalità «un documento per domanda» proposta nella issue come alternativa.
+
 ## [0.11.0] - 2026-10-22 — Memo collegati a più elementi (#9)
 Commit `fad39e0`
 
