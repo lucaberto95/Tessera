@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.26.0] - 2026-10-22 — Infrastruttura AI (#39)
+Commit `75f1ab4`
+
+- «Impostazioni › AI…»: provider Nessuno (predefinito), server locale compatibile OpenAI (Ollama, LM Studio, llama.cpp, vLLM) o cloud (OpenAI, Anthropic, Mistral, Google, tutti dall'endpoint compatibile OpenAI). Indirizzo, modello (elenco da `GET /models` o nome libero), chiave API, timeout, «Prova connessione» con errori chiari (server spento, indirizzo errato, chiave rifiutata, modello mancante, timeout).
+- Tutela dei dati: nessuna chiamata senza un'azione dell'utente; un provider cloud si usa solo dopo la conferma, una volta per provider, di quali dati escono e verso chi; la chiave API sta solo nell'archivio credenziali di Windows (mai nel progetto, nelle impostazioni o nei messaggi); i redirect HTTP non si seguono. Blocco per amministratori: `tessera.ini` accanto all'eseguibile (`[AI] Locked=true`, `Disabled=true`, `Provider/Url/Model/Timeout`).
+- `src/core/ai/`: client asincrono e annullabile (`Ai::Client`), output strutturato con JSON Schema (ripiego sul prompt se il server non supporta `response_format`, nuovo tentativo su JSON non valido), stima dei token e suddivisione in blocchi, descrizione di ciò che viene inviato, autore «AI (modello X)».
+- Registro opzionale delle richieste nel progetto (`ai_log`, schema v11 con backup automatico; spento di default, non annullabile, non unito né esportato).
+- Test con un server HTTP finto locale (nessuna rete, nessuna chiave reale). Non incluso: client Anthropic Messages dedicato, funzioni AI concrete (#40-#43), interfaccia per consultare il registro.
 ## [0.25.0] - 2026-10-22 — Icona e installer (#47)
 Commit `a1b0b9f`
 
