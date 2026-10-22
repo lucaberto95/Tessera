@@ -2,6 +2,7 @@
 
 #include "core/Model.h"
 
+#include <QHash>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -26,8 +27,31 @@ Table codebookTable(const Project &project);
 bool exportCodebookHtml(const Project &project, const QString &path, QString *error);
 
 Table variablesTable(const Project &project);
+// Validates a user/CSV value against a variable type and returns it in the stored form:
+// decimals with '.', dates as ISO yyyy-MM-dd, booleans as "1"/"0". Empty input is valid.
+bool normalizeVariableValue(VariableType type, const QString &input, QString *out);
+// Picks the narrowest type that every non-empty value respects (Text when none fits).
+VariableType inferVariableType(const QStringList &values);
+
+struct CsvVariableColumn {
+    QString name;
+    VariableType type = VariableType::Text; // existing variable's type, or the inferred one
+    bool existing = false;
+    int invalidCount = 0; // existing variables only: values that do not fit the type
+    QStringList samples;
+};
+struct CsvVariablesPreview {
+    QList<CsvVariableColumn> columns;
+    int matchedRows = 0;
+    QStringList unmatchedDocuments;
+    Table sampleRows; // header + first data rows
+};
+
 // Matches rows to documents by name (first column, or a column called "Documento"/"Document").
-bool importVariablesCsv(Project &project, const QString &path, QString *report, QString *error);
+bool previewVariablesCsv(const Project &project, const QString &path, CsvVariablesPreview *preview, QString *error);
+// `types` overrides the type of new variables by column name; the default is the inferred one.
+bool importVariablesCsv(Project &project, const QString &path, QString *report, QString *error,
+                        const QHash<QString, VariableType> &types = {});
 
 QString htmlEscape(const QString &s);
 
