@@ -59,10 +59,36 @@ private slots:
     {
         DocumentTree docs(m_project);
         docs.rebuild();
-        QCOMPARE(docs.topLevelItemCount(), 1);
+        QCOMPARE(docs.topLevelItemCount(), 2); // the group, then "Set di documenti"
         QCOMPARE(docs.topLevelItem(0)->childCount(), 3);
+        QCOMPARE(docs.topLevelItem(1)->childCount(), 1);
+        QCOMPARE(docs.topLevelItem(1)->child(0)->childCount(), 2);
         docs.setAllActive(true);
-        QCOMPARE(docs.activeDocumentIds().size(), 3);
+        QCOMPARE(docs.activeDocumentIds().size(), 3); // each document once, even if also in a set
+
+        // Checking a set activates its documents; their entries in the group follow.
+        docs.setAllActive(false);
+        QTreeWidgetItem *group = docs.topLevelItem(0);
+        QTreeWidgetItem *set = docs.topLevelItem(1)->child(0);
+        set->setCheckState(0, Qt::Checked);
+        QCOMPARE(docs.activeDocumentIds().size(), 2);
+        QCOMPARE(group->child(0)->checkState(0), Qt::Unchecked);
+        QCOMPARE(group->child(1)->checkState(0), Qt::Checked);
+        QCOMPARE(group->child(2)->checkState(0), Qt::Checked);
+        // ...and unchecking a document in its group unchecks it in the set.
+        group->child(1)->setCheckState(0, Qt::Unchecked);
+        QCOMPARE(set->child(0)->checkState(0), Qt::Unchecked);
+        QCOMPARE(set->checkState(0), Qt::PartiallyChecked);
+        QCOMPARE(docs.activeDocumentIds().size(), 1);
+
+        // A set created from the active documents.
+        const qint64 newSet = m_project->addDocumentSet("Attivi", docs.activeDocumentIds());
+        docs.rebuild();
+        QCOMPARE(docs.topLevelItem(1)->childCount(), 2);
+        QVERIFY(m_project->undo());
+        QVERIFY(m_project->documentSets().size() == 1 && newSet > 0);
+        docs.setAllActive(true);
+        shot(&docs, "document_tree");
 
         CodeTree codes(m_project);
         codes.rebuild();

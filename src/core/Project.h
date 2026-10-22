@@ -85,6 +85,15 @@ public:
     // Replaces the text and the document's segments atomically (used by the text editing mode).
     bool updateDocumentText(qint64 id, const QString &text, const QList<Segment> &segments);
 
+    // Document sets: references to documents of any group; a document can be in several sets.
+    QList<DocumentSet> documentSets() const;
+    QList<qint64> documentSetMembers(qint64 setId) const; // in document tree order
+    qint64 addDocumentSet(const QString &name, const QList<qint64> &documentIds = {}, const QString &uuid = {});
+    bool renameDocumentSet(qint64 id, const QString &name);
+    bool deleteDocumentSet(qint64 id);
+    bool addToDocumentSet(qint64 setId, const QList<qint64> &documentIds);
+    bool removeFromDocumentSet(qint64 setId, const QList<qint64> &documentIds);
+
     // Codes
     QList<Code> codes() const;            // ordered by sibling position, not hierarchical
     QList<Code> codesInTreeOrder() const; // depth-first, as shown in the code tree
@@ -138,6 +147,7 @@ signals:
     void closed();
     void groupsChanged();
     void documentsChanged();
+    void documentSetsChanged();
     void codesChanged();
     void segmentsChanged(qint64 documentId); // 0 = several documents
     void memosChanged();

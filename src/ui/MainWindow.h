@@ -88,6 +88,8 @@ private:
     QAction *m_importDocs = nullptr;
     QAction *m_newTextDoc = nullptr;
     QAction *m_newGroup = nullptr;
+    QAction *m_newDocumentSet = nullptr;
+    QAction *m_documentSetFromActive = nullptr;
     QAction *m_variables = nullptr;
     QAction *m_newCode = nullptr;
     QAction *m_newSubcode = nullptr;

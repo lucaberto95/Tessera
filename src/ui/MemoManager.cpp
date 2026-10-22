@@ -103,6 +103,11 @@ QString MemoManager::targetLabel(int type, qint64 id) const
         const Segment s = m_project->segment(id);
         return tr("Segmento: %1 / %2").arg(m_project->document(s.documentId).name, m_project->code(s.codeId).name);
     }
+    case MemoTarget::DocumentSet:
+        for (const DocumentSet &s : m_project->documentSets())
+            if (s.id == id)
+                return tr("Set: %1").arg(s.name);
+        return tr("Set");
     }
     return {};
 }

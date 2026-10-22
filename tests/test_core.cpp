@@ -284,6 +284,78 @@ private slots:
         QCOMPARE(fileHash(path("m5.tsra")), before);
     }
 
+    void builtInUpgradeFromVersion1()
+    {
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("v1.tsra")));
+            old.addDocument(old.groups().first().id, "Doc", "Testo");
+        }
+        Project p;
+        QVERIFY(p.open(path("v1.tsra")));
+        QCOMPARE(p.meta("schema_version"), QString::number(p.schemaVersion()));
+        QVERIFY(!p.migrationBackupPath().isEmpty());
+        // The new tables work, undo included.
+        QVERIFY(p.addDocumentSet("Set", {p.documents().first().id}) > 0);
+        QVERIFY(p.undo());
+        QVERIFY(p.documentSets().isEmpty());
+    }
+
+    void documentSets()
+    {
+        Project p;
+        QVERIFY(p.create(path("sets.tsra")));
+        QCOMPARE(p.meta("schema_version"), QString::number(p.schemaVersion()));
+        const qint64 g1 = p.groups().first().id;
+        const qint64 g2 = p.addGroup("Secondo gruppo");
+        const qint64 a = p.addDocument(g1, "A", "a");
+        const qint64 b = p.addDocument(g2, "B", "b");
+        const qint64 c = p.addDocument(g1, "C", "c");
+
+        QSignalSpy spy(&p, &Project::documentSetsChanged);
+        const qint64 s = p.addDocumentSet("Trasversale", {b, a});
+        QVERIFY(s > 0);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(p.undoLabel(), QString("Nuovo set di documenti"));
+        // Members follow the document tree order, whatever order they were added in.
+        QCOMPARE(p.documentSetMembers(s), (QList<qint64>{a, b}));
+
+        // A document can be in several sets; adding it twice to the same set is harmless.
+        const qint64 s2 = p.addDocumentSet("Altro", {a});
+        QVERIFY(p.addToDocumentSet(s, {a, c}));
+        QCOMPARE(p.documentSetMembers(s), (QList<qint64>{a, c, b}));
+        QVERIFY(!p.addToDocumentSet(s, {9999})); // unknown document
+        QCOMPARE(p.documentSetMembers(s).size(), 3);
+        QVERIFY(p.removeFromDocumentSet(s, {c}));
+        QCOMPARE(p.documentSetMembers(s), (QList<qint64>{a, b}));
+        QVERIFY(p.renameDocumentSet(s, "Rinominato"));
+        QCOMPARE(p.documentSets().first().name, QString("Rinominato"));
+
+        // Deleting a document removes it from every set; undo puts it back in all of them.
+        QVERIFY(p.deleteDocument(a));
+        QCOMPARE(p.documentSetMembers(s), QList<qint64>{b});
+        QVERIFY(p.documentSetMembers(s2).isEmpty());
+        QVERIFY(p.undo());
+        QCOMPARE(p.documentSetMembers(s), (QList<qint64>{a, b}));
+        QCOMPARE(p.documentSetMembers(s2), QList<qint64>{a});
+
+        // Deleting a set keeps its documents and drops its memo.
+        Memo m;
+        m.targetType = MemoTarget::DocumentSet;
+        m.targetId = s;
+        m.body = "perché questo set";
+        QVERIFY(p.saveMemo(m) > 0);
+        QVERIFY(p.deleteDocumentSet(s));
+        QCOMPARE(p.documentSets().size(), 1);
+        QCOMPARE(p.documents().size(), 3);
+        QVERIFY(p.memos().isEmpty());
+        QVERIFY(p.undo());
+        QCOMPARE(p.documentSets().size(), 2);
+        QCOMPARE(p.documentSetMembers(s), (QList<qint64>{a, b}));
+        QCOMPARE(p.memoFor(MemoTarget::DocumentSet, s).body, QString("perché questo set"));
+    }
+
     void batchDefersSignals()
     {
         Project p;
@@ -838,6 +910,92 @@ private slots:
             }
         }
         QVERIFY(foundBool);
+    }
+
+    void qdpxDocumentSets()
+    {
+        Project p;
+        QVERIFY(p.create(path("sets_src.tsra")));
+        const qint64 g1 = p.groups().first().id;
+        const qint64 g2 = p.addGroup("Focus group");
+        const qint64 a = p.addDocument(g1, "A", "testo a");
+        const qint64 b = p.addDocument(g2, "B", "testo b");
+        const qint64 s = p.addDocumentSet("Trasversale", {a, b});
+        QVERIFY(p.addDocumentSet("Vuoto") > 0);
+        Memo gm;
+        gm.targetType = MemoTarget::Group;
+        gm.targetId = g2;
+        gm.body = "memo del gruppo";
+        p.saveMemo(gm);
+        Memo sm;
+        sm.targetType = MemoTarget::DocumentSet;
+        sm.targetId = s;
+        sm.body = "memo del set";
+        p.saveMemo(sm);
+
+        QString err, report;
+        QVERIFY2(Qdpx::exportProject(p, path("sets.qdpx"), &err), qPrintable(err));
+        Project q;
+        QVERIFY(q.create(path("sets_dst.tsra")));
+        QVERIFY2(Qdpx::importProject(q, path("sets.qdpx"), &report, &err), qPrintable(err));
+
+        // Groups come back as groups, sets as sets, and each memo exactly once.
+        QCOMPARE(q.groups().size(), 2);
+        QCOMPARE(q.documentSets().size(), 2);
+        const DocumentSet qs = q.documentSets().first();
+        QCOMPARE(qs.name, QString("Trasversale"));
+        QCOMPARE(qs.uuid, p.documentSets().first().uuid);
+        QCOMPARE(q.documentSetMembers(qs.id).size(), 2);
+        QVERIFY(q.documentSetMembers(q.documentSets().last().id).isEmpty());
+        QCOMPARE(q.memoFor(MemoTarget::DocumentSet, qs.id).body, QString("memo del set"));
+        QCOMPARE(q.memoFor(MemoTarget::Group, q.groups().last().id).body, QString("memo del gruppo"));
+        QCOMPARE(q.memos().size(), 2);
+    }
+
+    void qdpxForeignSets()
+    {
+        auto writeQdpx = [this](const QString &name, const QString &origin) {
+            const QString xml = QStringLiteral(
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+                "<Project xmlns=\"urn:QDA-XML:project:1.0\" name=\"Altro\" origin=\"%1\">"
+                "<Sources>"
+                "<TextSource guid=\"11111111-1111-4111-8111-111111111111\" name=\"Uno\">"
+                "<PlainTextContent>uno</PlainTextContent></TextSource>"
+                "<TextSource guid=\"22222222-2222-4222-8222-222222222222\" name=\"Due\">"
+                "<PlainTextContent>due</PlainTextContent></TextSource>"
+                "</Sources><Sets>"
+                "<Set guid=\"33333333-3333-4333-8333-333333333333\" name=\"Donne\">"
+                "<Description>solo donne</Description>"
+                "<MemberSource targetGUID=\"22222222-2222-4222-8222-222222222222\"/></Set>"
+                "</Sets></Project>").arg(origin);
+            QZipWriter zip(path(name));
+            zip.addFile("project.qde", xml.toUtf8());
+            zip.close();
+        };
+        QString err, report;
+
+        // Sets from other programs become document sets; the documents stay in one group.
+        writeQdpx("foreign.qdpx", "Altro software 1.0");
+        Project p;
+        QVERIFY(p.create(path("foreign.tsra")));
+        QVERIFY2(Qdpx::importProject(p, path("foreign.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(p.groups().size(), 1);
+        QCOMPARE(p.documentsInGroup(p.groups().first().id).size(), 2);
+        QCOMPARE(p.documentSets().size(), 1);
+        const DocumentSet s = p.documentSets().first();
+        QCOMPARE(s.name, QString("Donne"));
+        QCOMPARE(p.documentSetMembers(s.id).size(), 1);
+        QCOMPARE(p.document(p.documentSetMembers(s.id).first()).name, QString("Due"));
+        QCOMPARE(p.memoFor(MemoTarget::DocumentSet, s.id).body, QString("solo donne"));
+
+        // Tessera 0.1.0 exported only groups, so its sets are still read as groups.
+        writeQdpx("legacy.qdpx", "Tessera 0.1.0");
+        Project q;
+        QVERIFY(q.create(path("legacy.tsra")));
+        QVERIFY2(Qdpx::importProject(q, path("legacy.qdpx"), &report, &err), qPrintable(err));
+        QVERIFY(q.documentSets().isEmpty());
+        QCOMPARE(q.groups().size(), 2);
+        QCOMPARE(q.groups().last().name, QString("Donne"));
     }
 };
 
