@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.19.0] - 2026-10-22 — QDPX con PDF e immagini (#46)
+Commit `88f5cd8`
+
+- L'export QDPX include i PDF (`PDFSource`: file originale in `sources/<guid>.pdf`, testo a pagine come `Representation`, aree come `PDFSelection`) e le immagini (`PictureSource`, file in `sources/<guid>.<ext>`, aree come `PictureSelection`), con codici, commenti, variabili e memo. L'import li ricostruisce: round trip senza perdite, tranne le frazioni di punto delle aree PDF (lo schema vuole interi). Un PDF di un altro programma senza testo viene estratto dal file.
+- I memo di gruppi e set (anche più di uno, e quelli collegati a un gruppo o a un set) sono `<Note>` elencate dal set come `<MemberNote>`; prima solo il primo viaggiava nella `Description`. I gruppi vuoti non si perdono più.
+- Il rapporto d'import elenca le fonti ignorate per tipo (audio, video, immagini o PDF mancanti o illeggibili), i casi (`Cases`) e le mappe (`Graphs`).
+- I collegamenti con un'estremità in un'immagine non si esportano più (avrebbero puntato a un oggetto inesistente).
+- Non incluso: audio/video e trascrizioni (#28, #29, col punto d'aggancio indicato in `Qdpx.cpp`), grafi (#15), barra di avanzamento per file molto grandi, memo liberi con collegamenti (tornano come memo del primo elemento collegato). Coordinate di PDF e immagini scritte come punti/pixel con origine in alto a sinistra, non verificate con file di altri programmi.
 ## [0.18.0] - 2026-10-22 — PDF a pagine e codifica di aree (#26)
 Commit `9254cf8`
 
