@@ -2,6 +2,18 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.13.0] - 2026-10-22 — Export Excel nativo (.xlsx) (#44)
+Commit `7575a73`
+
+- Le esportazioni in Excel producono un vero file `.xlsx`, scritto senza librerie esterne: intestazioni in grassetto con filtro automatico e prima riga bloccata, larghezze delle colonne adattate al contenuto, testo a capo per segmenti, commenti, descrizioni e memo.
+- Numeri e date sono valori veri (le date si vedono nel formato del sistema); nomi e variabili di tipo testo restano testo, così «007» o un documento chiamato «2024» non cambiano.
+- Il colore del codice fa da sfondo alla cella del codice (segmenti, codebook, matrici); la matrice codici × documenti e le co-occorrenze mantengono la heatmap come riempimento delle celle.
+- Pannello dei segmenti: nuovo pulsante «Esporta Excel (.xlsx)» accanto al CSV, e nel menu Analisi «Esporta segmenti recuperati (Excel .xlsx)…». Codebook, variabili, memo, matrice, co-occorrenze e statistiche propongono `.xlsx` nella finestra di salvataggio; CSV e HTML restano disponibili.
+- Nuovo comando «Esporta tutto il progetto in Excel…» (menu Progetto): una cartella di lavoro con i fogli Documenti, Codici, Segmenti, Variabili e Memo.
+- Le celle oltre il limite di Excel di 32.767 caratteri vengono troncate con un avviso; i caratteri non ammessi da XML vengono tolti.
+- Il lettore XLSX legge anche fogli diversi dal primo e decodifica le sequenze `_xHHHH_` di Excel.
+- Non incluso: la heatmap come formattazione condizionale di Excel (è un riempimento statico, uguale a quello a schermo).
+
 ## [0.12.0] - 2026-10-22 — Import di dati di sondaggio da Excel/CSV (#33)
 Commit `92fa2f0`
 
