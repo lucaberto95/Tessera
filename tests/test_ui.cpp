@@ -20,6 +20,7 @@
 #include "ui/SurveyImportDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/VariablesDialog.h"
+#include "ui/WordFrequencyDialog.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -916,6 +917,113 @@ private slots:
 
         QVERIFY(m_project->undo());
         QVERIFY(!m_project->memo(id).id);
+    }
+
+    void wordFrequencies()
+    {
+        WordFrequencyDialog dlg(m_project, [] { return QList<qint64>{}; }, [this] { return m_project->allSegments(); });
+        dlg.resize(900, 600);
+        dlg.setMinLength(3);
+        dlg.run();
+        QVERIFY(dlg.isBusy());
+        QTRY_VERIFY(!dlg.isBusy());
+        auto *table = dlg.findChild<QTableWidget *>("wordFrequencyTable");
+        auto *kwic = dlg.findChild<QTableWidget *>("keywordTable");
+        QVERIFY(table && kwic);
+        const Words::Result all = dlg.result();
+        QCOMPARE(table->rowCount(), int(all.entries.size()));
+        QCOMPARE(all.documents, 3);
+        QCOMPARE(table->item(0, 0)->text(), all.entries[0].word);
+        QCOMPARE(table->item(0, 1)->data(Qt::DisplayRole).toInt(), all.entries[0].count);
+        QVERIFY(all.indexOf("lavoro") >= 0);
+        QCOMPARE(all.indexOf("che"), -1); // Italian stop list
+
+        // The stop list can be turned off; sorting by a column reorders the rows.
+        dlg.setUseStopList(false);
+        dlg.setMinLength(1);
+        dlg.run();
+        QTRY_VERIFY(!dlg.isBusy());
+        QVERIFY(dlg.result().indexOf("che") >= 0);
+        QVERIFY(dlg.result().countedWords > all.countedWords);
+        table->sortByColumn(0, Qt::AscendingOrder);
+        QVERIFY(table->item(0, 0)->text() <= table->item(1, 0)->text());
+        dlg.setUseStopList(true);
+        dlg.setMinLength(3);
+
+        // Filter by text.
+        auto *filter = dlg.findChild<QLineEdit *>("wordFilter");
+        dlg.run();
+        QTRY_VERIFY(!dlg.isBusy());
+        filter->setText("lavor");
+        QVERIFY(dlg.visibleRows() > 0 && dlg.visibleRows() < table->rowCount());
+        filter->clear();
+        QCOMPARE(dlg.visibleRows(), table->rowCount());
+        shot(&dlg, "word_frequencies");
+
+        // Cloud: the first N words.
+        dlg.setTopWords(20);
+        QCOMPARE(dlg.cloudWordCount(), 20);
+
+        // Comparison columns: one per group; the counts add up.
+        dlg.setComparison(WordFrequencyDialog::CompareGroups);
+        dlg.run();
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(dlg.result().columnLabels.size(), m_project->groups().size());
+        QCOMPARE(table->columnCount(), 4 + int(m_project->groups().size()));
+        QCOMPARE(dlg.result().entries[0].columns.value(0), dlg.result().entries[0].count);
+        dlg.setComparison(WordFrequencyDialog::CompareNone);
+
+        // Words in context: the occurrences open the document at the word.
+        QSignalSpy opened(&dlg, &WordFrequencyDialog::occurrenceActivated);
+        dlg.run();
+        QTRY_VERIFY(!dlg.isBusy());
+        dlg.showKeyword("lavoro");
+        QVERIFY(!dlg.occurrences().isEmpty());
+        QCOMPARE(kwic->rowCount(), int(dlg.occurrences().size()));
+        QCOMPARE(kwic->item(0, 2)->text().toLower(), QString("lavoro"));
+        kwic->sortByColumn(3, Qt::DescendingOrder); // sorting must not break the link to the occurrence
+        emit kwic->cellDoubleClicked(0, 0);
+        QCOMPARE(opened.count(), 1);
+        const qint64 doc = opened.first()[0].toLongLong();
+        const int start = opened.first()[1].toInt(), end = opened.first()[2].toInt();
+        QCOMPARE(m_project->documentText(doc).mid(start, end - start).toLower(), QString("lavoro"));
+        QCOMPARE(kwic->item(0, 0)->text(), m_project->document(doc).name);
+
+        // Actions on the selected words: search, dictionary and stop list.
+        QSignalSpy search(&dlg, &WordFrequencyDialog::searchRequested);
+        dlg.selectWords({"lavoro"});
+        QCOMPARE(dlg.selectedWords(), QStringList({"lavoro"}));
+        for (QPushButton *b : dlg.findChildren<QPushButton *>())
+            if (b->text() == "Cerca e codifica…")
+                b->click();
+        QCOMPARE(search.count(), 1);
+        QCOMPARE(search.first()[0].toString(), QString("lavoro"));
+
+        const qint64 category = m_project->dictCategories(m_project->dictionaries().first().id).first().id;
+        const qsizetype entries = m_project->dictEntries(category).size();
+        QCOMPARE(dlg.addSelectedToDictionary(category), 1);
+        QCOMPARE(m_project->dictEntries(category).size(), entries + 1);
+        QVERIFY(m_project->undo());
+        QCOMPARE(m_project->dictEntries(category).size(), entries);
+
+        dlg.selectWords({"lavoro"});
+        dlg.excludeSelectedWords();
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(dlg.result().indexOf("lavoro"), -1);
+        QVERIFY(Words::stopList(*m_project).contains("lavoro"));
+        Words::setStopList(*m_project, Words::builtInStopWords("it"));
+
+        // Only the retrieved segments.
+        dlg.setScope(WordFrequencyDialog::Scope::RetrievedSegments);
+        dlg.run();
+        QTRY_VERIFY(!dlg.isBusy());
+        QVERIFY(dlg.result().totalWords > 0 && dlg.result().totalWords < all.totalWords);
+
+        // "Cerca e codifica" opens the search already filled in.
+        SearchDialog searchDialog(m_project, [] { return QList<qint64>{}; }, [] { return qint64(0); });
+        searchDialog.searchFor("video");
+        QCOMPARE(searchDialog.findChild<QLineEdit *>()->text(), QString("video"));
+        QCOMPARE(searchDialog.findChild<QTableWidget *>()->rowCount(), 1); // whole word: not "videochiamata"
     }
 
     void mainWindow()

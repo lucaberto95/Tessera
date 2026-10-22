@@ -9,6 +9,7 @@
 #include "core/Survey.h"
 #include "core/TextUtils.h"
 #include "core/VariableFilter.h"
+#include "core/WordFrequencies.h"
 #include "core/Xlsx.h"
 
 #include <QCryptographicHash>
@@ -2532,6 +2533,176 @@ private slots:
         QCOMPARE(p.dictEntries(f.tempo).size(), 5);
         QCOMPARE(Dictionaries::importFile(p, f.dict, 0, path("missing.txt"), &err), -1);
         QVERIFY(!err.isEmpty());
+    }
+
+    // ---------------------------------------------------------------- word frequencies (#18)
+
+    void wordFrequenciesCountsAndFilters()
+    {
+        Project p;
+        QVERIFY(p.create(path("words.tsra")));
+        const qint64 g = p.groups().first().id;
+        // Apostrophes and hyphens separate words; numbers are words; emoji are not.
+        const qint64 d = p.addDocument(g, "D", QString::fromUtf8("L'azienda e dell'azienda: smart-working, 2024 e 2024! "
+                                                                 "\xF0\x9F\x98\x80 Azienda"));
+        const QList<Words::Source> src = Words::documentSources({d});
+        const QHash<qint64, QString> texts = Words::loadTexts(p, src);
+
+        Words::Result r = Words::frequencies(src, texts, {});
+        QCOMPARE(r.totalWords, 11);
+        QCOMPARE(r.countedWords, 11);
+        QCOMPARE(r.documents, 1);
+        QCOMPARE(r.entries.size(), 7);
+        QCOMPARE(r.entries[0].word, QString("azienda")); // case folded: "Azienda" counts too
+        QCOMPARE(r.entries[0].count, 3);
+        QCOMPARE(r.entries[1].word, QString("2024")); // ties alphabetically
+        QCOMPARE(r.entries[2].word, QString("e"));
+        QVERIFY(qAbs(r.percent(r.entries[0]) - 100.0 * 3 / 11) < 1e-9);
+        QCOMPARE(r.indexOf("working"), 6);
+        QCOMPARE(r.entries[0].documents, 1);
+
+        Words::Options o;
+        o.caseSensitive = true;
+        r = Words::frequencies(src, texts, o);
+        QCOMPARE(r.entries[r.indexOf("azienda")].count, 2);
+        QCOMPARE(r.entries[r.indexOf("Azienda")].count, 1);
+
+        // Minimum length, numbers and stop words reduce the counted words, not the total.
+        o = {};
+        o.minLength = 3;
+        o.excludeNumbers = true;
+        o.stopWords = {Words::stopWord("Dell'")};
+        r = Words::frequencies(src, texts, o);
+        QCOMPARE(r.totalWords, 11);
+        QCOMPARE(r.countedWords, 5); // azienda x3, smart, working
+        QCOMPARE(r.entries.size(), 3);
+        o.minLength = 6;
+        QCOMPARE(Words::frequencies(src, texts, o).entries.size(), 2); // azienda, working
+
+        // Cancelling from the progress callback stops the computation.
+        r = Words::frequencies(src, texts, {}, {}, [](int, int) { return false; });
+        QVERIFY(!r.complete);
+    }
+
+    void wordFrequenciesColumnsAndSources()
+    {
+        Project p;
+        QVERIFY(p.create(path("words-cols.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 a = p.addDocument(g, "A", "casa casa lavoro");
+        const qint64 b = p.addDocument(g, "B", "lavoro lavoro lavoro\ncasa");
+        const QList<Words::Source> src = Words::documentSources({a, b});
+        const QHash<qint64, QString> texts = Words::loadTexts(p, src);
+        Words::Result r = Words::frequencies(src, texts, {}, {{"Primo", {a}}, {"Secondo", {b}}, {"Tutti", {a, b}}});
+        QCOMPARE(r.columnLabels, QStringList({"Primo", "Secondo", "Tutti"}));
+        QCOMPARE(r.columnWords, QList<int>({3, 4, 7}));
+        const Words::Entry &lavoro = r.entries[r.indexOf("lavoro")];
+        QCOMPARE(lavoro.count, 4);
+        QCOMPARE(lavoro.documents, 2);
+        QCOMPARE(lavoro.columns, QList<int>({1, 3, 4}));
+
+        // Segments: overlapping or touching passages of a document merge, so nothing is counted twice.
+        auto seg = [&](qint64 doc, int s, int e) {
+            Segment x;
+            x.documentId = doc;
+            x.start = s;
+            x.end = e;
+            return x;
+        };
+        const QList<Words::Source> merged = Words::segmentSources({seg(b, 0, 5), seg(a, 20, 25), seg(a, 0, 4), seg(a, 3, 9), seg(a, 9, 12)});
+        QCOMPARE(merged.size(), 3);
+        QCOMPARE(merged[0].documentId, a);
+        QCOMPARE(merged[0].start, 0);
+        QCOMPARE(merged[0].end, 12); // [0,4) + [3,9) + [9,12) are one passage
+        QCOMPARE(merged[1].start, 20);
+        r = Words::frequencies(Words::segmentSources({seg(a, 0, 8), seg(b, 0, 20)}), texts, {});
+        QCOMPARE(r.totalWords, 2 + 3); // "casa cas" (cut mid-word) and "lavoro lavoro lavoro"
+        QCOMPARE(r.documents, 2);
+    }
+
+    void keywordInContextOccurrences()
+    {
+        Project p;
+        QVERIFY(p.create(path("kwic.tsra")));
+        const qint64 g = p.groups().first().id;
+        const QString t1 = "Il lavoro da casa e il Lavoro in ufficio.\nUn lavoro da remoto.";
+        const qint64 d1 = p.addDocument(g, "D1", t1);
+        const qint64 d2 = p.addDocument(g, "D2", "niente");
+        const QList<Words::Source> src = Words::documentSources({d1, d2});
+        const QHash<qint64, QString> texts = Words::loadTexts(p, src);
+
+        QList<Words::Occurrence> occ = Words::keywordInContext(src, texts, "lavoro", false, 8);
+        QCOMPARE(occ.size(), 3);
+        QCOMPARE(occ[0].keyword, QString("lavoro"));
+        QCOMPARE(occ[0].left, QString("Il "));
+        QCOMPARE(occ[0].right, QString(" da casa"));
+        QCOMPARE(t1.mid(occ[0].start, occ[0].end - occ[0].start), QString("lavoro"));
+        QCOMPARE(occ[1].keyword, QString("Lavoro"));
+        QCOMPARE(occ[2].left, QString("cio. Un ")); // the line break becomes a space
+        QCOMPARE(Words::keywordInContext(src, texts, "lavoro", true, 8).size(), 2);
+        // More words in a row, across punctuation; apostrophes in the query separate words.
+        occ = Words::keywordInContext(src, texts, "lavoro da", false, 5);
+        QCOMPARE(occ.size(), 2);
+        QCOMPARE(occ[1].keyword, QString("lavoro da"));
+        QCOMPARE(Words::keywordInContext(src, texts, "lavoro", false, 8, 2).size(), 2); // limit
+        QVERIFY(Words::keywordInContext(src, texts, "...", false).isEmpty());
+        // A passage limits the search, but not the context around a hit.
+        Words::Source onlyFirst{d1, 0, 14};
+        occ = Words::keywordInContext({onlyFirst}, texts, "lavoro", false, 4);
+        QCOMPARE(occ.size(), 1);
+        QCOMPARE(occ[0].right, QString(" da "));
+    }
+
+    void wordStopLists()
+    {
+        const QStringList it = Words::builtInStopWords("it");
+        QVERIFY(it.contains("dell") && it.contains("che") && it.contains("è") && !it.contains("lavoro"));
+        QVERIFY(Words::builtInStopWords("en").contains("the"));
+        QCOMPARE(Words::stopWord("  Dell' "), QString("dell"));
+        QCOMPARE(Words::stopWord("due parole"), QString());
+        QCOMPARE(Words::stopWord("..."), QString());
+
+        {
+            Project p;
+            QVERIFY(p.create(path("stop.tsra")));
+            QCOMPARE(Words::stopList(p), it); // never set: the Italian list
+            Words::setStopList(p, {"Zeta", "alfa", "ALFA", "x y", ""});
+            QCOMPARE(Words::stopList(p), QStringList({"alfa", "zeta"}));
+            Words::setStopList(p, {});
+            QVERIFY(Words::stopList(p).isEmpty()); // an empty list is not "never set"
+            Words::setStopList(p, {"beta"});
+        }
+        Project q;
+        QVERIFY(q.open(path("stop.tsra")));
+        QCOMPARE(Words::stopList(q), QStringList({"beta"}));
+    }
+
+    void wordsAddedToDictionary()
+    {
+        Project p;
+        QVERIFY(p.create(path("words-dict.tsra")));
+        const DictionaryFixture f = makeDictionaryProject(p);
+        const qint64 undoable = p.dictEntries(f.tempo).size();
+        QCOMPARE(Words::addToDictionary(p, f.tempo, {"orologio", "tempo", "Orologio", "scadenza"}), 2);
+        QCOMPARE(p.dictEntries(f.tempo).size(), undoable + 2);
+        QVERIFY(p.undo()); // one step
+        QCOMPARE(p.dictEntries(f.tempo).size(), undoable);
+    }
+
+    void wordCloudLayoutDoesNotOverlap()
+    {
+        QList<QSizeF> sizes;
+        for (int i = 0; i < 40; ++i)
+            sizes << QSizeF(30 + (i * 37) % 120, 12 + (i * 11) % 40);
+        const QList<QPointF> centres = Words::cloudLayout(sizes, 2);
+        QCOMPARE(centres.size(), sizes.size());
+        QCOMPARE(centres[0], QPointF(0, 0)); // the first word sits in the middle
+        for (int i = 0; i < sizes.size(); ++i)
+            for (int j = i + 1; j < sizes.size(); ++j) {
+                const QRectF a(centres[i] - QPointF(sizes[i].width() / 2, sizes[i].height() / 2), sizes[i]);
+                const QRectF b(centres[j] - QPointF(sizes[j].width() / 2, sizes[j].height() / 2), sizes[j]);
+                QVERIFY2(!a.intersects(b), qPrintable(QString("%1 and %2 overlap").arg(i).arg(j)));
+            }
     }
 };
 

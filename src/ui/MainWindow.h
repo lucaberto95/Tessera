@@ -56,6 +56,7 @@ private:
     void showCooccurrence();
     void showStats();
     void showDictionaries();
+    void showWordFrequencies();
     void showVariableFilter();
     void showVariables();
     void showMemos();
@@ -116,6 +117,7 @@ private:
     QAction *m_cooccurrence = nullptr;
     QAction *m_statsAction = nullptr;
     QAction *m_dictionaries = nullptr;
+    QAction *m_wordFrequencies = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;
     QAction *m_exportSegmentsXlsx = nullptr;
     QAction *m_exportSegmentsCsv = nullptr;

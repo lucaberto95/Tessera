@@ -86,6 +86,14 @@ SearchDialog::SearchDialog(Project *project, std::function<QList<qint64>()> acti
     layout->addWidget(autoBox);
 }
 
+void SearchDialog::searchFor(const QString &query, bool wholeWords)
+{
+    m_regex->setChecked(false);
+    m_wholeWords->setChecked(wholeWords);
+    m_query->setText(query);
+    search();
+}
+
 void SearchDialog::search()
 {
     m_hits.clear();

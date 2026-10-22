@@ -18,6 +18,9 @@ public:
     SearchDialog(Project *project, std::function<QList<qint64>()> activeDocuments,
                  std::function<qint64()> currentCode, QWidget *parent = nullptr);
 
+    // Fills the search field (whole words) and runs the search, e.g. from a word of the word-frequency table.
+    void searchFor(const QString &query, bool wholeWords = true);
+
 signals:
     void hitActivated(qint64 documentId, int start, int end);
 

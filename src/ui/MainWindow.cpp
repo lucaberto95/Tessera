@@ -22,6 +22,7 @@
 #include "ui/SurveyImportDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/VariablesDialog.h"
+#include "ui/WordFrequencyDialog.h"
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -187,6 +188,7 @@ void MainWindow::createActions()
     m_retrieval = make(tr("Recupero &complesso…"), &MainWindow::showRetrieval, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
     m_cooccurrence = make(tr("Co-&occorrenze dei codici…"), &MainWindow::showCooccurrence);
     m_statsAction = make(tr("&Statistiche e tabelle incrociate…"), &MainWindow::showStats);
+    m_wordFrequencies = make(tr("&Frequenze di parole, nuvola e parole in contesto…"), &MainWindow::showWordFrequencies);
     m_dictionaries = make(tr("&Dizionari e analisi del contenuto…"), &MainWindow::showDictionaries);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
     m_exportSegmentsXlsx = make(tr("Esporta segmenti recuperati (&Excel .xlsx)…"), [this] { m_segments->exportXlsx(); });
@@ -261,6 +263,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_retrieval);
     analysis->addAction(m_cooccurrence);
     analysis->addAction(m_statsAction);
+    analysis->addAction(m_wordFrequencies);
     analysis->addAction(m_dictionaries);
     analysis->addAction(m_activateByVariables);
     analysis->addSeparator();
@@ -812,6 +815,28 @@ void MainWindow::showDictionaries()
     auto *dlg = new DictionaryDialog(m_project, [this] { return m_documents->activeDocumentIds(); }, this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &DictionaryDialog::documentActivated, this, [this](qint64 doc) { m_view->openDocument(doc); });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showWordFrequencies()
+{
+    auto *dlg = new WordFrequencyDialog(m_project, [this] { return m_documents->activeDocumentIds(); },
+                                        [this] { return m_segments->segments(); }, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &WordFrequencyDialog::occurrenceActivated, this,
+            [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
+    // "Cerca e codifica": the search dialog opens already filled in.
+    connect(dlg, &WordFrequencyDialog::searchRequested, this, [this](const QString &word) {
+        auto *search = new SearchDialog(m_project, [this] { return m_documents->activeDocumentIds(); },
+                                        [this] { return m_codes->currentCodeId(); }, this);
+        search->setAttribute(Qt::WA_DeleteOnClose);
+        connect(search, &SearchDialog::hitActivated, this,
+                [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
+        connect(m_project, &Project::closed, search, &QDialog::close);
+        search->show();
+        search->searchFor(word);
+    });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

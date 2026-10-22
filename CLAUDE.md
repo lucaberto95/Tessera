@@ -58,6 +58,9 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
   Dictionaries   `tokenize`, `findMatches`, `analyze` (documenti × categorie), `autocode`, `countsToVariables`,
                  import/export (Categoria/Voce in .xlsx/.csv, elenco di parole .txt)
+  WordFrequencies  (`Words::`) frequenze con filtri e colonne di confronto, `keywordInContext`, liste di parole
+                 escluse (it/en scritte da zero; lista del progetto in meta `word_stoplist`, prefisso `#` = "impostata"),
+                 `cloudLayout` (spirale con collisioni). Funzioni pure su testi già letti: girano in un thread
   Exporters      CSV per Excel (UTF-8 BOM, ';'), HTML, import variabili CSV, tabelle/fogli .xlsx (`*Sheet`, `projectSheets`)
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
   Xlsx           lettore (fogli, stringhe condivise/inline, date dai formati) e scrittore `writeWorkbook(Sheet...)`
@@ -69,7 +72,9 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   attivazione), DocumentView + CodingStripe, LinksDialog, SegmentsPanel (`setRetrieval`, `setPassages`),
   CooccurrenceDialog, StatsDialog, MemoDialog (non modale, `Ui::editMemo/openMemo`, `MemoLinkPicker`, drop di
   codici/documenti), SurveyImportDialog, DictionaryDialog (non modale), MemoManager, VariablesDialog,
-  SearchDialog, MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
+  WordFrequencyDialog (3 schede: frequenze, nuvola, parole in contesto; calcolo con `QtConcurrent` + barra di
+  avanzamento, `Qt6::Concurrent`; il progetto non è thread-safe: i testi si leggono prima, nel thread della UI),
+  SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
 
@@ -171,8 +176,8 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#21, #33, #44. Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da #19: aggiungere parole al
-dizionario dalla tabella delle frequenze (dipende da #18) e le regole di disambiguazione.
+#21, #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#19: le regole di disambiguazione.
 Aggiornare questo elenco quando una issue viene chiusa.
 
 ## Rilasci

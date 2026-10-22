@@ -4,7 +4,7 @@ project(Tessera VERSION 0.14.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Concurrent Test)
 qt_standard_project_setup()
 
 if(MSVC)
@@ -26,6 +26,7 @@ qt_add_library(tessera_core STATIC
     src/core/Xlsx.h src/core/Xlsx.cpp
     src/core/Survey.h src/core/Survey.cpp
     src/core/Dictionaries.h src/core/Dictionaries.cpp
+    src/core/WordFrequencies.h src/core/WordFrequencies.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
 )
 target_include_directories(tessera_core PUBLIC src)
@@ -56,9 +57,10 @@ qt_add_library(tessera_ui STATIC
     src/ui/VariableFilterDialog.h src/ui/VariableFilterDialog.cpp
     src/ui/SurveyImportDialog.h src/ui/SurveyImportDialog.cpp
     src/ui/DictionaryDialog.h src/ui/DictionaryDialog.cpp
+    src/ui/WordFrequencyDialog.h src/ui/WordFrequencyDialog.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
 )
-target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg)
+target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent)
 
 qt_add_executable(Tessera WIN32 src/main.cpp)
 target_link_libraries(Tessera PRIVATE tessera_ui)
