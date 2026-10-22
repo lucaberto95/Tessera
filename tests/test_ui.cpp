@@ -3,6 +3,7 @@
 #include "core/DemoProject.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
+#include "ui/CooccurrenceDialog.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
 #include "ui/MainWindow.h"
@@ -366,6 +367,59 @@ private slots:
         panel.clearRetrieval();
         QVERIFY(!panel.hasRetrieval());
         QCOMPARE(panel.segments().size(), 2);
+    }
+
+    void cooccurrenceDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("cooccurrence.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "D", QString(40, 'x'));
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        const qint64 b = p.addCode(0, "B", Qt::blue);
+        p.addSegment(doc, a, 0, 10);
+        p.addSegment(doc, a, 20, 30);
+        p.addSegment(doc, b, 5, 15);
+
+        CooccurrenceDialog dlg(&p, {}, {});
+        SegmentsPanel panel(&p);
+        connect(&dlg, &CooccurrenceDialog::passagesRequested, &panel, &SegmentsPanel::setPassages);
+        dlg.show();
+
+        QCOMPARE(dlg.matrix().frequency(a), 2);
+        QCOMPARE(dlg.matrix().count(a, b), 1);
+        QTableWidget *table = dlg.findChildren<QTableWidget *>().first();
+        QCOMPARE(table->rowCount(), 2);
+        QCOMPARE(table->columnCount(), 2);
+        QCOMPARE(table->item(0, 0)->text(), QString("2")); // diagonal = frequency
+        QCOMPARE(table->item(0, 1)->text(), QString("1"));
+        QCOMPARE(table->item(1, 0)->text(), QString("1"));
+
+        // Double click on a cell: the segments panel shows the overlapping passage.
+        QVERIFY(!panel.hasRetrieval());
+        emit table->cellDoubleClicked(0, 1);
+        QVERIFY(panel.hasRetrieval());
+        QCOMPARE(panel.segments().size(), 1);
+        QCOMPARE(panel.segments().first().start, 5);
+        QCOMPARE(panel.segments().first().end, 10);
+        shot(&dlg, "cooccurrence");
+        panel.clearRetrieval();
+        QVERIFY(!panel.hasRetrieval());
+
+        // Map: one node per code, edges below the threshold are hidden.
+        QCOMPARE(dlg.mapNodeCount(), 2);
+        QCOMPARE(dlg.mapEdgeCount(), 1);
+        dlg.setMapThreshold(2);
+        QCOMPARE(dlg.mapEdgeCount(), 0);
+        dlg.setMapThreshold(1);
+
+        // Normalized values and the same-document criterion.
+        dlg.setNormalized(true);
+        QCOMPARE(table->item(0, 0)->text(), QString("2")); // the diagonal keeps the frequency
+        QCOMPARE(table->item(0, 1)->text(), QString("0.50")); // 1 / (2 + 1 - 1)
+        dlg.setNormalized(false);
+        dlg.setCriterion(Cooccurrence::Criterion::SameDocument);
+        QCOMPARE(dlg.matrix().count(a, b), 1);
+        QCOMPARE(dlg.matrix().frequency(a), 1);
     }
 
     void dialogs()

@@ -22,6 +22,8 @@ public:
     QList<Segment> segments() const { return m_segments; }
     // Complex retrieval: shows the result of the query (re-run on every refresh) instead of the simple union.
     void setRetrieval(const Retrieval::Query &query);
+    // Shows ready-made passages (e.g. a co-occurrence cell) as a retrieval; `label` names their origin.
+    void setPassages(const QList<Retrieval::Result> &passages, const QString &label);
     void clearRetrieval();
     bool hasRetrieval() const { return m_hasQuery; }
     int resultCount() const { return int(m_segments.size()); }
@@ -47,6 +49,9 @@ private:
     QList<Segment> m_segments;
     Retrieval::Query m_query;
     bool m_hasQuery = false;
+    bool m_fixed = false; // m_results come from setPassages(), not from running m_query
+    QList<Retrieval::Result> m_fixedResults;
+    QString m_fixedLabel;
     QList<Retrieval::Result> m_results;
     QToolButton *m_back;
     QToolButton *m_codeResults;

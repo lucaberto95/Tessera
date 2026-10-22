@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
-project(Tessera VERSION 0.1.0 LANGUAGES CXX)
+project(Tessera VERSION 0.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Test)
 qt_standard_project_setup()
 
 if(MSVC)
@@ -20,6 +20,7 @@ qt_add_library(tessera_core STATIC
     src/core/Qdpx.h src/core/Qdpx.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
     src/core/Retrieval.h src/core/Retrieval.cpp
+    src/core/Cooccurrence.h src/core/Cooccurrence.cpp
     src/core/VariableFilter.h src/core/VariableFilter.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
 )
@@ -45,10 +46,11 @@ qt_add_library(tessera_ui STATIC
     src/ui/SearchDialog.h src/ui/SearchDialog.cpp
     src/ui/MatrixDialog.h src/ui/MatrixDialog.cpp
     src/ui/RetrievalDialog.h src/ui/RetrievalDialog.cpp
+    src/ui/CooccurrenceDialog.h src/ui/CooccurrenceDialog.cpp
     src/ui/VariableFilterDialog.h src/ui/VariableFilterDialog.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
 )
-target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts)
+target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg)
 
 qt_add_executable(Tessera WIN32 src/main.cpp)
 target_link_libraries(Tessera PRIVATE tessera_ui)

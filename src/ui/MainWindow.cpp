@@ -8,6 +8,7 @@
 #include "ui/CodeTree.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
+#include "ui/CooccurrenceDialog.h"
 #include "ui/MatrixDialog.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/VariableFilterDialog.h"
@@ -173,6 +174,7 @@ void MainWindow::createActions()
                     QStyle::SP_FileDialogContentsView);
     m_matrix = make(tr("&Matrice codici × documenti…"), &MainWindow::showMatrix, QKeySequence(Qt::CTRL | Qt::Key_M));
     m_retrieval = make(tr("Recupero &complesso…"), &MainWindow::showRetrieval, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
+    m_cooccurrence = make(tr("Co-&occorrenze dei codici…"), &MainWindow::showCooccurrence);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
     m_exportSegmentsCsv = make(tr("Esporta segmenti recuperati (&Excel/CSV)…"), [this] { m_segments->exportCsv(); });
 
@@ -237,6 +239,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_search);
     analysis->addAction(m_matrix);
     analysis->addAction(m_retrieval);
+    analysis->addAction(m_cooccurrence);
     analysis->addAction(m_activateByVariables);
     analysis->addSeparator();
     analysis->addAction(m_exportSegmentsHtml);
@@ -712,6 +715,15 @@ void MainWindow::showRetrieval()
     auto *dlg = new RetrievalDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &RetrievalDialog::retrievalRequested, m_segments, &SegmentsPanel::setRetrieval);
+    dlg->show();
+}
+
+void MainWindow::showCooccurrence()
+{
+    auto *dlg = new CooccurrenceDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &CooccurrenceDialog::passagesRequested, m_segments, &SegmentsPanel::setPassages);
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }
 

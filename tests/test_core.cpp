@@ -1,3 +1,4 @@
+#include "core/Cooccurrence.h"
 #include "core/Exporters.h"
 #include "core/Importers.h"
 #include "core/Project.h"
@@ -708,6 +709,98 @@ private slots:
         QCOMPARE(r[0].end, 14); // from the start of A to the end of B
         QCOMPARE(r[0].codeIds, (QList<qint64>{1, 2}));
         QCOMPARE(Retrieval::run(fol, {seg(1, 10, 1, 10, 14), seg(2, 10, 2, 0, 4)}, textOf).size(), 0); // B before A
+    }
+
+    void cooccurrenceMatrix()
+    {
+        using namespace Cooccurrence;
+        // Doc 10: A 0-10, A 20-30, B 5-15, B 25-27, C 100-110. Doc 11: A 0-5, B 50-60.
+        const QList<Segment> segs{seg(1, 10, 1, 0, 10),   seg(2, 10, 1, 20, 30), seg(3, 10, 2, 5, 15),
+                                  seg(4, 10, 2, 25, 27),  seg(5, 10, 3, 100, 110), seg(6, 11, 1, 0, 5),
+                                  seg(7, 11, 2, 50, 60)};
+        Options o;
+        o.codes = {1, 2, 3};
+
+        // Overlap: A∩B gives the intervals 5-10 and 25-27; the diagonal is the segment count.
+        Matrix m = compute(o, segs);
+        QCOMPARE(m.count(1, 2), 2);
+        QCOMPARE(m.count(2, 1), 2); // symmetric
+        QCOMPARE(m.count(1, 3), 0);
+        QCOMPARE(m.frequency(1), 3);
+        QCOMPARE(m.frequency(2), 3);
+        QCOMPARE(m.frequency(3), 1);
+        for (qint64 a : o.codes)
+            for (qint64 b : o.codes)
+                QCOMPARE(m.count(a, b), m.count(b, a));
+        // 2 of A's 3 segments and 2 of B's 3 take part: 2 / (3 + 3 - 2)
+        QCOMPARE(m.jaccard(1, 2), 0.5);
+        QCOMPARE(m.jaccard(1, 1), 1.0);
+        QCOMPARE(m.jaccard(1, 3), 0.0);
+        const auto cell = passages(o, 1, 2, segs);
+        QCOMPARE(spans(cell), (QList<QPair<int, int>>{{5, 10}, {25, 27}}));
+        QCOMPARE(passages(o, 1, 1, segs).size(), 3); // the diagonal lists the code's segments
+
+        // Proximity in characters: A 20-30 and B 5-15 are 5 apart, A 0-10 and B 25-27 are 15 apart,
+        // A 0-5 and B 50-60 (another document) are 45 apart.
+        o.criterion = Criterion::Proximity;
+        o.inParagraphs = false;
+        o.distance = 0;
+        QCOMPARE(compute(o, segs).count(1, 2), 2); // 0-10/5-15 and 20-30/25-27 overlap
+        o.distance = 5;
+        m = compute(o, segs);
+        QCOMPARE(m.count(1, 2), 3); // adds 20-30 with 5-15
+        QCOMPARE(m.count(1, 3), 0);
+        o.distance = 100;
+        QCOMPARE(compute(o, segs).count(1, 3), 2); // doc 10 only: C is in no other document
+        QCOMPARE(spans(passages(o, 1, 3, segs)), (QList<QPair<int, int>>{{0, 110}, {20, 110}}));
+
+        // Proximity in paragraphs uses the document text.
+        const QString text = QStringLiteral("aaaa\nbbbb\ncccc\ndddd");
+        const QList<Segment> two{seg(1, 10, 1, 0, 4), seg(2, 10, 2, 10, 14)};
+        const auto textOf = [&text](qint64) { return text; };
+        o.codes = {1, 2};
+        o.inParagraphs = true;
+        o.distance = 1;
+        QCOMPARE(compute(o, two, textOf).count(1, 2), 0);
+        o.distance = 2;
+        QCOMPARE(compute(o, two, textOf).count(1, 2), 1);
+
+        // Same document: one per shared document; the diagonal counts documents.
+        o.criterion = Criterion::SameDocument;
+        o.codes = {1, 2, 3};
+        m = compute(o, segs);
+        QCOMPARE(m.count(1, 2), 2);
+        QCOMPARE(m.count(1, 3), 1);
+        QCOMPARE(m.count(2, 3), 1);
+        QCOMPARE(m.frequency(1), 2);
+        QCOMPARE(m.frequency(3), 1);
+        QCOMPARE(m.jaccard(1, 2), 1.0);
+        QCOMPARE(m.jaccard(1, 3), 0.5);
+        QCOMPARE(passages(o, 1, 3, segs).size(), 3); // A 0-10, A 20-30 and C of doc 10
+
+        // Segments of codes outside the list are ignored.
+        o.codes = {1};
+        QCOMPARE(compute(o, segs).counts.size(), 1);
+    }
+
+    void cooccurrenceLayout()
+    {
+        using Weights = QList<QList<double>>;
+        QVERIFY(Cooccurrence::forceLayout(Weights()).isEmpty());
+        QCOMPARE(Cooccurrence::forceLayout(Weights{QList<double>{0}}), (QList<QPointF>{QPointF(0.5, 0.5)}));
+
+        // 0-1 strongly linked, 2 isolated: same seed gives the same layout, linked nodes end up closer.
+        const Weights w{{0, 5, 0}, {5, 0, 0}, {0, 0, 0}};
+        const auto a = Cooccurrence::forceLayout(w, 7);
+        QCOMPARE(a, Cooccurrence::forceLayout(w, 7));
+        QCOMPARE(a.size(), 3);
+        for (const QPointF &p : a) {
+            QVERIFY(p.x() >= 0 && p.x() <= 1);
+            QVERIFY(p.y() >= 0 && p.y() <= 1);
+        }
+        const auto dist = [&a](int i, int j) { return QLineF(a[i], a[j]).length(); };
+        QVERIFY(dist(0, 1) < dist(0, 2));
+        QVERIFY(dist(0, 1) < dist(1, 2));
     }
 
     void variableTypeInference()

@@ -148,7 +148,9 @@ void SegmentsPanel::refresh()
 
     if (m_hasQuery)
         m_summary->setText(tr("<b>%n risultati</b>", nullptr, int(m_segments.size())) + QStringLiteral(" · ") +
-                           tr("Recupero complesso: %1").arg(Retrieval::modeLabel(m_query.mode)) + QStringLiteral(" · ") +
+                           (m_fixed ? m_fixedLabel
+                                    : tr("Recupero complesso: %1").arg(Retrieval::modeLabel(m_query.mode))) +
+                           QStringLiteral(" · ") +
                            (m_documentIds.isEmpty() ? tr("tutti i documenti")
                                                     : tr("%n documenti attivi", nullptr, int(m_documentIds.size()))));
     else if (m_codeIds.isEmpty())
@@ -180,12 +182,23 @@ void SegmentsPanel::setRetrieval(const Retrieval::Query &query)
 {
     m_query = query;
     m_hasQuery = true;
+    m_fixed = false;
+    refresh();
+}
+
+void SegmentsPanel::setPassages(const QList<Retrieval::Result> &passages, const QString &label)
+{
+    m_fixedResults = passages;
+    m_fixedLabel = label;
+    m_fixed = true;
+    m_hasQuery = true;
     refresh();
 }
 
 void SegmentsPanel::clearRetrieval()
 {
     m_hasQuery = false;
+    m_fixed = false;
     m_results.clear();
     refresh();
 }
@@ -196,15 +209,21 @@ void SegmentsPanel::rebuildSegmentsFromQuery()
     m_results.clear();
     if (!m_project->isOpen())
         return;
-    QList<qint64> codes = m_query.codesA;
-    for (qint64 c : std::as_const(m_query.codesB))
-        if (!codes.contains(c))
-            codes << c;
-    const QList<Segment> source = m_project->segments(m_documentIds, codes);
     QHash<qint64, Segment> byId;
-    for (const Segment &s : source)
-        byId.insert(s.id, s);
-    m_results = Retrieval::run(m_query, source, [this](qint64 id) { return m_project->documentText(id); });
+    if (m_fixed) {
+        for (const Segment &s : m_project->allSegments())
+            byId.insert(s.id, s);
+        m_results = m_fixedResults;
+    } else {
+        QList<qint64> codes = m_query.codesA;
+        for (qint64 c : std::as_const(m_query.codesB))
+            if (!codes.contains(c))
+                codes << c;
+        const QList<Segment> source = m_project->segments(m_documentIds, codes);
+        for (const Segment &s : source)
+            byId.insert(s.id, s);
+        m_results = Retrieval::run(m_query, source, [this](qint64 id) { return m_project->documentText(id); });
+    }
     for (const Retrieval::Result &r : std::as_const(m_results)) {
         // Whole stored segments keep their weight/comment; new intervals have none.
         Segment s = byId.value(r.segmentId);
@@ -234,7 +253,7 @@ qint64 SegmentsPanel::codeResults(const QString &codeName)
 void SegmentsPanel::codeResultsInteractive()
 {
     const QString name = Ui::askText(this, tr("Codifica i risultati"), tr("Nome del nuovo codice:"),
-                                     Retrieval::modeLabel(m_query.mode));
+                                     m_fixed ? m_fixedLabel : Retrieval::modeLabel(m_query.mode));
     if (!name.trimmed().isEmpty() && !codeResults(name))
         Ui::showError(this, tr("Non è stato possibile creare il codice."));
 }

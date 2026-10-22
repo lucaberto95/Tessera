@@ -62,6 +62,8 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata 
   Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, Memo, Variable
   Project        unica fonte di verità: file SQLite .tsra, CRUD, segnali, batch, undo/redo
   Importers      TXT/MD, DOCX, ODT (QZipReader privato + XML), RTF (parser proprio), PDF (QtPdf), HTML
+  Retrieval      recupero complesso dei segmenti (intersezione, sovrapposizione, vicinanza...) su segmenti in memoria
+  Cooccurrence   matrice codici × codici (sovrapposizione / vicinanza / stesso documento), Jaccard e layout force-directed
   VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
   Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
@@ -71,7 +73,10 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   MainWindow     menu, toolbar, azioni, collega i segnali del Project ai pannelli
   DocumentTree / CodeTree   alberi con caselle di "attivazione" per il recupero dei segmenti
   DocumentView + CodingStripe   testo con evidenziazioni + barra laterale con le parentesi dei codici
-  SegmentsPanel  segmenti recuperati (codici attivi × documenti attivi; nessun documento attivo = tutti)
+  SegmentsPanel  segmenti recuperati (codici attivi × documenti attivi; nessun documento attivo = tutti);
+                 `setRetrieval(Query)` per il recupero complesso, `setPassages(...)` per passaggi già calcolati
+  CooccurrenceDialog  matrice + mappa (QGraphicsScene, export PNG e SVG con Qt6::Svg); il doppio clic su una cella
+                 emette `passagesRequested` verso il SegmentsPanel
   MemoDialog, MemoManager, VariablesDialog, SearchDialog, MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
@@ -149,6 +154,9 @@ Si lavora direttamente su `main`: niente rami e niente pull request.
    sola al push; l'utente ha chiesto di chiuderle subito, senza attendere la prova manuale. Nel
    riepilogo finale elencare comunque all'utente le cose da controllare a mano nell'app vera
    (`--example`): i test automatici non coprono aspetto, focus e scorciatoie reali.
+5. **Ogni issue chiusa comporta una nuova release**: dopo il push segui la sezione "Rilasci"
+   (versione nuova, `CHANGELOG.md`, tag, zip, `gh release create`). Una release per issue, non
+   si accumulano più issue in una sola.
 
 ### Issue, etichette e roadmap
 
@@ -170,7 +178,10 @@ tipo, **#5** ricerca nel documento (Ctrl+F; Ctrl+Maiusc+F = ricerca lessicale su
 **#12** recupero complesso dei segmenti (Ctrl+Maiusc+R, logica in `src/core/Retrieval.*`),
 **#3** attivazione dei documenti per valori delle variabili (menu Documenti/Analisi ▸ "Attiva per
 variabili…", logica in `src/core/VariableFilter.*`; un valore vuoto o non valido soddisfa solo
-"è vuoto"; "Attiva" è disabilitato con 0 risultati perché nessun documento attivo = tutti).
+"è vuoto"; "Attiva" è disabilitato con 0 risultati perché nessun documento attivo = tutti),
+**#13** co-occorrenze dei codici (menu Analisi ▸ "Co-occorrenze dei codici…", logica in
+`src/core/Cooccurrence.*`; diagonale = frequenze; il Jaccard è `min(coinvolti) / (fa + fb - min)`, esatto per
+"stesso documento").
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.
@@ -178,6 +189,7 @@ Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` 
 ## Rilasci
 
 `CHANGELOG.md` va aggiornato a ogni release (una voce per versione, con commit e issue).
+Ogni issue chiusa fa una release nuova (di norma incremento della versione minore).
 
 1. Aggiornare `project(Tessera VERSION x.y.z)` in `CMakeLists.txt`.
 2. `build.cmd Release`, eseguire i test, `deploy.cmd zip`.
