@@ -10,6 +10,7 @@
 #include "ui/DocumentView.h"
 #include "ui/MatrixDialog.h"
 #include "ui/RetrievalDialog.h"
+#include "ui/VariableFilterDialog.h"
 #include "ui/MemoManager.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
@@ -150,6 +151,7 @@ void MainWindow::createActions()
     m_documentSetFromActive = make(tr("Crea set dai documenti &attivi…"),
                                    [this] { m_documents->newDocumentSetFromActive(); });
     m_variables = make(tr("&Variabili dei documenti…"), &MainWindow::showVariables);
+    m_activateByVariables = make(tr("Attiva per &variabili…"), &MainWindow::showVariableFilter);
 
     m_newCode = make(tr("&Nuovo codice…"), [this] { m_codes->newCode(0); }, QKeySequence(Qt::CTRL | Qt::Key_K));
     m_newSubcode = make(tr("Nuovo &sottocodice…"), [this] {
@@ -215,6 +217,7 @@ void MainWindow::createMenus()
     docs->addAction(m_newDocumentSet);
     docs->addAction(m_documentSetFromActive);
     docs->addSeparator();
+    docs->addAction(m_activateByVariables);
     docs->addAction(tr("Attiva tutti i documenti"), this, [this] { m_documents->setAllActive(true); });
     docs->addAction(tr("Disattiva tutti i documenti"), this, [this] { m_documents->setAllActive(false); });
 
@@ -234,6 +237,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_search);
     analysis->addAction(m_matrix);
     analysis->addAction(m_retrieval);
+    analysis->addAction(m_activateByVariables);
     analysis->addSeparator();
     analysis->addAction(m_exportSegmentsHtml);
     analysis->addAction(m_exportSegmentsCsv);
@@ -708,6 +712,17 @@ void MainWindow::showRetrieval()
     auto *dlg = new RetrievalDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &RetrievalDialog::retrievalRequested, m_segments, &SegmentsPanel::setRetrieval);
+    dlg->show();
+}
+
+void MainWindow::showVariableFilter()
+{
+    auto *dlg = new VariableFilterDialog(m_project, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &VariableFilterDialog::activationRequested, m_documents, &DocumentTree::setActiveDocuments);
+    connect(dlg, &VariableFilterDialog::setRequested, this,
+            [this](const QList<qint64> &ids) { m_documents->newDocumentSet(ids); });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }
 

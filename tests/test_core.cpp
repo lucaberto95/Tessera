@@ -4,6 +4,7 @@
 #include "core/Qdpx.h"
 #include "core/Retrieval.h"
 #include "core/TextUtils.h"
+#include "core/VariableFilter.h"
 
 #include <QCryptographicHash>
 #include <QFile>
@@ -14,6 +15,8 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QtCore/private/qzipwriter_p.h>
+
+namespace VF = VariableFilter;
 
 class TestCore : public QObject {
     Q_OBJECT
@@ -831,6 +834,105 @@ private slots:
         QCOMPARE(byName["Nascita"].type, VariableType::Date);
         QCOMPARE(b.variableValue(db1, byName["Peso"].id), QString("70.5"));
         QCOMPARE(b.variableValue(db1, byName["Nascita"].id), QString("1990-03-05"));
+    }
+
+    void variableFilterMatches()
+    {
+        using VF::Op;
+        using VT = VariableType;
+        // Text: case-insensitive, empty satisfies only "is empty".
+        QVERIFY(VF::matches(VT::Text, Op::Equals, "Femmina", "femmina"));
+        QVERIFY(!VF::matches(VT::Text, Op::NotEquals, "Femmina", "femmina"));
+        QVERIFY(VF::matches(VT::Text, Op::NotEquals, "Maschio", "femmina"));
+        QVERIFY(VF::matches(VT::Text, Op::Contains, "Roma centro", "CENTRO"));
+        QVERIFY(VF::matches(VT::Text, Op::IsEmpty, "", ""));
+        QVERIFY(!VF::matches(VT::Text, Op::IsEmpty, "x", ""));
+        QVERIFY(!VF::matches(VT::Text, Op::Equals, "", ""));
+        QVERIFY(!VF::matches(VT::Text, Op::NotEquals, "", "x"));
+        // Integer: numeric, not alphabetical (9 < 10); invalid values satisfy nothing.
+        QVERIFY(VF::matches(VT::Integer, Op::Less, "9", "10"));
+        QVERIFY(VF::matches(VT::Integer, Op::LessEq, "10", "10"));
+        QVERIFY(VF::matches(VT::Integer, Op::Greater, "40", "39"));
+        QVERIFY(VF::matches(VT::Integer, Op::GreaterEq, "40", "40"));
+        QVERIFY(VF::matches(VT::Integer, Op::Equals, "-3", "-3"));
+        QVERIFY(VF::matches(VT::Integer, Op::NotEquals, "-3", "3"));
+        QVERIFY(!VF::matches(VT::Integer, Op::Greater, "abc", "1"));
+        QVERIFY(!VF::matches(VT::Integer, Op::NotEquals, "abc", "1"));
+        QVERIFY(!VF::matches(VT::Integer, Op::Greater, "5", "abc"));
+        QVERIFY(!VF::matches(VT::Integer, Op::Greater, "", "1"));
+        QVERIFY(!VF::matches(VT::Integer, Op::Greater, "5", ""));
+        // Decimal accepts comma or point in the condition value.
+        QVERIFY(VF::matches(VT::Decimal, Op::Greater, "70.5", "70,25"));
+        QVERIFY(VF::matches(VT::Decimal, Op::Equals, "70.5", "70,5"));
+        QVERIFY(!VF::matches(VT::Decimal, Op::Less, "70.5", "70.5"));
+        // Boolean.
+        QVERIFY(VF::matches(VT::Boolean, Op::IsTrue, "1", ""));
+        QVERIFY(!VF::matches(VT::Boolean, Op::IsTrue, "0", ""));
+        QVERIFY(VF::matches(VT::Boolean, Op::IsFalse, "0", ""));
+        QVERIFY(!VF::matches(VT::Boolean, Op::IsFalse, "", ""));
+        QVERIFY(VF::matches(VT::Boolean, Op::IsEmpty, "", ""));
+        // Date: ISO storage, any accepted format in the condition; Between is inclusive and order-free.
+        QVERIFY(VF::matches(VT::Date, Op::Before, "1990-03-05", "01/01/2000"));
+        QVERIFY(!VF::matches(VT::Date, Op::After, "1990-03-05", "2000-01-01"));
+        QVERIFY(VF::matches(VT::Date, Op::After, "2001-02-03", "2000-01-01"));
+        QVERIFY(VF::matches(VT::Date, Op::Equals, "2000-01-01", "01/01/2000"));
+        QVERIFY(VF::matches(VT::Date, Op::Between, "2000-01-01", "2000-01-01", "2000-12-31"));
+        QVERIFY(VF::matches(VT::Date, Op::Between, "2000-12-31", "2000-12-31", "2000-01-01"));
+        QVERIFY(!VF::matches(VT::Date, Op::Between, "2001-01-01", "2000-01-01", "2000-12-31"));
+        QVERIFY(!VF::matches(VT::Date, Op::Between, "2000-06-01", "2000-01-01", "non-una-data"));
+        QVERIFY(!VF::matches(VT::Date, Op::Before, "non-una-data", "2000-01-01"));
+        // Operators offered per type.
+        QVERIFY(!VF::operatorsFor(VT::Text).contains(Op::Less));
+        QVERIFY(VF::operatorsFor(VT::Date).contains(Op::Between));
+        QVERIFY(VF::operatorsFor(VT::Boolean).contains(Op::IsTrue));
+    }
+
+    void variableFilterDocuments()
+    {
+        using VF::Op;
+        Project p;
+        QVERIFY(p.create(path("vf.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "D1", "a");
+        const qint64 d2 = p.addDocument(g, "D2", "b");
+        const qint64 d3 = p.addDocument(g, "D3", "c");
+        const qint64 d4 = p.addDocument(g, "D4", "d");
+        const qint64 sex = p.addVariable("Genere", VariableType::Text);
+        const qint64 age = p.addVariable("Età", VariableType::Integer);
+        p.setVariableValue(d1, sex, "F");
+        p.setVariableValue(d1, age, "45");
+        p.setVariableValue(d2, sex, "F");
+        p.setVariableValue(d2, age, "30");
+        p.setVariableValue(d3, sex, "M");
+        p.setVariableValue(d3, age, "50");
+        // d4 has no values at all.
+
+        const VF::Condition female{sex, Op::Equals, "F", {}};
+        const VF::Condition over40{age, Op::GreaterEq, "40", {}};
+        QCOMPARE(VF::matchingDocuments(p, {female}, false), (QList<qint64>{d1, d2}));
+        QCOMPARE(VF::matchingDocuments(p, {female, over40}, false), (QList<qint64>{d1}));
+        QCOMPARE(VF::matchingDocuments(p, {female, over40}, true), (QList<qint64>{d1, d2, d3}));
+        QCOMPARE(VF::matchingDocuments(p, {{sex, Op::IsEmpty, {}, {}}}, false), (QList<qint64>{d4}));
+        // No conditions: no restriction.
+        QCOMPARE(VF::matchingDocuments(p, {}, false), (QList<qint64>{d1, d2, d3, d4}));
+        // A condition on a variable that does not exist never matches.
+        QCOMPARE(VF::matchingDocuments(p, {{9999, Op::IsEmpty, {}, {}}}, false), QList<qint64>());
+        QCOMPARE(VF::matchingDocuments(p, {{9999, Op::IsEmpty, {}, {}}, female}, true), (QList<qint64>{d1, d2}));
+        // An invalid value in the condition matches nothing.
+        QCOMPARE(VF::matchingDocuments(p, {{age, Op::Greater, "abc", {}}}, false), QList<qint64>());
+
+        // The last filter is kept in the project file and is not an undo step.
+        const QString lastStep = p.undoLabel();
+        VF::save(p, {female, {age, Op::Between, "1", "2"}}, true);
+        QCOMPARE(p.undoLabel(), lastStep);
+        p.close();
+        QVERIFY(p.open(path("vf.tsra")));
+        const VF::Saved saved = VF::loadSaved(p);
+        QVERIFY(saved.any);
+        QCOMPARE(saved.conditions.size(), 2);
+        QVERIFY(saved.conditions[0] == female);
+        QCOMPARE(saved.conditions[1].op, Op::Between);
+        QCOMPARE(saved.conditions[1].value2, QString("2"));
     }
 
     void qdpxRoundTrip()

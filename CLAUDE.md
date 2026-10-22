@@ -62,6 +62,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata 
   Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, Memo, Variable
   Project        unica fonte di verità: file SQLite .tsra, CRUD, segnali, batch, undo/redo
   Importers      TXT/MD, DOCX, ODT (QZipReader privato + XML), RTF (parser proprio), PDF (QtPdf), HTML
+  VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
   Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
   TextUtils      newline, UTF-16 <-> code point, adattamento segmenti dopo modifiche, frasi/paragrafi
@@ -71,7 +72,7 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   DocumentTree / CodeTree   alberi con caselle di "attivazione" per il recupero dei segmenti
   DocumentView + CodingStripe   testo con evidenziazioni + barra laterale con le parentesi dei codici
   SegmentsPanel  segmenti recuperati (codici attivi × documenti attivi; nessun documento attivo = tutti)
-  MemoDialog, MemoManager, VariablesDialog, SearchDialog, MatrixDialog, UiUtils
+  MemoDialog, MemoManager, VariablesDialog, SearchDialog, MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
 
@@ -166,7 +167,10 @@ Si lavora direttamente su `main`: niente rami e niente pull request.
 Chiuse e già in `main` (provate solo con i test automatici, non ancora a mano nell'app vera):
 **#1** migrazioni dello schema, **#2** set di documenti, **#4** import CSV delle variabili con
 tipo, **#5** ricerca nel documento (Ctrl+F; Ctrl+Maiusc+F = ricerca lessicale sul progetto),
-**#12** recupero complesso dei segmenti (Ctrl+Maiusc+R, logica in `src/core/Retrieval.*`).
+**#12** recupero complesso dei segmenti (Ctrl+Maiusc+R, logica in `src/core/Retrieval.*`),
+**#3** attivazione dei documenti per valori delle variabili (menu Documenti/Analisi ▸ "Attiva per
+variabili…", logica in `src/core/VariableFilter.*`; un valore vuoto o non valido soddisfa solo
+"è vuoto"; "Attiva" è disabilitato con 0 risultati perché nessun documento attivo = tutti).
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.

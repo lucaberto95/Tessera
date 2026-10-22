@@ -11,6 +11,7 @@
 #include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
+#include "ui/VariableFilterDialog.h"
 #include "ui/VariablesDialog.h"
 
 #include <QCheckBox>
@@ -240,6 +241,70 @@ private slots:
         panel.setActivation({}, {codeNamed("Isolamento")});
         QCOMPARE(panel.segments().size(), 2);
         shot(&panel, "segments_panel");
+    }
+
+    void activateByVariables()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("varfilter.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "D1", "uno uno");
+        const qint64 d2 = p.addDocument(g, "D2", "due due");
+        const qint64 d3 = p.addDocument(g, "D3", "tre tre");
+        const qint64 sex = p.addVariable("Genere", VariableType::Text);
+        const qint64 age = p.addVariable("Età", VariableType::Integer);
+        p.setVariableValue(d1, sex, "F");
+        p.setVariableValue(d1, age, "45");
+        p.setVariableValue(d2, sex, "F");
+        p.setVariableValue(d2, age, "30");
+        p.setVariableValue(d3, sex, "M");
+        p.setVariableValue(d3, age, "50");
+        const qint64 code = p.addCode(0, "C", Qt::red);
+        p.addSegment(d1, code, 0, 3);
+        p.addSegment(d2, code, 0, 3);
+        p.addSegment(d3, code, 0, 3);
+
+        DocumentTree tree(&p);
+        SegmentsPanel panel(&p);
+        panel.setActivation({}, {code});
+        QCOMPARE(panel.segments().size(), 3); // no active document = all
+
+        VariableFilterDialog dlg(&p);
+        connect(&dlg, &VariableFilterDialog::activationRequested, &tree, &DocumentTree::setActiveDocuments);
+        connect(&dlg, &VariableFilterDialog::activationRequested, this,
+                [&](const QList<qint64> &ids) { panel.setActivation(ids, {code}); });
+        dlg.show();
+
+        using Op = VariableFilter::Op;
+        dlg.setConditions({{sex, Op::Equals, "F", {}}, {age, Op::GreaterEq, "40", {}}}, false);
+        QCOMPARE(dlg.matchingDocuments(), (QList<qint64>{d1}));
+        QPushButton *activate = nullptr;
+        for (QPushButton *btn : dlg.findChildren<QPushButton *>())
+            if (btn->text() == QStringLiteral("Attiva"))
+                activate = btn;
+        QVERIFY(activate && activate->isEnabled());
+        activate->click();
+        QCOMPARE(tree.activeDocumentIds(), (QList<qint64>{d1}));
+        QCOMPARE(panel.segments().size(), 1);
+        QCOMPARE(panel.segments().first().documentId, d1);
+
+        // "Any" widens the selection.
+        dlg.setConditions({{sex, Op::Equals, "F", {}}, {age, Op::GreaterEq, "40", {}}}, true);
+        QCOMPARE(dlg.matchingDocuments().size(), 3);
+
+        // A condition nobody satisfies cannot be activated (it would mean "all documents").
+        dlg.setConditions({{age, Op::Greater, "99", {}}}, false);
+        QVERIFY(dlg.matchingDocuments().isEmpty());
+        QVERIFY(!activate->isEnabled());
+
+        // The last filter is remembered for the next time the dialog opens.
+        dlg.setConditions({{age, Op::Less, "40", {}}}, false);
+        activate->click();
+        VariableFilterDialog again(&p);
+        QCOMPARE(again.conditions().size(), 1);
+        QCOMPARE(again.conditions().first().op, Op::Less);
+        QCOMPARE(again.conditions().first().value, QString("40"));
+        QCOMPARE(again.matchingDocuments(), (QList<qint64>{d2}));
     }
 
     void complexRetrieval()

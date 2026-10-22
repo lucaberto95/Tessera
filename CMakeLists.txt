@@ -20,6 +20,7 @@ qt_add_library(tessera_core STATIC
     src/core/Qdpx.h src/core/Qdpx.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
     src/core/Retrieval.h src/core/Retrieval.cpp
+    src/core/VariableFilter.h src/core/VariableFilter.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
 )
 target_include_directories(tessera_core PUBLIC src)
@@ -44,6 +45,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/SearchDialog.h src/ui/SearchDialog.cpp
     src/ui/MatrixDialog.h src/ui/MatrixDialog.cpp
     src/ui/RetrievalDialog.h src/ui/RetrievalDialog.cpp
+    src/ui/VariableFilterDialog.h src/ui/VariableFilterDialog.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts)

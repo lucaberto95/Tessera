@@ -51,6 +51,7 @@ private:
     void showSearch();
     void showMatrix();
     void showRetrieval();
+    void showVariableFilter();
     void showVariables();
     void showMemos();
     void editProjectMemo();
@@ -91,6 +92,7 @@ private:
     QAction *m_newDocumentSet = nullptr;
     QAction *m_documentSetFromActive = nullptr;
     QAction *m_variables = nullptr;
+    QAction *m_activateByVariables = nullptr;
     QAction *m_newCode = nullptr;
     QAction *m_newSubcode = nullptr;
     QAction *m_codeCurrent = nullptr;
