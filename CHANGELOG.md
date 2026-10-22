@@ -2,6 +2,18 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.11.0] - 2026-10-22 — Memo collegati a più elementi (#9)
+Commit `fad39e0`
+
+- Un memo si può collegare a più codici, documenti, segmenti, gruppi e set: la finestra del memo ha la sezione «Collegato a» con «Aggiungi…» (selettore con filtro) e «Rimuovi»; codici e documenti trascinati dagli alberi sulla finestra vengono collegati.
+- La finestra del memo non è più modale: si può continuare a lavorare (e trascinare) mentre è aperta; testo e collegamenti si salvano insieme, con un solo passo di annulla.
+- L'icona del memo compare su tutti gli elementi collegati, e «Memo…» su ognuno di essi apre lo stesso memo.
+- Eliminare un elemento collegato non elimina il memo finché ne resta almeno un altro.
+- «Nuovo memo libero…» in *Tutti i memo* crea un memo senza bersaglio principale, distinto dal memo del progetto; la colonna «Collegato a» elenca tutti gli elementi del memo.
+- Nuova tabella `memo_links` (migrazione dello schema alla versione 4, con copia di sicurezza del file all'apertura).
+- QDPX: un memo collegato a più oggetti diventa una nota con un `<NoteRef>` per ogni oggetto, e all'import più riferimenti alla stessa nota danno un solo memo collegato; le note senza riferimenti diventano memo liberi.
+- Nel progetto di esempio il memo di «Isolamento» è collegato anche all'intervista di Marco.
+
 ## [0.10.0] - 2026-10-22 — Collegamenti tra brani dei documenti (#8)
 Commit `e0199f8`
 
