@@ -150,6 +150,8 @@ successive. Mantenerlo aggiornato a ogni sessione, nello stesso momento in cui c
   Ctrl+Shift+F = ricerca lessicale sul progetto.
 - **#4** (import CSV delle variabili con riconoscimento del tipo): implementata, in attesa di prova manuale e merge
   nella [PR 57](https://github.com/lucaberto95/Tessera/pull/57).
+- **#12** (recupero complesso dei segmenti, Ctrl+Maiusc+R): implementata, in attesa di prova manuale e merge
+  nella [PR 58](https://github.com/lucaberto95/Tessera/pull/58). Logica in src/core/Retrieval.*.
 - Aggiornare questo elenco quando una issue passa in PR o viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`;
