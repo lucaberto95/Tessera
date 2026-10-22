@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.24.0] - 2026-10-22 — Report in Word, PDF e HTML (#45)
+Commit `0dc26d6`
+
+- «Crea report…» (menu Progetto): si scelgono titolo, formato (Word `.docx`, PDF, HTML) e contenuti: indice, codebook (gerarchia, colore, descrizione, memo, frequenze e N esempi di segmenti per codice), segmenti codificati raggruppati per codice o per documento (con o senza commenti), memo, tabella delle variabili e tabelle riassuntive.
+- I tre formati nascono da uno stesso elenco di blocchi (`Report::build`), quindi restano coerenti. Il DOCX usa stili Word veri (Titolo, Titolo 1-3, Citazione, Sommario) e un campo indice che Word compila all'apertura, più tabelle Word con intestazione ripetuta; il PDF è prodotto da `QTextDocument` + `QPdfWriter`.
+- Non incluso: matrice codici × documenti e miniature delle aree immagine/PDF nel report.
 ## [0.23.0] - 2026-10-22 — Documenti con formattazione (#32)
 Commit `86ffd70`
 
