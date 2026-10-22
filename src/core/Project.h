@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QObject>
 #include <QSqlDatabase>
+#include <QStringList>
 #include <QVariant>
 
 // A Tessera project is a single SQLite file. Every change is written immediately,
@@ -12,8 +13,21 @@
 class Project : public QObject {
     Q_OBJECT
 public:
-    static constexpr int SchemaVersion = 1;
     static constexpr const char *FileSuffix = "tsra";
+
+    // The base schema (version 1) never changes: every later change is a migration, applied in
+    // order by both create() and open(), so new and upgraded files always have the same schema.
+    struct Migration {
+        int toVersion = 0;
+        QStringList statements;
+    };
+    static constexpr int BaseSchemaVersion = 1;
+    static QList<Migration> builtInMigrations();
+    // Tests replace the migrations to simulate older and newer schema versions.
+    void setMigrations(const QList<Migration> &migrations) { m_migrations = migrations; }
+    int schemaVersion() const; // the version create() writes and open() upgrades to
+    // Copy of the file taken before open() upgraded it; empty when no upgrade was needed.
+    QString migrationBackupPath() const { return m_migrationBackup; }
 
     explicit Project(QObject *parent = nullptr);
     ~Project() override;
@@ -143,6 +157,7 @@ private:
     void emitAllChanged();
 
     bool initSchema();
+    bool applyMigrations(int fromVersion);
     bool exec(const QString &sql, const QVariantList &binds = {}) const;
     qint64 insert(const QString &sql, const QVariantList &binds);
     QVariant scalar(const QString &sql, const QVariantList &binds = {}) const;
@@ -156,6 +171,8 @@ private:
     QString m_connection;
     QString m_path;
     QString m_author;
+    QList<Migration> m_migrations = builtInMigrations();
+    QString m_migrationBackup;
     mutable QString m_lastError;
     int m_batchDepth = 0;
     QList<void (Project::*)()> m_pendingSignals;

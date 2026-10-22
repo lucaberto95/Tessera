@@ -4,8 +4,12 @@
 #include "core/Qdpx.h"
 #include "core/TextUtils.h"
 
+#include <QCryptographicHash>
 #include <QFile>
+#include <QFileInfo>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QtCore/private/qzipwriter_p.h>
@@ -21,6 +25,36 @@ private:
         QFile f(path(name));
         QVERIFY(f.open(QIODevice::WriteOnly));
         f.write(data);
+    }
+
+    // First value of a query run directly on a project file, bypassing Project.
+    static QVariant queryFile(const QString &file, const QString &sql)
+    {
+        QVariant result;
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("raw"));
+            db.setDatabaseName(file);
+            if (db.open()) {
+                QSqlQuery q(db);
+                if (q.exec(sql) && q.next())
+                    result = q.value(0);
+            }
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("raw"));
+        return result;
+    }
+
+    static QByteArray fileHash(const QString &file)
+    {
+        QFile f(file);
+        if (!f.open(QIODevice::ReadOnly))
+            return {};
+        return QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256);
+    }
+
+    static int fileVersion(const QString &file)
+    {
+        return queryFile(file, "SELECT value FROM meta WHERE key = 'schema_version'").toInt();
     }
 
 private slots:
@@ -85,6 +119,141 @@ private slots:
         QCOMPARE(p.code(b).position, 1);
         QVERIFY(p.moveCode(c, 0));
         QCOMPARE(p.code(c).parentId, qint64(0));
+    }
+
+    void migrationUpgradesOldProject()
+    {
+        {
+            Project old;
+            old.setMigrations({}); // base schema only, as Tessera 0.1.0 wrote it
+            QVERIFY(old.create(path("m1.tsra")));
+            const qint64 d = old.addDocument(old.groups().first().id, "Intervista", "Testo da codificare");
+            QVERIFY(old.addSegment(d, old.addCode(0, "Tema", Qt::red), 0, 5) > 0);
+        }
+        QCOMPARE(fileVersion(path("m1.tsra")), 1);
+
+        const QList<Project::Migration> migrations = {
+            {2, {"CREATE TABLE extra (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '')"}},
+            {3, {"ALTER TABLE codes ADD COLUMN alias TEXT NOT NULL DEFAULT ''"}},
+        };
+        Project p;
+        p.setMigrations(migrations);
+        QCOMPARE(p.schemaVersion(), 3);
+        QVERIFY(p.open(path("m1.tsra")));
+        QCOMPARE(p.meta("schema_version"), QString("3"));
+        QCOMPARE(p.allSegments().size(), 1);
+        QVERIFY(!p.canUndo());
+
+        // The backup keeps the file as it was before the upgrade.
+        const QString backup = p.migrationBackupPath();
+        QCOMPARE(QFileInfo(backup).fileName(), QString("m1 (backup v1).tsra"));
+        QCOMPARE(fileVersion(backup), 1);
+        QCOMPARE(queryFile(backup, "SELECT count(*) FROM segments").toInt(), 1);
+
+        // Undo triggers are built after the upgrade, so they cover the new column too.
+        const qint64 code = p.codes().first().id;
+        QVERIFY(p.renameCode(code, "Nuovo nome"));
+        QVERIFY(p.undo());
+        QCOMPARE(p.code(code).name, QString("Tema"));
+
+        // Already up to date: no backup.
+        p.close();
+        QVERIFY(p.open(path("m1.tsra")));
+        QVERIFY(p.migrationBackupPath().isEmpty());
+        p.close();
+
+        // A later upgrade never overwrites an earlier backup.
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("m1.tsra")));
+        }
+        QVERIFY(p.open(path("m1.tsra")));
+        QCOMPARE(QFileInfo(p.migrationBackupPath()).fileName(), QString("m1 (backup v1 2).tsra"));
+    }
+
+    void migrationFailureLeavesFileUntouched()
+    {
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("m2.tsra")));
+        }
+        const QByteArray before = fileHash(path("m2.tsra"));
+
+        Project p;
+        p.setMigrations({{2, {"CREATE TABLE extra (id INTEGER PRIMARY KEY)"}}, {3, {"NOT VALID SQL"}}});
+        QVERIFY(!p.open(path("m2.tsra")));
+        QVERIFY(!p.isOpen());
+        QVERIFY(p.lastError().contains("versione 3"));
+        QCOMPARE(fileHash(path("m2.tsra")), before);
+        QVERIFY(!QFile::exists(path("m2 (backup v1).tsra")));
+        QCOMPARE(fileVersion(path("m2.tsra")), 1);
+    }
+
+    void migrationRejectsDanglingReferences()
+    {
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("m3.tsra")));
+        }
+        Project p;
+        p.setMigrations({{2, {"INSERT INTO segments(document_id, code_id, start_pos, end_pos, uuid)"
+                              " VALUES (99, 99, 0, 1, 'x')"}}});
+        QVERIFY(!p.open(path("m3.tsra")));
+        QVERIFY(p.lastError().contains("segments"));
+        QCOMPARE(queryFile(path("m3.tsra"), "SELECT count(*) FROM segments").toInt(), 0);
+        QCOMPARE(fileVersion(path("m3.tsra")), 1);
+    }
+
+    void migrationCanRebuildTables()
+    {
+        // SQLite cannot change a column in place: copy into a new table, drop the old one, rename.
+        // Foreign keys are off while migrating, so the drop must not cascade to the segments.
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("m4.tsra")));
+            const qint64 d = old.addDocument(old.groups().first().id, "Doc", "Testo");
+            QVERIFY(old.addSegment(d, old.addCode(0, "C", Qt::red), 0, 5) > 0);
+        }
+        Project p;
+        p.setMigrations({{2,
+                          {"CREATE TABLE documents_new (id INTEGER PRIMARY KEY,"
+                           " group_id INTEGER NOT NULL REFERENCES document_groups(id) ON DELETE CASCADE,"
+                           " name TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', source_path TEXT,"
+                           " imported_at TEXT, position INTEGER NOT NULL DEFAULT 0, uuid TEXT NOT NULL,"
+                           " kind TEXT NOT NULL DEFAULT 'text')",
+                           "INSERT INTO documents_new (id, group_id, name, content, source_path, imported_at,"
+                           " position, uuid) SELECT id, group_id, name, content, source_path, imported_at,"
+                           " position, uuid FROM documents",
+                           "DROP TABLE documents",
+                           "ALTER TABLE documents_new RENAME TO documents"}}});
+        QVERIFY(p.open(path("m4.tsra")));
+        QCOMPARE(p.documents().size(), 1);
+        QCOMPARE(p.allSegments().size(), 1);
+
+        // Foreign keys are enforced again once the project is open.
+        QVERIFY(p.deleteDocument(p.documents().first().id));
+        QVERIFY(p.allSegments().isEmpty());
+    }
+
+    void futureVersionIsRejected()
+    {
+        Project newer;
+        QList<Project::Migration> migrations = Project::builtInMigrations();
+        migrations.append({99, {"CREATE TABLE extra (id INTEGER PRIMARY KEY)"}});
+        newer.setMigrations(migrations);
+        QVERIFY(newer.create(path("m5.tsra")));
+        QCOMPARE(newer.meta("schema_version"), QString("99"));
+        newer.close();
+        const QByteArray before = fileHash(path("m5.tsra"));
+
+        Project p;
+        QVERIFY(!p.open(path("m5.tsra")));
+        QVERIFY(p.lastError().contains("più recente"));
+        QCOMPARE(fileHash(path("m5.tsra")), before);
     }
 
     void batchDefersSignals()
