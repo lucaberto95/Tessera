@@ -2,6 +2,7 @@
 rem Creates a self-contained folder dist\Tessera with the executable, the Qt runtime and the
 rem Visual C++ runtime DLLs (app-local, no installer needed). Run build.cmd first.
 rem Optional: deploy.cmd zip  -> also creates dist\Tessera-<version>-win64.zip
+rem           deploy.cmd installer -> also builds dist\Tessera-<version>-setup.exe (needs Inno Setup 6)
 setlocal
 if not defined QTDIR set QTDIR=C:\Qt\6.10.3\msvc2022_64
 set VSDIR=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools
@@ -23,4 +24,15 @@ if /i "%1"=="zip" (
     call set ZIP=%~dp0dist\Tessera-%%VERSION%%-win64.zip
     call powershell -NoProfile -Command "Compress-Archive -Path '%DIST%' -DestinationPath '%%ZIP%%' -Force" || exit /b 1
     call echo Archivio: %%ZIP%%
+)
+
+if /i "%1"=="installer" (
+    for /f "tokens=3" %%v in ('findstr /r /c:"project(Tessera VERSION" "%~dp0CMakeLists.txt"') do set VERSION=%%v
+    set ISCC=
+    for %%p in ("%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "%ProgramFiles%\Inno Setup 6\ISCC.exe") do if exist %%p set ISCC=%%~p
+    if not defined ISCC (
+        echo Inno Setup 6 non trovato: installarlo da https://jrsoftware.org/isinfo.php e rilanciare.
+        exit /b 1
+    )
+    call "%%ISCC%%" /DAppVersion=%%VERSION%% "%~dp0installer\tessera.iss" || exit /b 1
 )

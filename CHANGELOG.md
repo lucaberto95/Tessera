@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.25.0] - 2026-10-22 — Icona e installer (#47)
+Commit `TBD`
+
+- Icona originale (mosaico di tessere) in SVG, con `.ico` 16-256 px per l'applicazione e per i file `.tsra`; incorporate in `Tessera.exe` (`src/tessera.rc`) e usate per la finestra e la barra delle applicazioni. `tessera_makeicon` rigenera gli `.ico` dagli SVG.
+- `installer/tessera.iss` (Inno Setup): installazione per utente senza amministratore, menu Start, disinstallazione da App installate, associazione `.tsra` (doppio clic apre il progetto); `deploy.cmd installer` lo compila. La disinstallazione non tocca i progetti.
+- Non incluso: firma del codice. L'installer non è stato compilato in questo ambiente (Inno Setup non installato): la release contiene solo lo ZIP.
 ## [0.24.0] - 2026-10-22 — Report in Word, PDF e HTML (#45)
 Commit `0dc26d6`
 

@@ -12,6 +12,8 @@
 #include "ui/SummaryTablesDialog.h"
 #include "ui/DocumentTree.h"
 #include "core/RichText.h"
+#include <QSvgRenderer>
+#include <QtEndian>
 #include <QTextBlock>
 #include <QTextList>
 #include "ui/DocumentView.h"
@@ -1679,6 +1681,52 @@ private slots:
             buttons << b->text();
         QVERIFY(buttons.contains("Esporta Excel (.xlsx)"));
         QVERIFY(buttons.contains("Esporta Excel (CSV)"));
+    }
+    // Installer and icons (#47): ICO files hold 16-256 px entries, the SVG sources render, the
+    // Inno Setup script is per-user and associates .tsra, main.cpp opens a project passed as argument.
+    void installerAndIcons()
+    {
+        const QString root = QStringLiteral(TESSERA_SOURCE_DIR);
+        for (const char *name : {"tessera.ico", "tessera-file.ico"}) {
+            QFile f(root + "/installer/" + QString::fromLatin1(name));
+            QVERIFY2(f.open(QIODevice::ReadOnly), name);
+            const QByteArray d = f.readAll();
+            QCOMPARE(quint8(d[2]), quint8(1)); // type: icon
+            const int n = quint8(d[4]);
+            QVERIFY(n >= 6);
+            QSet<int> sizes;
+            for (int i = 0; i < n; ++i) {
+                const int w = quint8(d[6 + 16 * i]);
+                sizes << (w == 0 ? 256 : w);
+                const quint32 size = qFromLittleEndian<quint32>(d.constData() + 6 + 16 * i + 8);
+                const quint32 off = qFromLittleEndian<quint32>(d.constData() + 6 + 16 * i + 12);
+                QVERIFY(off + size <= quint32(d.size()));
+                QVERIFY(!QImage::fromData(d.mid(off, size), "PNG").isNull());
+            }
+            QVERIFY(sizes.contains(16) && sizes.contains(32) && sizes.contains(48) && sizes.contains(256));
+        }
+        for (const char *name : {"tessera.svg", "tessera-file.svg"})
+            QVERIFY(QSvgRenderer(root + "/installer/" + QString::fromLatin1(name)).isValid());
+
+        QFile iss(root + "/installer/tessera.iss");
+        QVERIFY(iss.open(QIODevice::ReadOnly));
+        const QString script = QString::fromUtf8(iss.readAll());
+        QVERIFY(script.contains("PrivilegesRequired=lowest"));
+        QVERIFY(script.contains("ChangesAssociations=yes"));
+        QVERIFY(script.contains("Software\\Classes\\.tsra"));
+        QVERIFY(script.contains("shell\\open\\command"));
+        QVERIFY(script.contains("{autoprograms}"));
+        QVERIFY(!script.contains("HKLM")); // per-user: HKA resolves to HKCU
+
+        QFile rc(root + "/src/tessera.rc");
+        QVERIFY(rc.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(rc.readAll()).contains("tessera.ico"));
+
+        QFile mainCpp(root + "/src/main.cpp");
+        QVERIFY(mainCpp.open(QIODevice::ReadOnly));
+        const QString m = QString::fromUtf8(mainCpp.readAll());
+        QVERIFY(m.contains("positionalArguments()") && m.contains("openProject"));
+        QVERIFY(m.contains("setWindowIcon"));
     }
 };
 

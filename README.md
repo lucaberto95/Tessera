@@ -13,7 +13,7 @@ scrivi memo e confronti i risultati tra documenti.
 
 Scarica `Tessera-x.y.z-win64.zip` dalla pagina
 [Releases](https://github.com/lucaberto95/Tessera/releases), estrai la cartella e avvia
-`Tessera.exe`. Non serve installare nulla: Qt e il runtime di Visual C++ sono già inclusi.
+`Tessera.exe`. In alternativa, se la release lo include, scarica l'installer `Tessera-x.y.z-setup.exe`: installa per l'utente corrente senza diritti di amministratore, crea il collegamento nel menu Start e associa i file `.tsra` (doppio clic = apre il progetto). La versione ZIP non richiede installazione: Qt e il runtime di Visual C++ sono già inclusi.
 
 Per provarlo subito, usa **Progetto → Crea progetto di esempio…**: crea tre interviste sul lavoro
 da remoto, già codificate, con variabili e memo.
@@ -72,6 +72,7 @@ Requisiti:
 ```bat
 build.cmd Release
 deploy.cmd zip
+deploy.cmd installer   :: richiede Inno Setup 6
 ```
 
 `build.cmd` compila nella cartella `build\Release`. `deploy.cmd zip` prepara la cartella

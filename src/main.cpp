@@ -4,7 +4,11 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QLibraryInfo>
+#include <QIcon>
 #include <QLocale>
+#include <QPainter>
+#include <QPixmap>
+#include <QSvgRenderer>
 #include <QTimer>
 #include <QTranslator>
 
@@ -14,6 +18,22 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName(QStringLiteral("Tessera"));
     QApplication::setApplicationName(QStringLiteral("Tessera"));
     QApplication::setApplicationVersion(QStringLiteral(TESSERA_VERSION_STRING));
+
+    // Window/taskbar icon: rendered from the embedded SVG (no icon-engine plugin needed).
+    {
+        QSvgRenderer svg(QStringLiteral(":/tessera.svg"));
+        QIcon icon;
+        for (int s : {16, 24, 32, 48, 64, 128, 256}) {
+            QPixmap pm(s, s);
+            pm.fill(Qt::transparent);
+            QPainter p(&pm);
+            p.setRenderHint(QPainter::Antialiasing);
+            svg.render(&p);
+            p.end();
+            icon.addPixmap(pm);
+        }
+        QApplication::setWindowIcon(icon);
+    }
 
     // Standard Qt dialogs (file dialogs, Yes/No buttons) in the user's language.
     QTranslator qtTranslator;

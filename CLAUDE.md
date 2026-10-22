@@ -26,6 +26,7 @@ Toolchain: VS 2022 Build Tools (MSVC 14.44, CMake e Ninja inclusi), Qt 6.10.3 in
 build.cmd Release        :: configura + compila in build\Release (app, libreria, test)
 deploy.cmd               :: dist\Tessera autonoma (Qt + runtime VC++ app-local)
 deploy.cmd zip           :: + dist\Tessera-<versione>-win64.zip per le release
+deploy.cmd installer     :: + dist\Tessera-<versione>-setup.exe (serve Inno Setup 6, ISCC.exe; non installato su questo PC)
 ```
 
 Da PowerShell: `cmd /c ".\build.cmd Release"`. Argomenti CMake extra solo via `TESSERA_CMAKE_ARGS`
@@ -208,6 +209,8 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   Project::setProvenance ripristina autore e data originali (le dd* mettono utente e ora correnti). Nella prova a secco gli id
   di ciò che non esiste ancora sono negativi. Le tabelle nuove vanno gestite anche in Merger (Merge.cpp). Il nome utente
   (QSettings user/name) si chiede al primo avvio (MainWindow::askUserNameOnFirstRun, non nei test).
+- **Installer e icona** (#47): `installer/tessera.svg` (app) e `tessera-file.svg` (file `.tsra`) sono i sorgenti; i `.ico` (16-256 px) si rigenerano con `cmake --build build\Release --target tessera_makeicon` e poi `tessera_makeicon in.svg out.ico` (vanno committati). `src/tessera.rc` incorpora i due `.ico` in `Tessera.exe` (icona 0 = app, 1 = tipo file); la finestra usa `:/tessera.svg` (qrc) in `main.cpp`. `installer/tessera.iss` (Inno Setup, per utente, `HKA\Software\Classes\.tsra`, `/DAppVersion`) è richiamato da `deploy.cmd installer`; `main.cpp` apre già il `.tsra` passato come argomento. Il test `installerAndIcons` controlla ico/svg/script. L'installer non è firmato (SmartScreen avvisa) e lo script non è mai stato compilato su questo PC (Inno Setup assente): provarlo a mano.
+
 ### Insidie già incontrate
 
 - Una `QString` nulla va in SQL come NULL: `bindAll()` la converte in `''` (colonne NOT NULL).
@@ -267,7 +270,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#45 (report DOCX/PDF/HTML con codebook, segmenti, memo, variabili e tabelle riassuntive; senza matrice e senza immagini/aree PDF come miniature), #23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#47 (icona originale ed `.iss` per Inno Setup; installer non compilato né firmato), #45 (report DOCX/PDF/HTML con codebook, segmenti, memo, variabili e tabelle riassuntive; senza matrice e senza immagini/aree PDF come miniature), #23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 **#32** documenti con formattazione (titoli, grassetto/corsivo/sottolineato/barrato, elenchi, tabelle come righe a bande da DOCX, ODT, RTF e HTML; logica in `src/core/RichText.*`; non incluso: immagini incorporate, formattazione in MD/PDF e nell'export QDPX, editor rich text: l'editing resta sul testo semplice).
 Aggiornare questo elenco quando una issue viene chiusa.
@@ -277,7 +280,7 @@ Aggiornare questo elenco quando una issue viene chiusa.
 `CHANGELOG.md` si aggiorna a ogni release (una voce per versione, con commit e issue); di norma +1 versione minore.
 
 1. `project(Tessera VERSION x.y.z)` in `CMakeLists.txt` (prima del tag: il tag deve contenere il cambio).
-2. `build.cmd Release`, test, `deploy.cmd zip`.
+2. `build.cmd Release`, test, `deploy.cmd zip` (e `deploy.cmd installer` se Inno Setup c'è: allegare anche il setup).
 3. Commit su `main`, tag `vx.y.z`, push del tag, poi
    `gh release create vx.y.z dist\Tessera-x.y.z-win64.zip -R lucaberto95/Tessera --title ... --notes ...`.
 4. `gh release view vx.y.z -R lucaberto95/Tessera --json assets`: lo zip deve esserci.

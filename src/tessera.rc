@@ -1,0 +1,3 @@
+// Application icon first (taskbar, Explorer), then the .tsra file-type icon (index 1 in Tessera.exe).
+1 ICON "../installer/tessera.ico"
+2 ICON "../installer/tessera-file.ico"

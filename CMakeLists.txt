@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Tessera VERSION 0.24.0 LANGUAGES CXX)
+project(Tessera VERSION 0.25.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -76,7 +76,12 @@ qt_add_library(tessera_ui STATIC
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent)
 
-qt_add_executable(Tessera WIN32 src/main.cpp)
+qt_add_executable(Tessera WIN32 src/main.cpp src/tessera.rc)
+qt_add_resources(Tessera icons PREFIX "/" BASE "${CMAKE_SOURCE_DIR}/installer" FILES installer/tessera.svg)
+
+# Regenerates installer/*.ico from the SVG sources (not built by default).
+qt_add_executable(tessera_makeicon EXCLUDE_FROM_ALL tools/makeicon.cpp)
+target_link_libraries(tessera_makeicon PRIVATE Qt6::Gui Qt6::Svg)
 target_link_libraries(Tessera PRIVATE tessera_ui)
 set_target_properties(Tessera PROPERTIES OUTPUT_NAME "Tessera")
 endif()
@@ -89,5 +94,6 @@ add_test(NAME tessera_tests COMMAND tessera_tests)
 if(TESSERA_BUILD_APP)
     qt_add_executable(tessera_ui_tests tests/test_ui.cpp)
     target_link_libraries(tessera_ui_tests PRIVATE tessera_ui Qt6::Test)
+    target_compile_definitions(tessera_ui_tests PRIVATE TESSERA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME tessera_ui_tests COMMAND tessera_ui_tests -platform offscreen)
 endif()
