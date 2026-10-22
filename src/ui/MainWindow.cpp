@@ -9,6 +9,7 @@
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
 #include "ui/MatrixDialog.h"
+#include "ui/RetrievalDialog.h"
 #include "ui/MemoManager.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
@@ -158,6 +159,7 @@ void MainWindow::createActions()
     m_search = make(tr("&Ricerca lessicale…"), &MainWindow::showSearch, QKeySequence::Find, true,
                     QStyle::SP_FileDialogContentsView);
     m_matrix = make(tr("&Matrice codici × documenti…"), &MainWindow::showMatrix, QKeySequence(Qt::CTRL | Qt::Key_M));
+    m_retrieval = make(tr("Recupero &complesso…"), &MainWindow::showRetrieval, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
     m_exportSegmentsCsv = make(tr("Esporta segmenti recuperati (&Excel/CSV)…"), [this] { m_segments->exportCsv(); });
 
@@ -217,6 +219,7 @@ void MainWindow::createMenus()
     QMenu *analysis = menuBar()->addMenu(tr("&Analisi"));
     analysis->addAction(m_search);
     analysis->addAction(m_matrix);
+    analysis->addAction(m_retrieval);
     analysis->addSeparator();
     analysis->addAction(m_exportSegmentsHtml);
     analysis->addAction(m_exportSegmentsCsv);
@@ -676,6 +679,14 @@ void MainWindow::showSearch()
     connect(dlg, &SearchDialog::hitActivated, this,
             [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showRetrieval()
+{
+    auto *dlg = new RetrievalDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &RetrievalDialog::retrievalRequested, m_segments, &SegmentsPanel::setRetrieval);
     dlg->show();
 }
 
