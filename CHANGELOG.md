@@ -2,6 +2,19 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.15.0] - 2026-10-22 — Frequenze di parole, nuvola di parole e parole in contesto (#18)
+Commit `9d1c2cf`
+
+- Nuova finestra «Frequenze di parole, nuvola e parole in contesto…» (menu Analisi), sui documenti, sui documenti attivi o sui segmenti recuperati.
+- Frequenze: tabella con parola, frequenza, percentuale e numero di documenti, ordinabile e filtrabile per testo; opzioni di lunghezza minima, maiuscole/minuscole ed esclusione dei numeri; confronto con una colonna per gruppo di documenti, per set o per valore di una variabile; esportazione in Excel, CSV o HTML.
+- Lista delle parole da escludere, salvata nel progetto e modificabile (liste di partenza in italiano e in inglese, scritte per Tessera); «Escludi dalla lista» aggiunge le parole selezionate.
+- Le parole sono quelle di `Dictionaries::tokenize`: apostrofi e trattini separano le parole («dell'azienda» = «dell» + «azienda»), le emoji non sono parole.
+- Nuvola di parole con le prime N parole, dimensione e colore secondo la frequenza, disposte a spirale senza sovrapposizioni; esportazione PNG e SVG.
+- Parole in contesto (KWIC): per una parola o una sequenza di parole, contesto sinistro e destro allineati attorno alla parola, con il documento; il doppio clic apre il documento sull'occorrenza; esportabile.
+- Da una parola della tabella: «Parole in contesto», «Cerca e codifica…» (apre la ricerca già compilata) e «Aggiungi al dizionario…» (voci di una categoria, un solo passo di annulla): era la parte rimandata dalla #19.
+- Il calcolo gira in un thread (`QtConcurrent`) con barra di avanzamento; la tabella mostra al massimo 20.000 parole (l'esportazione le contiene tutte).
+- Non incluso: la lemmatizzazione (la issue ammette una prima versione senza), il confronto con le parole combinate e l'albero delle parole.
+
 ## [0.14.0] - 2026-10-22 — Dizionari e codifica automatica con dizionario (#19)
 Commit `5407a87`
 
