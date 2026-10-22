@@ -1,7 +1,7 @@
 # CLAUDE.md — guida per riprendere il lavoro su Tessera
 
 Tessera: app desktop Windows per l'analisi qualitativa dei dati (QDA), alternativa a MAXQDA.
-C++20 + Qt 6.10 (Widgets, Sql/SQLite, Pdf, Charts). L'utente scrive in italiano: rispondi in italiano.
+C++20 + Qt 6.10 (Widgets, Sql/SQLite, Pdf, Charts, Network). L'utente scrive in italiano: rispondi in italiano.
 
 ## Regole
 
@@ -77,6 +77,10 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   Survey         import di sondaggi (.xlsx/.csv): ruoli colonna, un documento per rispondente, variabili tipizzate
   TextUtils      newline, UTF-16 <-> code point, adattamento di segmenti/link dopo modifiche, frasi/paragrafi
   DemoProject    progetto di esempio (3 interviste sul lavoro da remoto)
+  ai/AiConfig    (`Ai::`) provider (nessuno/locale/OpenAI/Anthropic/Mistral/Google), `Config`, `Settings` (QSettings + blocco
+                 amministratore `tessera.ini`), `Secrets` (chiavi in Credential Manager), consenso cloud
+  ai/AiClient    `Ai::Client`: /chat/completions e /models compatibili OpenAI, asincrono (`Reply`), annullabile, timeout, errori in
+                 italiano; output strutturato; `makeClient`, `splitIntoChunks`, `describeInput`
 src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWindow)
   MainWindow (menu, azioni, collega i segnali del Project ai pannelli), DocumentTree / CodeTree (caselle di
   attivazione), DocumentView + CodingStripe (+ ImageView per le immagini, PdfView per i PDF), LinksDialog, SegmentsPanel (`setRetrieval`, `setPassages`),
@@ -84,7 +88,7 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   codici/documenti), SurveyImportDialog, DictionaryDialog (non modale), MemoManager, VariablesDialog,
   WordFrequencyDialog (3 schede: frequenze, nuvola, parole in contesto; calcolo con `QtConcurrent` + barra di
   avanzamento, `Qt6::Concurrent`; il progetto non è thread-safe: i testi si leggono prima, nel thread della UI),
-  ReportDialog (Crea report, menu Progetto), SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
+  ReportDialog (Crea report, menu Progetto), AiSettingsDialog (Impostazioni > AI), SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
 
@@ -106,7 +110,7 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   statements }` in `Project::builtInMigrations()` (una istruzione SQL per voce, versioni crescenti, mai
   modificare una migrazione rilasciata). `open()` rifiuta file più nuovi, salva `"<nome> (backup vN).tsra"` e applica
   le migrazioni in **una transazione** (con `foreign_key_check`), a foreign key **disattivate** e prima dei trigger
-  di undo. Nei test `setMigrations()` simula versioni vecchie e future. Versione attuale: 8.
+  di undo. Nei test `setMigrations()` simula versioni vecchie e future. Versione attuale: 11.
 - **Segmenti generalizzati** (v6, #25): `documents.kind` (text|pdf|image|audio|video) e `segments.anchor_kind`
   (text|area|time) + `page, x1, y1, x2, y2` (area; pagina 1-based per i PDF, 0 per le immagini) e
   `t_start, t_end` (ms). I segmenti non testuali salvano `start_pos=0, end_pos=1` per rispettare il CHECK
@@ -211,6 +215,22 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   (QSettings user/name) si chiede al primo avvio (MainWindow::askUserNameOnFirstRun, non nei test).
 - **Installer e icona** (#47): `installer/tessera.svg` (app) e `tessera-file.svg` (file `.tsra`) sono i sorgenti; i `.ico` (16-256 px) si rigenerano con `cmake --build build\Release --target tessera_makeicon` e poi `tessera_makeicon in.svg out.ico` (vanno committati). `src/tessera.rc` incorpora i due `.ico` in `Tessera.exe` (icona 0 = app, 1 = tipo file); la finestra usa `:/tessera.svg` (qrc) in `main.cpp`. `installer/tessera.iss` (Inno Setup, per utente, `HKA\Software\Classes\.tsra`, `/DAppVersion`) è richiamato da `deploy.cmd installer`; `main.cpp` apre già il `.tsra` passato come argomento. Il test `installerAndIcons` controlla ico/svg/script. L'installer non è firmato (SmartScreen avvisa) e lo script non è mai stato compilato su questo PC (Inno Setup assente): provarlo a mano.
 
+- **Infrastruttura AI** (#39, `src/core/ai/`; le funzioni #40-#43 si appoggiano qui). Tutti i provider cloud passano dall'endpoint
+  compatibile OpenAI (nessun `AnthropicClient` dedicato: base URL e modello nelle preimpostazioni di `AiConfig.cpp`). Regole di
+  tutela dati: (1) **nessuna chiamata senza azione dell'utente** (un `Client` appena creato non invia nulla) e le funzioni devono
+  ottenere il client solo da `Ai::makeClient(Settings::load(), ...)`, che rifiuta provider assente, configurazione incompleta e
+  **cloud non confermato** (`Settings::cloudConfirmed`, una volta per provider, dopo `cloudNotice`); (2) la chiave API sta solo in
+  `Ai::Secrets` (Windows Credential Manager, `Tessera/AI/key-<provider>`; fuori da Windows solo in memoria), mai in .tsra,
+  QSettings, log o messaggi d'errore; (3) i redirect HTTP non si seguono (la chiave non deve finire altrove); (4) prima di ogni
+  invio la UI mostra cosa parte con `Ai::describeInput(documenti, parole)`. `Client::chat` con `Request::schema` chiede JSON via
+  `response_format`, ripiega su istruzione nel prompt se il server risponde 400 e riprova `maxRetries` volte se il JSON non è valido
+  (controllo minimo: tipo e `required` di primo livello). Contesto lungo: `splitIntoChunks` (caratteri/4) e map-reduce a carico
+  della funzione. Le codifiche create dall'AI usano l'autore `Ai::authorName` ("AI (modello X)"). Blocco amministratore:
+  `tessera.ini` accanto all'eseguibile, `[AI] Locked=true|Disabled=true` + `Provider/Url/Model/Timeout`. Registro opzionale
+  `ai_log` (v11, meta `ai_log` = "1", **spento di default**): `addAiLog` non fa nulla se spento; fuori dai trigger di undo,
+  non unito (Merge) né esportato. Nei test: `Ai::Settings::useFilesForTesting(ini, admin)` (chiavi in memoria, mai il vero
+  Credential Manager) e `tests/FakeHttp.h` (server `QTcpServer` che finge /chat/completions e /models; nessuna rete reale).
+
 ### Insidie già incontrate
 
 - Una `QString` nulla va in SQL come NULL: `bindAll()` la converte in `''` (colonne NOT NULL).
@@ -270,7 +290,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#47 (icona originale ed `.iss` per Inno Setup; installer non compilato né firmato), #45 (report DOCX/PDF/HTML con codebook, segmenti, memo, variabili e tabelle riassuntive; senza matrice e senza immagini/aree PDF come miniature), #23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#47 (icona originale ed `.iss` per Inno Setup; installer non compilato né firmato), #45 (report DOCX/PDF/HTML con codebook, segmenti, memo, variabili e tabelle riassuntive; senza matrice e senza immagini/aree PDF come miniature), #23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione), #39 (infrastruttura AI: client compatibile OpenAI, impostazioni, registro; nessuna funzione AI concreta ancora: #40-#43). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 **#32** documenti con formattazione (titoli, grassetto/corsivo/sottolineato/barrato, elenchi, tabelle come righe a bande da DOCX, ODT, RTF e HTML; logica in `src/core/RichText.*`; non incluso: immagini incorporate, formattazione in MD/PDF e nell'export QDPX, editor rich text: l'editing resta sul testo semplice).
 Aggiornare questo elenco quando una issue viene chiusa.

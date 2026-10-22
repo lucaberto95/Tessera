@@ -72,6 +72,7 @@ private:
     void exportCodebook();
     void createReport();
     void setUserName();
+    void showAiSettings();
     void about();
     void openSegment(qint64 documentId, int start, int end, qint64 segmentId);
     void showMemoTarget(int targetType, qint64 targetId);
@@ -137,5 +138,6 @@ private:
     QAction *m_projectMemo = nullptr;
     QAction *m_memos = nullptr;
     QAction *m_userName = nullptr;
+    QAction *m_aiSettings = nullptr;
     QAction *m_about = nullptr;
 };

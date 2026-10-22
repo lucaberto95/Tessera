@@ -1,4 +1,7 @@
+#include "FakeHttp.h"
 #include "core/Agreement.h"
+#include "core/ai/AiClient.h"
+#include "core/ai/AiConfig.h"
 #include "core/Cooccurrence.h"
 #include "core/Dictionaries.h"
 #include "core/Exporters.h"
@@ -24,7 +27,15 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHostAddress>
 #include <QImageWriter>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QTimer>
+#include <functional>
 #include <QPainter>
 #include <QPdfWriter>
 #include <QRegularExpression>
@@ -3763,8 +3774,8 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 10);
-        QCOMPARE(fileVersion(file), 10);
+        QCOMPARE(p.schemaVersion(), 11);
+        QCOMPARE(fileVersion(file), 11);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
@@ -3916,7 +3927,7 @@ private slots:
         QCOMPARE(fileVersion(file), 7);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 10);
+        QCOMPARE(fileVersion(file), 11);
         const qint64 doc = p.documents().first().id;
         const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
         QVERIFY(a > 0);
@@ -4101,7 +4112,7 @@ private slots:
         QCOMPARE(fileVersion(file), 8);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 10);
+        QCOMPARE(fileVersion(file), 11);
         const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
         QVERIFY(p.setSummary(doc, p.codes().first().id, "ok"));
         QVERIFY(p.addSummaryTable("T", "{}") > 0);
@@ -4448,6 +4459,467 @@ private slots:
         QVERIFY(!bad.load(path("not-a-project.tsra"), &error));
         QVERIFY(!error.isEmpty());
         QVERIFY(!bad.load(path("missing.tsra"), &error));
+    }
+
+    // ---------------------------------------------------------------- AI infrastructure (issue #39)
+
+    static QByteArray completion(const QString &content)
+    {
+        return QJsonDocument(QJsonObject{{"choices", QJsonArray{QJsonObject{
+                   {"message", QJsonObject{{"role", "assistant"}, {"content", content}}}}}}})
+            .toJson(QJsonDocument::Compact);
+    }
+
+    static Ai::Response awaitReply(Ai::Reply *r, int ms = 5000)
+    {
+        if (!r->isFinished()) {
+            QSignalSpy spy(r, &Ai::Reply::finished);
+            spy.wait(ms);
+        }
+        return r->response();
+    }
+
+    static Ai::Config localConfig(const FakeHttp &srv)
+    {
+        Ai::Config c;
+        c.provider = Ai::Provider::Local;
+        c.baseUrl = srv.url();
+        c.model = "tessera-test";
+        c.apiKey = "secret-key-123";
+        c.timeoutSec = 5;
+        return c;
+    }
+
+    static QJsonObject simpleSchema()
+    {
+        return QJsonObject{{"type", "object"},
+                           {"properties", QJsonObject{{"codes", QJsonObject{{"type", "array"}}}}},
+                           {"required", QJsonArray{"codes"}}};
+    }
+
+private slots:
+    void aiChatRequestAndStructuredOutput()
+    {
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) {
+            return FakeHttp::Res{200, completion(R"({"codes":["lavoro","tempo"]})")};
+        };
+        Ai::Client client(localConfig(srv));
+        Ai::Request req;
+        req.messages = {{"system", "Sei un assistente."}, {"user", "Proponi codici."}};
+        req.schema = simpleSchema();
+        req.schemaName = "codes_result";
+        const Ai::Response r = awaitReply(client.chat(req));
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.attempts, 1);
+        QCOMPARE(r.json.object().value("codes").toArray().size(), 2);
+
+        QCOMPARE(srv.requests.size(), 1);
+        const FakeHttp::Req &sent = srv.requests.first();
+        QCOMPARE(sent.method, QString("POST"));
+        QCOMPARE(sent.path, QString("/v1/chat/completions"));
+        QCOMPARE(sent.headers.value("authorization"), QByteArray("Bearer secret-key-123"));
+        const QJsonObject body = QJsonDocument::fromJson(sent.body).object();
+        QCOMPARE(body.value("model").toString(), QString("tessera-test"));
+        QCOMPARE(body.value("stream").toBool(true), false);
+        QCOMPARE(body.value("messages").toArray().size(), 2);
+        QCOMPARE(body.value("messages").toArray().at(1).toObject().value("content").toString(), QString("Proponi codici."));
+        const QJsonObject rf = body.value("response_format").toObject();
+        QCOMPARE(rf.value("type").toString(), QString("json_schema"));
+        QCOMPARE(rf.value("json_schema").toObject().value("name").toString(), QString("codes_result"));
+        QVERIFY(rf.value("json_schema").toObject().value("schema").toObject() == simpleSchema());
+
+        // Free text: no response_format, no json.
+        srv.requests.clear();
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, completion("Ciao")}; };
+        Ai::Request plain;
+        plain.messages = {{"user", "Saluta"}};
+        const Ai::Response p = awaitReply(client.chat(plain));
+        QVERIFY(p.ok);
+        QCOMPARE(p.text, QString("Ciao"));
+        QVERIFY(!QJsonDocument::fromJson(srv.requests.first().body).object().contains("response_format"));
+
+        // The answer may come wrapped in a code fence or in chatter.
+        srv.handler = [](const FakeHttp::Req &) {
+            return FakeHttp::Res{200, completion("Ecco:\n```json\n{\"codes\": []}\n```")};
+        };
+        const Ai::Response f = awaitReply(client.chat(req));
+        QVERIFY2(f.ok, qPrintable(f.error));
+        QVERIFY(f.json.object().contains("codes"));
+    }
+
+    void aiRetriesOnInvalidJson()
+    {
+        FakeHttp srv;
+        int n = 0;
+        srv.handler = [&n](const FakeHttp::Req &) {
+            return FakeHttp::Res{200, completion(++n == 1 ? QString("non e' json") : QString(R"({"codes":["a"]})"))};
+        };
+        Ai::Client client(localConfig(srv));
+        Ai::Request req;
+        req.messages = {{"user", "x"}};
+        req.schema = simpleSchema();
+        Ai::Response r = awaitReply(client.chat(req));
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.attempts, 2);
+        QCOMPARE(srv.requests.size(), 2);
+        // The retry shows the model its wrong answer and asks again.
+        const QJsonArray msgs = QJsonDocument::fromJson(srv.requests.at(1).body).object().value("messages").toArray();
+        QCOMPARE(msgs.size(), 3);
+        QCOMPARE(msgs.at(1).toObject().value("role").toString(), QString("assistant"));
+
+        // Still invalid after the retries: a clear error.
+        srv.requests.clear();
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, completion("{\"altro\":1}")}; };
+        req.maxRetries = 2;
+        r = awaitReply(client.chat(req));
+        QVERIFY(!r.ok);
+        QCOMPARE(r.kind, Ai::ErrorKind::InvalidJson);
+        QCOMPARE(r.attempts, 3);
+        QVERIFY(!r.error.isEmpty());
+
+        // No retries asked: a single attempt.
+        srv.requests.clear();
+        req.maxRetries = 0;
+        r = awaitReply(client.chat(req));
+        QCOMPARE(r.attempts, 1);
+    }
+
+    void aiFallsBackWithoutResponseFormat()
+    {
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &q) {
+            if (q.body.contains("response_format"))
+                return FakeHttp::Res{400, R"({"error":{"message":"response_format is not supported"}})"};
+            return FakeHttp::Res{200, completion(R"({"codes":["x"]})")};
+        };
+        Ai::Client client(localConfig(srv));
+        Ai::Request req;
+        req.messages = {{"user", "x"}};
+        req.schema = simpleSchema();
+        const Ai::Response r = awaitReply(client.chat(req));
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(srv.requests.size(), 2);
+        const QJsonObject second = QJsonDocument::fromJson(srv.requests.at(1).body).object();
+        QVERIFY(!second.contains("response_format"));
+        QVERIFY(second.value("messages").toArray().first().toObject().value("content").toString().contains("JSON Schema"));
+    }
+
+    void aiErrorsAreClear()
+    {
+        FakeHttp srv;
+        Ai::Request req;
+        req.messages = {{"user", "x"}};
+
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{401, R"({"error":{"message":"bad key"}})"}; };
+        {
+            Ai::Client c(localConfig(srv));
+            const Ai::Response r = awaitReply(c.chat(req));
+            QVERIFY(!r.ok);
+            QCOMPARE(r.kind, Ai::ErrorKind::Unauthorized);
+            QVERIFY(r.error.contains("chiave API"));
+            QVERIFY(!r.error.contains("secret-key-123")); // keys never appear in messages
+        }
+        srv.handler = [](const FakeHttp::Req &) {
+            return FakeHttp::Res{404, R"({"error":{"message":"model 'tessera-test' not found"}})"};
+        };
+        {
+            Ai::Client c(localConfig(srv));
+            const Ai::Response r = awaitReply(c.chat(req));
+            QCOMPARE(r.kind, Ai::ErrorKind::ModelNotFound);
+            QVERIFY(r.error.contains("tessera-test"));
+        }
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{404, "<html>nope</html>"}; };
+        {
+            Ai::Client c(localConfig(srv));
+            const Ai::Response r = awaitReply(c.chat(req));
+            QCOMPARE(r.kind, Ai::ErrorKind::Http);
+            QVERIFY(r.error.contains("/v1"));
+        }
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, "{\"hello\":1}"}; };
+        {
+            Ai::Client c(localConfig(srv));
+            QCOMPARE(awaitReply(c.chat(req)).kind, Ai::ErrorKind::BadResponse);
+        }
+        // Timeout: the server never answers.
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, {}, true}; };
+        {
+            Ai::Client c(localConfig(srv));
+            c.setTimeoutMs(300);
+            const Ai::Response r = awaitReply(c.chat(req));
+            QCOMPARE(r.kind, Ai::ErrorKind::Timeout);
+        }
+        // Wrong address: nothing listens there.
+        {
+            Ai::Config cfg = localConfig(srv);
+            quint16 port;
+            {
+                QTcpServer tmp;
+                QVERIFY(tmp.listen(QHostAddress::LocalHost, 0));
+                port = tmp.serverPort();
+            }
+            cfg.baseUrl = QString("http://127.0.0.1:%1/v1").arg(port);
+            Ai::Client c(cfg);
+            const Ai::Response r = awaitReply(c.chat(req));
+            QCOMPARE(r.kind, Ai::ErrorKind::Unreachable);
+            QVERIFY(r.error.contains("non risponde"));
+        }
+        // Incomplete configuration: reported without any network traffic.
+        {
+            Ai::Config cfg = localConfig(srv);
+            cfg.model.clear();
+            srv.requests.clear();
+            Ai::Client c(cfg);
+            const Ai::Response r = awaitReply(c.chat(req));
+            QCOMPARE(r.kind, Ai::ErrorKind::Config);
+            QVERIFY(r.error.contains("modello"));
+            cfg = localConfig(srv);
+            cfg.baseUrl = "localhost 11434";
+            Ai::Client c2(cfg);
+            QCOMPARE(awaitReply(c2.chat(req)).kind, Ai::ErrorKind::Config);
+            QCOMPARE(srv.requests.size(), 0);
+        }
+        // A redirect is never followed (it could carry the key elsewhere).
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{302, {}, false, "Location: http://127.0.0.1:1/x\r\n"}; };
+        {
+            Ai::Client c(localConfig(srv));
+            srv.requests.clear();
+            const Ai::Response r = awaitReply(c.chat(req));
+            QVERIFY(!r.ok);
+            QCOMPARE(srv.requests.size(), 1);
+        }
+    }
+
+    void aiCancel()
+    {
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, {}, true}; };
+        Ai::Client client(localConfig(srv));
+        Ai::Request req;
+        req.messages = {{"user", "x"}};
+        Ai::Reply *reply = client.chat(req);
+        QSignalSpy spy(reply, &Ai::Reply::finished);
+        QTimer::singleShot(150, reply, [reply] { reply->cancel(); });
+        QVERIFY(spy.wait(3000));
+        QCOMPARE(reply->response().kind, Ai::ErrorKind::Cancelled);
+        QVERIFY(!reply->response().ok);
+        reply->cancel(); // idempotent
+        QTest::qWait(50);
+        QCOMPARE(spy.count(), 1);
+
+        // Cancelling right after the call, before anything was sent.
+        srv.requests.clear();
+        Ai::Reply *early = client.chat(req);
+        QSignalSpy spy2(early, &Ai::Reply::finished);
+        early->cancel();
+        QTest::qWait(100);
+        QCOMPARE(spy2.count(), 1);
+        QCOMPARE(early->response().kind, Ai::ErrorKind::Cancelled);
+        QCOMPARE(srv.requests.size(), 0);
+    }
+
+    void aiModelsAndConnectionTest()
+    {
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &q) {
+            if (q.method == "GET" && q.path == "/v1/models")
+                return FakeHttp::Res{200, R"({"object":"list","data":[{"id":"zeta"},{"id":"tessera-test"},{"id":"models/gem"}]})"};
+            return FakeHttp::Res{404, "{}"};
+        };
+        Ai::Client client(localConfig(srv));
+        Ai::Response r = awaitReply(client.listModels());
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.models, QStringList({"gem", "tessera-test", "zeta"}));
+        QCOMPARE(srv.requests.first().headers.value("authorization"), QByteArray("Bearer secret-key-123"));
+
+        r = awaitReply(client.testConnection());
+        QVERIFY2(r.ok, qPrintable(r.error));
+
+        Ai::Config other = localConfig(srv);
+        other.model = "assente";
+        Ai::Client c2(other);
+        r = awaitReply(c2.testConnection());
+        QVERIFY(!r.ok);
+        QCOMPARE(r.kind, Ai::ErrorKind::ModelNotFound);
+        QVERIFY(r.error.contains("assente"));
+
+        // Listing the models needs no model name.
+        Ai::Config noModel = localConfig(srv);
+        noModel.model.clear();
+        Ai::Client c3(noModel);
+        QVERIFY(awaitReply(c3.listModels()).ok);
+
+        // Not an OpenAI-compatible server.
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, "{\"version\":\"1\"}"}; };
+        QCOMPARE(awaitReply(client.listModels()).kind, Ai::ErrorKind::BadResponse);
+
+        // A server without /models: a one-token request decides.
+        srv.requests.clear();
+        srv.handler = [](const FakeHttp::Req &q) {
+            if (q.path == "/v1/chat/completions")
+                return FakeHttp::Res{200, completion("pong")};
+            return FakeHttp::Res{404, "{}"};
+        };
+        r = awaitReply(client.testConnection());
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(srv.requests.size(), 2);
+        QCOMPARE(QJsonDocument::fromJson(srv.requests.at(1).body).object().value("max_tokens").toInt(), 1);
+
+        // Cancelling the test cancels the call in flight.
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, {}, true}; };
+        Ai::Reply *t = client.testConnection();
+        QSignalSpy spy(t, &Ai::Reply::finished);
+        QTimer::singleShot(150, t, [t] { t->cancel(); });
+        QVERIFY(spy.wait(3000));
+        QCOMPARE(t->response().kind, Ai::ErrorKind::Cancelled);
+    }
+
+    void aiNoNetworkWithoutExplicitCall()
+    {
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, completion("x")}; };
+        Ai::Client client(localConfig(srv));
+        QTest::qWait(150);
+        QCOMPARE(srv.requests.size(), 0); // creating a client sends nothing
+
+        QTemporaryDir dir;
+        Ai::Settings::useFilesForTesting(dir.filePath("s.ini"), dir.filePath("admin.ini"));
+        Ai::Config cloud;
+        cloud.provider = Ai::Provider::OpenAi;
+        cloud.baseUrl = Ai::defaultBaseUrl(cloud.provider);
+        cloud.model = "m";
+        cloud.apiKey = "k";
+        QVERIFY(cloud.isConfigured());
+        QString err;
+        QVERIFY(!Ai::Settings::mayCall(cloud));
+        QVERIFY(!Ai::makeClient(cloud, nullptr, &err)); // cloud without confirmation
+        QVERIFY(!err.isEmpty());
+        Ai::Settings::setCloudConfirmed(Ai::Provider::OpenAi, true);
+        QVERIFY(Ai::Settings::mayCall(cloud));
+        Ai::Client *c = Ai::makeClient(cloud, nullptr, &err);
+        QVERIFY(c);
+        delete c;
+        // Local server: no confirmation needed; no provider: no client.
+        QVERIFY(Ai::Settings::mayCall(localConfig(srv)));
+        QVERIFY(!Ai::makeClient(Ai::Config(), nullptr, &err));
+        // Cloud providers must use https.
+        cloud.baseUrl = "http://api.example.com/v1";
+        QVERIFY(!cloud.isConfigured());
+        Ai::Settings::useFilesForTesting({}, {});
+        QCOMPARE(srv.requests.size(), 0);
+    }
+
+    void aiSettingsSecretsAndLock()
+    {
+        QTemporaryDir dir;
+        const QString ini = dir.filePath("s.ini"), admin = dir.filePath("admin.ini");
+        Ai::Settings::useFilesForTesting(ini, admin);
+
+        QCOMPARE(Ai::Settings::load().provider, Ai::Provider::None); // default: no AI
+        Ai::Config c;
+        c.provider = Ai::Provider::OpenAi;
+        c.baseUrl = Ai::defaultBaseUrl(c.provider);
+        c.model = "gpt-test";
+        c.apiKey = "sk-SECRET-VALUE";
+        c.timeoutSec = 33;
+        QVERIFY(Ai::Settings::save(c));
+        const Ai::Config back = Ai::Settings::load();
+        QCOMPARE(back.provider, Ai::Provider::OpenAi);
+        QCOMPARE(back.model, QString("gpt-test"));
+        QCOMPARE(back.timeoutSec, 33);
+        QCOMPARE(back.apiKey, QString("sk-SECRET-VALUE")); // from the credential store
+        // The key is not in the settings file.
+        QFile f(ini);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray text = f.readAll();
+        QVERIFY(!text.contains("SECRET"));
+        QVERIFY(text.contains("gpt-test"));
+        f.close();
+
+        // Administrator lock: settings come from the file and cannot be changed.
+        {
+            QFile a(admin);
+            QVERIFY(a.open(QIODevice::WriteOnly));
+            a.write("[AI]\nLocked=true\nProvider=local\nUrl=http://lab-server:11434/v1\nModel=llama3\nTimeout=200\n");
+        }
+        QVERIFY(Ai::Settings::isLocked());
+        const Ai::Config locked = Ai::Settings::load();
+        QCOMPARE(locked.provider, Ai::Provider::Local);
+        QCOMPARE(locked.baseUrl, QString("http://lab-server:11434/v1"));
+        QCOMPARE(locked.model, QString("llama3"));
+        QCOMPARE(locked.timeoutSec, 200);
+        QString err;
+        QVERIFY(!Ai::Settings::save(c, &err));
+        QVERIFY(!err.isEmpty());
+        QCOMPARE(Ai::Settings::load().model, QString("llama3"));
+        // Disabled: no provider whatever the settings say.
+        {
+            QFile a(admin);
+            QVERIFY(a.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            a.write("[AI]\nDisabled=true\n");
+        }
+        QVERIFY(Ai::Settings::isLocked());
+        QCOMPARE(Ai::Settings::load().provider, Ai::Provider::None);
+
+        // The author of AI codings.
+        QCOMPARE(Ai::authorName(back), QString("AI (modello gpt-test)"));
+        Ai::Settings::useFilesForTesting({}, {});
+    }
+
+    void aiChunkingAndDescriptions()
+    {
+        QString text;
+        for (int i = 0; i < 200; ++i)
+            text += QString("Paragrafo %1. Una frase lunga abbastanza per contare qualcosa. Altra frase.\n\n").arg(i);
+        QCOMPARE(Ai::estimateTokens("abcdefgh"), 2);
+        QCOMPARE(Ai::estimateTokens(""), 0);
+        const QStringList chunks = Ai::splitIntoChunks(text, 500);
+        QVERIFY(chunks.size() > 5);
+        QCOMPARE(chunks.join(QString()), text); // nothing lost, nothing duplicated
+        for (const QString &c : chunks) {
+            QVERIFY(Ai::estimateTokens(c) <= 500);
+            QVERIFY(c.endsWith("\n\n")); // cut at paragraph boundaries
+        }
+        QCOMPARE(Ai::splitIntoChunks("breve", 500), QStringList({"breve"}));
+        QVERIFY(Ai::splitIntoChunks(QString(), 10).isEmpty());
+        // No separator at all, with emoji: hard cut that keeps the text.
+        const QString solid = QString("\U0001F600").repeated(100) + QString("x").repeated(50);
+        const QStringList solidChunks = Ai::splitIntoChunks(solid, 10);
+        QCOMPARE(solidChunks.join(QString()), solid);
+        for (const QString &c : solidChunks)
+            QVERIFY(!c.isEmpty() && !c.back().isHighSurrogate());
+
+        QCOMPARE(Ai::countWords("Una frase, di sei parole."), 5);
+        QCOMPARE(Ai::describeInput(3, 12000), QString("3 documenti, ~12.000 parole"));
+        QCOMPARE(Ai::describeInput(1, 1), QString("1 documento, ~1 parola"));
+    }
+
+    void aiLogInProject()
+    {
+        Project p;
+        QVERIFY(p.create(path("ailog.tsra")));
+        QCOMPARE(p.schemaVersion(), 11);
+        QVERIFY(!p.aiLogEnabled());
+        QCOMPARE(p.addAiLog("f", "local", "m", "in", "out"), qint64(0)); // off by default
+        p.setAiLogEnabled(true);
+        QSignalSpy spy(&p, &Project::aiLogChanged);
+        const bool couldUndo = p.canUndo();
+        const qint64 id = p.addAiLog("suggerimento codici", "local", "llama3", "3 documenti, ~12.000 parole", "{\"codes\":[]}");
+        QVERIFY(id > 0);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(p.canUndo(), couldUndo); // the log is not an undo step
+        const QList<AiLogEntry> log = p.aiLog();
+        QCOMPARE(log.size(), 1);
+        QCOMPARE(log.first().function, QString("suggerimento codici"));
+        QCOMPARE(log.first().model, QString("llama3"));
+        QCOMPARE(log.first().inputSummary, QString("3 documenti, ~12.000 parole"));
+        QVERIFY(log.first().createdAt.isValid());
+        p.close();
+        QVERIFY(p.open(path("ailog.tsra")));
+        QVERIFY(p.aiLogEnabled());
+        QCOMPARE(p.aiLog().size(), 1);
+        QVERIFY(p.clearAiLog());
+        QVERIFY(p.aiLog().isEmpty());
     }
 };
 

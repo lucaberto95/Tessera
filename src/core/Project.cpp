@@ -705,6 +705,12 @@ QList<Project::Migration> Project::builtInMigrations()
          {// Formatting of text documents (issue #32): character styles and paragraph kinds as ranges of the
           // plain text (see RichText.h), which stays the base of every position.
           QStringLiteral("ALTER TABLE documents ADD COLUMN rich_content TEXT NOT NULL DEFAULT ''")}},
+        {11,
+         {// Log of the requests made to language models (issue #39). Deliberately outside the undo triggers.
+          QStringLiteral("CREATE TABLE ai_log ("
+                         " id INTEGER PRIMARY KEY, function TEXT NOT NULL, provider TEXT NOT NULL,"
+                         " model TEXT NOT NULL, created_at TEXT NOT NULL, input_summary TEXT NOT NULL DEFAULT '',"
+                         " output TEXT NOT NULL DEFAULT '')")}},
     };
 }
 
@@ -2208,6 +2214,52 @@ bool Project::deleteSummaryTable(qint64 id)
     notify(&Project::summariesChanged);
     return true;
 }
+// ---------------------------------------------------------------- AI log
+
+bool Project::aiLogEnabled() const
+{
+    return meta(QStringLiteral("ai_log")) == QLatin1String("1");
+}
+
+void Project::setAiLogEnabled(bool enabled)
+{
+    setMeta(QStringLiteral("ai_log"), enabled ? QStringLiteral("1") : QStringLiteral("0"));
+}
+
+qint64 Project::addAiLog(const QString &function, const QString &provider, const QString &model,
+                         const QString &inputSummary, const QString &output)
+{
+    if (!aiLogEnabled())
+        return 0;
+    const qint64 id = insert(QStringLiteral("INSERT INTO ai_log(function, provider, model, created_at, input_summary, "
+                                            "output) VALUES (?, ?, ?, ?, ?, ?)"),
+                             {function, provider, model, isoNow(), inputSummary, output});
+    if (id)
+        emit aiLogChanged();
+    return id;
+}
+
+QList<AiLogEntry> Project::aiLog() const
+{
+    QList<AiLogEntry> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id, function, provider, model, created_at, input_summary, output FROM ai_log "
+                          "ORDER BY id"));
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toString(), q.value(3).toString(),
+                    fromIso(q.value(4)).toLocalTime(),
+                    q.value(5).toString(), q.value(6).toString()});
+    return out;
+}
+
+bool Project::clearAiLog()
+{
+    if (!exec(QStringLiteral("DELETE FROM ai_log")))
+        return false;
+    emit aiLogChanged();
+    return true;
+}
+
 // ---------------------------------------------------------------- dictionaries
 
 QList<Dictionary> Project::dictionaries() const

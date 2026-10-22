@@ -4,7 +4,7 @@ project(Tessera VERSION 0.25.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Concurrent Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Concurrent Network Test)
 qt_standard_project_setup()
 
 if(MSVC)
@@ -35,12 +35,17 @@ qt_add_library(tessera_core STATIC
     src/core/Dictionaries.h src/core/Dictionaries.cpp
     src/core/WordFrequencies.h src/core/WordFrequencies.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
+    src/core/ai/AiConfig.h src/core/ai/AiConfig.cpp
+    src/core/ai/AiClient.h src/core/ai/AiClient.cpp
 )
 target_include_directories(tessera_core PUBLIC src)
 target_compile_definitions(tessera_core PUBLIC TESSERA_VERSION_STRING="${PROJECT_VERSION}")
 target_link_libraries(tessera_core
-    PUBLIC Qt6::Core Qt6::Gui Qt6::Sql Qt6::Pdf
+    PUBLIC Qt6::Core Qt6::Gui Qt6::Sql Qt6::Pdf Qt6::Network
     PRIVATE Qt6::CorePrivate)
+if(WIN32)
+    target_link_libraries(tessera_core PRIVATE advapi32) # Credential Manager (API keys)
+endif()
 
 option(TESSERA_BUILD_APP "Build the desktop application (off = core library and tests only)" ON)
 
@@ -72,6 +77,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/SurveyImportDialog.h src/ui/SurveyImportDialog.cpp
     src/ui/DictionaryDialog.h src/ui/DictionaryDialog.cpp
     src/ui/WordFrequencyDialog.h src/ui/WordFrequencyDialog.cpp
+    src/ui/AiSettingsDialog.h src/ui/AiSettingsDialog.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent)

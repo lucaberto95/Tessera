@@ -169,6 +169,17 @@ struct SummaryTable {
     QString uuid;
 };
 
+// One request made to a language model (issue #39), kept for transparency and reproducibility. Not part of undo.
+struct AiLogEntry {
+    qint64 id = 0;
+    QString function; // what the request was for (e.g. "suggerimento codici")
+    QString provider;
+    QString model;
+    QDateTime createdAt;
+    QString inputSummary; // what was sent, in words ("3 documenti, ~12.000 parole"), not the text itself
+    QString output;
+};
+
 QString documentKindToString(DocumentKind k);
 DocumentKind documentKindFromString(const QString &s);
 QString segmentKindToString(SegmentKind k);

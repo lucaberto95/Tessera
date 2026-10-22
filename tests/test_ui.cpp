@@ -1,6 +1,9 @@
 // Smoke tests for the widgets: build every view/dialog on the example project, exercise the main
 // interactions and optionally save screenshots (set TESSERA_SHOTS to a directory).
+#include "FakeHttp.h"
 #include "core/DemoProject.h"
+#include "core/ai/AiConfig.h"
+#include "ui/AiSettingsDialog.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
 #include "ui/AgreementDialog.h"
@@ -45,6 +48,7 @@
 #include <QDir>
 #include <QImage>
 #include <QLineEdit>
+#include <QMenuBar>
 #include <QListWidget>
 #include <QMimeData>
 #include <QPainter>
@@ -1727,6 +1731,121 @@ private slots:
         const QString m = QString::fromUtf8(mainCpp.readAll());
         QVERIFY(m.contains("positionalArguments()") && m.contains("openProject"));
         QVERIFY(m.contains("setWindowIcon"));
+    }
+
+    void aiSettingsDialog()
+    {
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &q) {
+            if (q.path == "/v1/models")
+                return FakeHttp::Res{200, R"({"data":[{"id":"m1"},{"id":"llama3"}]})"};
+            return FakeHttp::Res{404, "{}"};
+        };
+        QTemporaryDir dir;
+        Ai::Settings::useFilesForTesting(dir.filePath("s.ini"), dir.filePath("admin.ini"));
+        Project p;
+        QVERIFY(p.create(dir.filePath("ai.tsra")));
+
+        {
+            AiSettingsDialog dlg(&p);
+            QCOMPARE(dlg.config().provider, Ai::Provider::None); // no AI by default
+            dlg.selectProvider(Ai::Provider::Local);
+            QCOMPARE(dlg.config().baseUrl, QString("http://localhost:11434/v1"));
+            Ai::Config cfg = dlg.config();
+            cfg.baseUrl = srv.url();
+            cfg.model = "m1";
+            dlg.setConfig(cfg);
+            QTest::qWait(100);
+            QCOMPARE(srv.requests.size(), 0); // opening and editing the dialog sends nothing
+
+            dlg.refreshModels();
+            QVERIFY(dlg.isBusy());
+            QTRY_VERIFY(!dlg.isBusy());
+            QVERIFY2(!dlg.statusIsError(), qPrintable(dlg.statusText()));
+            QCOMPARE(dlg.modelList(), QStringList({"llama3", "m1"}));
+
+            dlg.testConnection();
+            QTRY_VERIFY(!dlg.isBusy());
+            QVERIFY2(!dlg.statusIsError(), qPrintable(dlg.statusText()));
+            QVERIFY(dlg.statusText().contains("riuscita"));
+
+            cfg.model = "assente";
+            dlg.setConfig(cfg);
+            dlg.testConnection();
+            QTRY_VERIFY(!dlg.isBusy());
+            QVERIFY(dlg.statusIsError());
+            QVERIFY(dlg.statusText().contains("assente"));
+
+            cfg.model = "llama3";
+            dlg.setConfig(cfg);
+            auto *log = dlg.findChild<QCheckBox *>();
+            QVERIFY(log);
+            log->setChecked(true);
+            dlg.accept();
+            QVERIFY(p.aiLogEnabled());
+        }
+        const Ai::Config saved = Ai::Settings::load();
+        QCOMPARE(saved.provider, Ai::Provider::Local);
+        QCOMPARE(saved.model, QString("llama3"));
+        QCOMPARE(saved.baseUrl, srv.url());
+
+        // A cloud provider needs the explicit confirmation of what is sent, and nothing leaves before it.
+        {
+            AiSettingsDialog dlg(&p);
+            QString shown;
+            bool answer = false;
+            dlg.setConfirmHandler([&](const QString &notice) {
+                shown = notice;
+                return answer;
+            });
+            Ai::Config cfg;
+            cfg.provider = Ai::Provider::OpenAi;
+            cfg.baseUrl = Ai::defaultBaseUrl(cfg.provider);
+            cfg.model = "gpt-test";
+            cfg.apiKey = "sk-test";
+            dlg.setConfig(cfg);
+            QVERIFY(!dlg.apply());
+            QVERIFY(shown.contains("OpenAI") && shown.contains("fuori dal tuo computer"));
+            QVERIFY(!Ai::Settings::cloudConfirmed(Ai::Provider::OpenAi));
+            dlg.testConnection(); // declined again: no request is made
+            QVERIFY(!dlg.isBusy());
+            QVERIFY(dlg.statusIsError());
+            QCOMPARE(Ai::Settings::load().provider, Ai::Provider::Local); // unchanged
+
+            answer = true;
+            QVERIFY(dlg.apply());
+            QVERIFY(Ai::Settings::cloudConfirmed(Ai::Provider::OpenAi));
+            QCOMPARE(Ai::Settings::load().provider, Ai::Provider::OpenAi);
+            QCOMPARE(Ai::Settings::load().apiKey, QString("sk-test"));
+        }
+
+        // Locked by the administrator: the fields cannot be edited and nothing is saved.
+        {
+            QFile a(dir.filePath("admin.ini"));
+            QVERIFY(a.open(QIODevice::WriteOnly));
+            a.write("[AI]\nLocked=true\nProvider=local\nUrl=http://lab:11434/v1\nModel=llama3\n");
+            a.close();
+            AiSettingsDialog dlg(&p);
+            QCOMPARE(dlg.config().baseUrl, QString("http://lab:11434/v1"));
+            const auto edits = dlg.findChildren<QLineEdit *>();
+            QVERIFY(!edits.isEmpty());
+            for (QLineEdit *e : edits)
+                QVERIFY(!e->isEnabled());
+            QVERIFY(dlg.apply());
+            QCOMPARE(Ai::Settings::load().baseUrl, QString("http://lab:11434/v1"));
+        }
+        Ai::Settings::useFilesForTesting({}, {});
+    }
+
+    void aiSettingsMenuEntry()
+    {
+        MainWindow w;
+        bool found = false;
+        for (QAction *a : w.menuBar()->actions())
+            if (a->menu() && a->menu()->title().contains("Impostazioni"))
+                for (QAction *e : a->menu()->actions())
+                    found = found || e->text().contains("AI");
+        QVERIFY(found);
     }
 };
 

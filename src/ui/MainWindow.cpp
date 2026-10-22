@@ -13,6 +13,7 @@
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
 #include "ui/AgreementDialog.h"
+#include "ui/AiSettingsDialog.h"
 #include "ui/ReportDialog.h"
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
@@ -213,6 +214,7 @@ void MainWindow::createActions()
     m_projectMemo->setIcon(Ui::memoIcon());
 
     m_userName = make(tr("&Nome utente…"), &MainWindow::setUserName, {}, false);
+    m_aiSettings = make(tr("&AI…"), &MainWindow::showAiSettings, {}, false);
     m_about = make(tr("&Informazioni su Tessera"), &MainWindow::about, {}, false);
 }
 
@@ -296,6 +298,7 @@ void MainWindow::createMenus()
 
     QMenu *settings = menuBar()->addMenu(tr("&Impostazioni"));
     settings->addAction(m_userName);
+    settings->addAction(m_aiSettings);
 
     QMenu *help = menuBar()->addMenu(tr("&Aiuto"));
     help->addAction(m_about);
@@ -1075,6 +1078,12 @@ void MainWindow::setUserName()
         return;
     m_project->setAuthor(name);
     QSettings().setValue(QStringLiteral("user/name"), name);
+}
+
+void MainWindow::showAiSettings()
+{
+    AiSettingsDialog dlg(m_project->isOpen() ? m_project : nullptr, this);
+    dlg.exec();
 }
 
 void MainWindow::askUserNameOnFirstRun()

@@ -237,9 +237,19 @@ public:
     bool updateSummaryTable(qint64 id, const QString &name, const QString &configJson);
     bool deleteSummaryTable(qint64 id);
 
+    // Log of the requests made to language models (issue #39). Optional, off by default (meta "ai_log"):
+    // addAiLog does nothing and returns 0 while it is off. Not undoable, not merged, not exported. Never holds keys.
+    bool aiLogEnabled() const;
+    void setAiLogEnabled(bool enabled);
+    qint64 addAiLog(const QString &function, const QString &provider, const QString &model,
+                    const QString &inputSummary, const QString &output);
+    QList<AiLogEntry> aiLog() const;
+    bool clearAiLog();
+
 signals:
     void opened();
     void summariesChanged();
+    void aiLogChanged();
     void closed();
     void groupsChanged();
     void documentsChanged();
