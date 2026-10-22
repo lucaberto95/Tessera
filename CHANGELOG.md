@@ -2,6 +2,17 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.10.0] - 2026-10-22 — Collegamenti tra brani dei documenti (#8)
+Commit `e0199f8`
+
+- Collegamenti ipertestuali tra due brani, nello stesso documento o in documenti diversi: «Inizia collegamento» (`Ctrl+L`) sulla selezione, poi «Completa collegamento» (`Ctrl+Shift+L`) sulla destinazione, anche dal menu contestuale.
+- Il testo collegato è blu e sottolineato; `Ctrl+clic` (o il menu contestuale) apre l'altra estremità, in entrambe le direzioni. Il tooltip mostra la destinazione e il commento.
+- Finestra *Collegamenti…* (menu Documenti): tutti i link con le due estremità, commento, autore e data; doppio clic per aprire un'estremità, commento modificabile, eliminazione (annullabile).
+- Quando si modifica il testo di un documento le estremità si spostano come le codifiche; un link il cui testo viene cancellato del tutto sparisce.
+- Nuova tabella `links` (migrazione dello schema alla versione 3, con copia di sicurezza del file all'apertura).
+- QDPX: i collegamenti vengono esportati (`<Links>` tra selezioni di testo senza codifica) e reimportati; i collegamenti tra altri oggetti di altri programmi sono ignorati e segnalati.
+- Il progetto di esempio contiene un collegamento.
+
 ## [0.9.1] - 2026-10-22 — Correzioni di sicurezza e bachi
 Commit `a918403`
 
