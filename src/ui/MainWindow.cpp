@@ -93,7 +93,13 @@ MainWindow::MainWindow(QWidget *parent)
     updateTitle();
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow()
+{
+    // Child widgets emit signals while they are destroyed; our slots must not run on half-deleted actions.
+    const QList<QObject *> children = findChildren<QObject *>();
+    for (QObject *child : children)
+        child->disconnect(this);
+}
 
 void MainWindow::createActions()
 {
@@ -156,7 +162,8 @@ void MainWindow::createActions()
     m_editText->setCheckable(true);
     m_exportCodebook = make(tr("Esporta &codebook…"), &MainWindow::exportCodebook);
 
-    m_search = make(tr("&Ricerca lessicale…"), &MainWindow::showSearch, QKeySequence::Find, true,
+    m_search = make(tr("&Ricerca lessicale…"), &MainWindow::showSearch,
+                    QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F), true,
                     QStyle::SP_FileDialogContentsView);
     m_matrix = make(tr("&Matrice codici × documenti…"), &MainWindow::showMatrix, QKeySequence(Qt::CTRL | Qt::Key_M));
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
