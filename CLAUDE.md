@@ -184,8 +184,9 @@ variabili…", logica in `src/core/VariableFilter.*`; un valore vuoto o non vali
 **#13** co-occorrenze dei codici (menu Analisi ▸ "Co-occorrenze dei codici…", logica in
 `src/core/Cooccurrence.*`; diagonale = frequenze; il Jaccard è `min(coinvolti) / (fa + fb - min)`, esatto per
 "stesso documento").
-**#21** (parziale, issue ancora aperta) statistiche e tabelle incrociate (menu Analisi ▸ "Statistiche e tabelle incrociate…",
-logica in `src/core/Stats.*`); mancano grafici, chi-quadrato con p-value e classi per date.
+**#21** statistiche delle variabili e tabelle incrociate (menu Analisi ▸ "Statistiche e tabelle incrociate…", logica in
+`src/core/Stats.*`; grafico a barre/istogramma con Qt Charts, chi-quadrato con p-value dalla gamma incompleta, `codesToVariables`;
+non ci sono classi per le variabili di tipo data).
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.

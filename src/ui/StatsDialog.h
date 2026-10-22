@@ -6,6 +6,7 @@
 #include <QDialog>
 
 class Project;
+class QChartView;
 class QComboBox;
 class QLabel;
 class QSpinBox;
@@ -29,9 +30,13 @@ public:
     void setMeasure(Stats::Measure measure);
     void setPercent(Stats::Percent percent);
     const Stats::Crosstab &crosstab() const { return m_crosstab; }
+    const Stats::ChiSquare &chiSquare() const { return m_chi; }
+    // Bars of the chart shown for the selected variable (frequencies, or histogram classes).
+    int chartBars() const { return m_chartBars; }
 
 private:
     void fillVariables();
+    void rebuildChart();
     void rebuildStats();
     void rebuildCrosstab();
     void exportTable(const Exporters::Table &table, const QString &suffix);
@@ -41,12 +46,16 @@ private:
     QList<qint64> m_codeIds;
     Stats::VariableStats m_stats;
     Stats::Crosstab m_crosstab;
+    Stats::ChiSquare m_chi;
+    int m_chartBars = 0;
     Exporters::Table m_statsExport;
     Exporters::Table m_crosstabExport;
 
     QComboBox *m_variable;
     QTableWidget *m_statsTable;
     QLabel *m_summary;
+    QChartView *m_chart;
+    QLabel *m_chiSquare;
 
     QComboBox *m_columns;
     QComboBox *m_columnVariable;

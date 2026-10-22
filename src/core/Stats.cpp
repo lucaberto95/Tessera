@@ -69,6 +69,7 @@ VariableStats describe(VariableType type, const QStringList &values)
         double sum = 0;
         for (double x : numbers)
             sum += x;
+        s.values = numbers;
         s.mean = sum / n;
         s.min = numbers.first();
         s.max = numbers.last();
@@ -264,6 +265,98 @@ Crosstab crosstab(const QList<qint64> &codes, const QList<Group> &columns, const
         }
     }
     return t;
+}
+
+Histogram histogram(const VariableStats &stats, int bins)
+{
+    Histogram h;
+    if (stats.values.isEmpty())
+        return h;
+    if (bins <= 0)
+        bins = int(std::ceil(std::log2(double(stats.values.size())) + 1));
+    const double lo = stats.min;
+    const double width = (stats.max - stats.min) / bins;
+    for (int i = 0; i <= bins; ++i)
+        h.edges << (i == bins ? stats.max : lo + i * width);
+    h.counts.fill(0, bins);
+    for (double x : stats.values)
+        ++h.counts[width > 0 ? std::clamp(int((x - lo) / width), 0, bins - 1) : 0];
+    return h;
+}
+
+namespace {
+
+// Regularized lower incomplete gamma P(a, x): series for x < a + 1, continued fraction otherwise.
+double gammaP(double a, double x)
+{
+    if (x <= 0)
+        return 0;
+    const double front = std::exp(-x + a * std::log(x) - std::lgamma(a));
+    if (x < a + 1) {
+        double term = 1 / a, sum = term;
+        for (int n = 1; n < 1000 && std::abs(term) > std::abs(sum) * 1e-15; ++n) {
+            term *= x / (a + n);
+            sum += term;
+        }
+        return front * sum;
+    }
+    const double tiny = 1e-300;
+    double b = x + 1 - a, c = 1 / tiny, d = 1 / b, h = d;
+    for (int i = 1; i < 1000; ++i) {
+        const double an = -i * (i - a);
+        b += 2;
+        d = an * d + b;
+        if (std::abs(d) < tiny) d = tiny;
+        c = b + an / c;
+        if (std::abs(c) < tiny) c = tiny;
+        d = 1 / d;
+        const double delta = d * c;
+        h *= delta;
+        if (std::abs(delta - 1) < 1e-15)
+            break;
+    }
+    return 1 - front * h;
+}
+
+} // namespace
+
+double chiSquareSurvival(double x, int df)
+{
+    if (df <= 0)
+        return 1;
+    if (x <= 0)
+        return 1;
+    return std::clamp(1 - gammaP(df / 2.0, x / 2.0), 0.0, 1.0);
+}
+
+ChiSquare chiSquare(const Crosstab &table)
+{
+    ChiSquare r;
+    QList<int> rows, cols;
+    for (int i = 0; i < table.counts.size(); ++i)
+        if (table.rowTotal(i) > 0)
+            rows << i;
+    for (int j = 0; j < table.columns.size(); ++j)
+        if (table.columnTotal(j) > 0)
+            cols << j;
+    if (rows.size() < 2 || cols.size() < 2)
+        return r;
+
+    double total = 0;
+    for (int i : rows)
+        total += table.rowTotal(i);
+    for (int i : rows)
+        for (int j : cols) {
+            const double expected = double(table.rowTotal(i)) * table.columnTotal(j) / total;
+            const double diff = table.count(i, j) - expected;
+            r.statistic += diff * diff / expected;
+            if (expected < 5)
+                ++r.smallExpected;
+        }
+    r.valid = true;
+    r.df = int((rows.size() - 1) * (cols.size() - 1));
+    r.pValue = chiSquareSurvival(r.statistic, r.df);
+    return r;
 }
 
 QList<qint64> codesToVariables(Project &project, const QList<qint64> &codes, Measure measure)

@@ -2,15 +2,22 @@
 #include "core/Project.h"
 #include "ui/UiUtils.h"
 
+#include <QBarCategoryAxis>
+#include <QBarSeries>
+#include <QBarSet>
+#include <QChart>
+#include <QChartView>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QPainter>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QValueAxis>
 #include <QVBoxLayout>
 
 namespace {
@@ -44,6 +51,8 @@ StatsDialog::StatsDialog(Project *project, const QList<qint64> &activeDocuments,
     , m_variable(new QComboBox)
     , m_statsTable(new QTableWidget)
     , m_summary(new QLabel)
+    , m_chart(new QChartView)
+    , m_chiSquare(new QLabel)
     , m_columns(new QComboBox)
     , m_columnVariable(new QComboBox)
     , m_bins(new QSpinBox)
@@ -94,7 +103,10 @@ StatsDialog::StatsDialog(Project *project, const QList<qint64> &activeDocuments,
     statsBar->addWidget(statsCsv);
     statsLayout->addLayout(statsBar);
     statsLayout->addWidget(m_summary);
-    statsLayout->addWidget(m_statsTable);
+    m_chart->setMinimumHeight(220);
+    m_chart->setRenderHint(QPainter::Antialiasing);
+    statsLayout->addWidget(m_chart, 1);
+    statsLayout->addWidget(m_statsTable, 1);
     tabs->addTab(statsPage, tr("Variabili"));
 
     auto *crossPage = new QWidget;
@@ -122,6 +134,8 @@ StatsDialog::StatsDialog(Project *project, const QList<qint64> &activeDocuments,
     crossBar->addWidget(toVariables);
     crossLayout->addLayout(crossBar);
     crossLayout->addWidget(m_crosstabTable);
+    m_chiSquare->setWordWrap(true);
+    crossLayout->addWidget(m_chiSquare);
     tabs->addTab(crossPage, tr("Tabella incrociata"));
 
     auto *layout = new QVBoxLayout(this);
@@ -230,6 +244,61 @@ void StatsDialog::rebuildStats()
     }
     m_statsTable->horizontalHeader()->setStretchLastSection(true);
     m_statsTable->resizeColumnsToContents();
+    rebuildChart();
+}
+
+void StatsDialog::rebuildChart()
+{
+    // Numeric variables: histogram; the others: one bar per value (the 25 most frequent).
+    QStringList categories;
+    QList<int> values;
+    const Stats::VariableStats &s = m_stats;
+    if (s.numeric) {
+        const Stats::Histogram h = Stats::histogram(s);
+        for (int i = 0; i < h.counts.size(); ++i) {
+            categories << QStringLiteral("%1–%2").arg(QString::number(h.edges[i], 'g', 4),
+                                                       QString::number(h.edges[i + 1], 'g', 4));
+            values << h.counts[i];
+        }
+    } else {
+        for (int i = 0; i < s.frequencies.size() && i < 25; ++i) {
+            const Stats::Frequency &f = s.frequencies[i];
+            categories << (s.type == VariableType::Boolean ? (f.value == QLatin1String("1") ? tr("Vero") : tr("Falso"))
+                                                           : f.value);
+            values << f.count;
+        }
+    }
+    m_chartBars = int(values.size());
+
+    auto *chart = new QChart;
+    if (!values.isEmpty()) {
+        auto *set = new QBarSet(tr("Documenti"));
+        int max = 1;
+        for (int v : values) {
+            *set << v;
+            max = qMax(max, v);
+        }
+        auto *series = new QBarSeries;
+        series->append(set);
+        series->setLabelsVisible(true);
+        series->setBarWidth(s.numeric ? 1.0 : 0.7);
+        chart->addSeries(series);
+        auto *axisX = new QBarCategoryAxis;
+        axisX->append(categories);
+        chart->addAxis(axisX, Qt::AlignBottom);
+        series->attachAxis(axisX);
+        auto *axisY = new QValueAxis;
+        axisY->setRange(0, max);
+        axisY->setLabelFormat(QStringLiteral("%d"));
+        axisY->applyNiceNumbers();
+        chart->addAxis(axisY, Qt::AlignLeft);
+        series->attachAxis(axisY);
+    }
+    chart->legend()->hide();
+    chart->setTitle(m_variable->currentText());
+    QChart *old = m_chart->chart();
+    m_chart->setChart(chart);
+    delete old;
 }
 
 void StatsDialog::rebuildCrosstab()
@@ -306,6 +375,22 @@ void StatsDialog::rebuildCrosstab()
         if (auto *item = m_crosstabTable->item(last, c))
             item->setFont(bold);
     m_crosstabTable->resizeColumnsToContents();
+
+    m_chi = Stats::chiSquare(m_crosstab);
+    if (!m_chi.valid) {
+        m_chiSquare->setText(tr("Chi-quadrato non calcolabile: servono almeno due righe e due colonne non vuote."));
+    } else {
+        QString text = tr("χ² = %1, gdl = %2, p = %3")
+                           .arg(number(m_chi.statistic)).arg(m_chi.df)
+                           .arg(m_chi.pValue < 0.0001 ? QStringLiteral("< 0,0001")
+                                                      : QString::number(m_chi.pValue, 'f', 4).replace('.', ','));
+        if (m_chi.smallExpected > 0)
+            text += tr(" — attenzione: %n celle con frequenza attesa inferiore a 5, il test è poco affidabile", nullptr,
+                       m_chi.smallExpected);
+        if (kind == Columns::DocumentSets || measure == Stats::Measure::Segments)
+            text += tr(". Indicativo: i segmenti o i set sovrapposti non sono osservazioni indipendenti.");
+        m_chiSquare->setText(text);
+    }
 }
 
 void StatsDialog::exportTable(const Exporters::Table &table, const QString &suffix)

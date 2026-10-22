@@ -391,6 +391,8 @@ private slots:
         QCOMPARE(dlg.variableStats().valid, 2);
         QCOMPARE(dlg.variableStats().frequencies.size(), 2);
 
+        QCOMPARE(dlg.chartBars(), 2); // F and M
+        QVERIFY(!dlg.chiSquare().valid);
         dlg.setColumns(StatsDialog::Columns::Variable, sex);
         QCOMPARE(dlg.crosstab().columns.size(), 2);
         QCOMPARE(dlg.crosstab().count(0, 0), 2);

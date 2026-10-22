@@ -30,6 +30,7 @@ struct VariableStats {
     double stdDev = 0; // sample standard deviation (n - 1); 0 with a single value
     double min = 0;
     double max = 0;
+    QList<double> values; // numeric: the valid values, sorted
     // Every type: distinct valid values, most frequent first (ties by value).
     QList<Frequency> frequencies;
 };
@@ -38,6 +39,13 @@ struct VariableStats {
 VariableStats describe(VariableType type, const QStringList &values);
 // The same for a variable of the project over `documentIds` (empty = all documents).
 VariableStats describe(const Project &project, qint64 variableId, const QList<qint64> &documentIds = {});
+
+struct Histogram {
+    QList<double> edges; // bins + 1 boundaries; every class is [edge, next) except the last, which is closed
+    QList<int> counts;
+};
+// Equal-width classes over the numeric values; bins <= 0 picks Sturges' rule. Empty when there are no values.
+Histogram histogram(const VariableStats &stats, int bins = 0);
 
 // A column of a cross tabulation: documents that share a value, a group or a set.
 struct Group {
@@ -77,6 +85,20 @@ struct Crosstab {
 // `segments` may include other codes and documents: only the rows' codes and the columns' documents count.
 Crosstab crosstab(const QList<qint64> &codes, const QList<Group> &columns, const QList<Segment> &segments,
                   Measure measure);
+
+// Upper tail of the chi-square distribution: P(X >= x) with `df` degrees of freedom.
+double chiSquareSurvival(double x, int df);
+
+struct ChiSquare {
+    bool valid = false; // false with fewer than two non-empty rows or columns
+    double statistic = 0;
+    int df = 0;
+    double pValue = 1;
+    int smallExpected = 0; // cells with expected count < 5: the approximation is then unreliable
+};
+// Independence test on the counts of the table; rows and columns that sum to 0 are ignored. It assumes
+// each unit counts once, so it is only indicative with overlapping groups (sets) or Measure::Segments.
+ChiSquare chiSquare(const Crosstab &table);
 
 // "Transform codes into variables": one integer variable per code holding, for every document, the
 // number of segments (Measure::Segments) or 0/1 (Measure::Documents) of that code. Variables are named

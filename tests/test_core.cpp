@@ -839,6 +839,50 @@ private slots:
         QCOMPARE(b.frequencies.first().count, 2);
     }
 
+    void statsChiSquare()
+    {
+        // Critical values at 5%: chi2(1) = 3.841459, chi2(2) = 5.991465, chi2(4) = 9.487729.
+        QVERIFY(qAbs(Stats::chiSquareSurvival(3.841459, 1) - 0.05) < 1e-5);
+        QVERIFY(qAbs(Stats::chiSquareSurvival(5.991465, 2) - 0.05) < 1e-5);
+        QVERIFY(qAbs(Stats::chiSquareSurvival(9.487729, 4) - 0.05) < 1e-5);
+        QVERIFY(qAbs(Stats::chiSquareSurvival(20, 3) - 0.000167) < 1e-5); // continued-fraction branch
+        QCOMPARE(Stats::chiSquareSurvival(0, 2), 1.0);
+
+        // [[10, 20], [30, 40]]: n (ad - bc)^2 / (r1 r2 c1 c2) = 100 * 200^2 / (30 * 70 * 40 * 60)
+        Stats::Crosstab t;
+        t.columns = {{"a", {}}, {"b", {}}};
+        t.counts = {{10, 20}, {30, 40}};
+        auto r = Stats::chiSquare(t);
+        QVERIFY(r.valid);
+        QCOMPARE(r.df, 1);
+        QVERIFY(qAbs(r.statistic - 0.793651) < 1e-5);
+        QVERIFY(qAbs(r.pValue - 0.3730) < 1e-3);
+        QCOMPARE(r.smallExpected, 0);
+
+        // Empty rows and columns are ignored; a single remaining row cannot be tested.
+        t.counts = {{10, 20}, {0, 0}};
+        QVERIFY(!Stats::chiSquare(t).valid);
+        t.columns = {{"a", {}}, {"b", {}}, {"c", {}}};
+        t.counts = {{1, 0, 3}, {2, 0, 1}};
+        r = Stats::chiSquare(t);
+        QVERIFY(r.valid);
+        QCOMPARE(r.df, 1);
+        QCOMPARE(r.smallExpected, 4);
+    }
+
+    void statsHistogram()
+    {
+        const auto s = Stats::describe(VariableType::Integer, {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"});
+        const auto h = Stats::histogram(s, 3);
+        QCOMPARE(h.edges.size(), 4);
+        QCOMPARE(h.edges.first(), 1.0);
+        QCOMPARE(h.edges.last(), 10.0);
+        QCOMPARE(h.counts, (QList<int>{3, 3, 4})); // [1,4) [4,7) [7,10]
+        QCOMPARE(Stats::histogram(s).counts.size(), 5); // Sturges: ceil(log2(10) + 1)
+        QVERIFY(Stats::histogram(Stats::describe(VariableType::Integer, {"", "x"})).counts.isEmpty());
+        QCOMPARE(Stats::histogram(Stats::describe(VariableType::Integer, {"5", "5"}), 2).counts, (QList<int>{2, 0}));
+    }
+
     void statsCrosstab()
     {
         QTemporaryDir dir;
