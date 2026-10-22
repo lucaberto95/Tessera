@@ -2,6 +2,7 @@
 #include "core/Importers.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
+#include "core/Retrieval.h"
 #include "core/TextUtils.h"
 
 #include <QCryptographicHash>
@@ -25,6 +26,33 @@ private:
         QFile f(path(name));
         QVERIFY(f.open(QIODevice::WriteOnly));
         f.write(data);
+    }
+
+    static Segment seg(qint64 id, qint64 doc, qint64 code, int start, int end)
+    {
+        Segment s;
+        s.id = id;
+        s.documentId = doc;
+        s.codeId = code;
+        s.start = start;
+        s.end = end;
+        return s;
+    }
+
+    static QList<QPair<int, int>> spans(const QList<Retrieval::Result> &r)
+    {
+        QList<QPair<int, int>> out;
+        for (const auto &x : r)
+            out.append({x.start, x.end});
+        return out;
+    }
+
+    static QList<qint64> segmentIds(const QList<Retrieval::Result> &r)
+    {
+        QList<qint64> ids;
+        for (const auto &x : r)
+            ids << x.segmentId;
+        return ids;
     }
 
     // First value of a query run directly on a project file, bypassing Project.
@@ -562,6 +590,121 @@ private slots:
         QString err;
         QVERIFY(Exporters::writeCsv(path("t.csv"), t, &err));
         QCOMPARE(Exporters::readCsv(path("t.csv"), &err), t);
+    }
+
+    void retrievalModes()
+    {
+        using Retrieval::Mode;
+        // Codes: 1 = A, 2 = B, 3 = C. Document 10 has nested/adjacent cases, document 11 identical ones.
+        const QList<Segment> segs{seg(1, 10, 1, 0, 10),  seg(2, 10, 1, 20, 30), seg(3, 10, 2, 5, 15),
+                                  seg(4, 10, 2, 30, 40), // starts where A#2 ends: not overlapping
+                                  seg(5, 10, 3, 8, 12),  seg(6, 10, 1, 8, 12), // A#6 nested in B#3
+                                  seg(7, 11, 1, 0, 5),   seg(8, 11, 2, 0, 5)};
+        Retrieval::Query q;
+        q.codesA = {1};
+        q.codesB = {2};
+
+        q.mode = Mode::Overlap;
+        auto r = Retrieval::run(q, segs);
+        QCOMPARE(spans(r), (QList<QPair<int, int>>{{0, 10}, {8, 12}, {0, 5}}));
+        QCOMPARE(segmentIds(r), (QList<qint64>{1, 6, 7}));
+
+        q.mode = Mode::OnlyThisCode;
+        QCOMPARE(segmentIds(Retrieval::run(q, segs)), (QList<qint64>{2}));
+
+        q.mode = Mode::IfInside;
+        QCOMPARE(segmentIds(Retrieval::run(q, segs)), (QList<qint64>{6, 7}));
+
+        q.mode = Mode::IfOutside;
+        QCOMPARE(segmentIds(Retrieval::run(q, segs)), (QList<qint64>{1, 2}));
+
+        // A segment never counts as overlapping itself when a code is in both lists.
+        Retrieval::Query self;
+        self.mode = Mode::Overlap;
+        self.codesA = {1};
+        self.codesB = {1};
+        QVERIFY(Retrieval::run(self, {seg(1, 10, 1, 0, 10), seg(2, 10, 1, 20, 30)}).isEmpty());
+
+        // Adjacent segments (end == start) do not overlap.
+        q.mode = Mode::Overlap;
+        QVERIFY(Retrieval::run(q, {seg(1, 10, 1, 0, 10), seg(2, 10, 2, 10, 20)}).isEmpty());
+        // An empty list gives no results.
+        q.codesB.clear();
+        QVERIFY(Retrieval::run(q, segs).isEmpty());
+    }
+
+    void retrievalIntersections()
+    {
+        using Retrieval::Mode;
+        Retrieval::Query q;
+        q.mode = Mode::Intersection;
+        q.codesA = {1, 2};
+        // Code 1: 0-10; code 2: 5-15 and 8-20; code 3 (not in the query) covers everything.
+        const QList<Segment> segs{seg(1, 10, 1, 0, 10), seg(2, 10, 2, 5, 15), seg(3, 10, 2, 8, 20),
+                                  seg(4, 10, 3, 0, 100)};
+        auto r = Retrieval::run(q, segs);
+        QCOMPARE(spans(r), (QList<QPair<int, int>>{{5, 10}}));
+        QCOMPARE(r[0].codeIds, (QList<qint64>{1, 2}));
+        QCOMPARE(r[0].segmentId, qint64(0)); // a new interval, not a stored segment
+
+        QVERIFY(Retrieval::run(q, {seg(1, 10, 1, 0, 10), seg(2, 10, 2, 10, 20)}).isEmpty()); // adjacent
+        QCOMPARE(spans(Retrieval::run(q, {seg(1, 10, 1, 3, 9), seg(2, 10, 2, 3, 9)})),
+                 (QList<QPair<int, int>>{{3, 9}})); // identical
+        QCOMPARE(spans(Retrieval::run(q, {seg(1, 10, 1, 0, 50), seg(2, 10, 2, 10, 20)})),
+                 (QList<QPair<int, int>>{{10, 20}})); // nested
+        QCOMPARE(spans(Retrieval::run(q, {seg(1, 10, 1, 0, 10), seg(2, 10, 1, 5, 20), seg(3, 10, 2, 0, 20)})),
+                 (QList<QPair<int, int>>{{0, 20}})); // same-code overlap counts once
+
+        q.mode = Mode::IntersectionSet;
+        q.codesA = {1, 2, 3};
+        q.count = 2;
+        QCOMPARE(spans(Retrieval::run(q, segs)), (QList<QPair<int, int>>{{0, 20}}));
+        q.count = 3;
+        QCOMPARE(spans(Retrieval::run(q, segs)), (QList<QPair<int, int>>{{5, 10}}));
+    }
+
+    void retrievalOnlyOneAndProximity()
+    {
+        using Retrieval::Mode;
+        Retrieval::Query q;
+        q.mode = Mode::OnlyOneCode;
+        q.codesA = {1, 2};
+        const QList<Segment> segs{seg(1, 10, 1, 0, 10), seg(2, 10, 2, 5, 15), seg(3, 10, 1, 30, 40),
+                                  seg(4, 10, 1, 35, 45)}; // overlap within the same code is allowed
+        QCOMPARE(segmentIds(Retrieval::run(q, segs)), (QList<qint64>{3, 4}));
+
+        // Paragraph distance counts the newlines between the two passages.
+        const QString text = QStringLiteral("aaaa\nbbbb\ncccc\ndddd");
+        const auto textOf = [&text](qint64) { return text; };
+        const QList<Segment> pair{seg(1, 10, 1, 0, 4), seg(2, 10, 2, 10, 14)}; // 2 newlines, 6 characters apart
+        Retrieval::Query prox;
+        prox.mode = Mode::Near;
+        prox.codesA = {1};
+        prox.codesB = {2};
+        prox.distance = 1;
+        QCOMPARE(Retrieval::run(prox, pair, textOf).size(), 0);
+        prox.distance = 2;
+        QCOMPARE(Retrieval::run(prox, pair, textOf).size(), 1);
+        prox.inParagraphs = false;
+        prox.distance = 5;
+        QCOMPARE(Retrieval::run(prox, pair, textOf).size(), 0);
+        prox.distance = 6;
+        QCOMPARE(Retrieval::run(prox, pair, textOf).size(), 1);
+        // Overlapping and touching passages are at distance 0.
+        prox.distance = 0;
+        QCOMPARE(Retrieval::run(prox, {seg(1, 10, 1, 0, 10), seg(2, 10, 2, 9, 20)}, textOf).size(), 1);
+        QCOMPARE(Retrieval::run(prox, {seg(1, 10, 1, 0, 10), seg(2, 10, 2, 10, 20)}, textOf).size(), 1);
+
+        Retrieval::Query fol = prox;
+        fol.mode = Mode::FollowedBy;
+        fol.inParagraphs = true;
+        fol.distance = 2;
+        const auto r = Retrieval::run(fol, pair, textOf);
+        QCOMPARE(r.size(), 1);
+        QCOMPARE(r[0].start, 0);
+        QCOMPARE(r[0].end, 14); // from the start of A to the end of B
+        QCOMPARE(r[0].codeIds, (QList<qint64>{1, 2}));
+        QCOMPARE(Retrieval::run(fol, {seg(1, 10, 1, 10, 14), seg(2, 10, 2, 0, 4)}, textOf).size(), 0); // B before A
     }
 
     void variableTypeInference()
