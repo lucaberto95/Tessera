@@ -15,6 +15,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QStackedWidget>
@@ -25,6 +26,7 @@
 #include <QVBoxLayout>
 #include <QRegularExpression>
 
+#include <algorithm>
 #include <functional>
 #include <tuple>
 
@@ -80,8 +82,48 @@ public:
     std::function<void(qint64 codeId)> onCodeDropped;
     std::function<void(const QPoint &globalPos, int position)> onContextMenu;
     std::function<QString(int position)> tooltipAt;
+    std::function<bool(int position)> hasLinkAt;
+    std::function<bool(int position)> onLinkClicked; // true if a link was followed
+
+    // Index of the character under `p` (cursorForPosition gives the nearest boundary instead).
+    int charIndexAt(const QPoint &p) const
+    {
+        const QTextCursor c = cursorForPosition(p);
+        int pos = c.position();
+        if (pos > 0 && cursorRect(c).left() > p.x())
+            --pos;
+        return pos;
+    }
 
 protected:
+    void mousePressEvent(QMouseEvent *e) override
+    {
+        // Ctrl+click follows a link; anywhere else it is an ordinary click.
+        if (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier) && onLinkClicked
+            && onLinkClicked(charIndexAt(e->position().toPoint()))) {
+            m_followedLink = true; // the release belongs to the click, not to a new selection
+            e->accept();
+            return;
+        }
+        QTextEdit::mousePressEvent(e);
+    }
+    void mouseReleaseEvent(QMouseEvent *e) override
+    {
+        if (std::exchange(m_followedLink, false) && e->button() == Qt::LeftButton) {
+            e->accept();
+            return;
+        }
+        QTextEdit::mouseReleaseEvent(e);
+    }
+    void mouseMoveEvent(QMouseEvent *e) override
+    {
+        if (hasLinkAt && e->buttons() == Qt::NoButton) {
+            const bool overLink =
+                (e->modifiers() & Qt::ControlModifier) && hasLinkAt(charIndexAt(e->position().toPoint()));
+            viewport()->setCursor(overLink ? Qt::PointingHandCursor : Qt::IBeamCursor);
+        }
+        QTextEdit::mouseMoveEvent(e);
+    }
     void dragEnterEvent(QDragEnterEvent *e) override
     {
         if (e->mimeData()->hasFormat(QString::fromLatin1(Ui::CodeMimeType))) {
@@ -114,13 +156,13 @@ protected:
     void contextMenuEvent(QContextMenuEvent *e) override
     {
         if (onContextMenu)
-            onContextMenu(e->globalPos(), cursorForPosition(e->pos()).position());
+            onContextMenu(e->globalPos(), charIndexAt(e->pos()));
     }
     bool viewportEvent(QEvent *e) override
     {
         if (e->type() == QEvent::ToolTip && tooltipAt) {
             auto *help = static_cast<QHelpEvent *>(e);
-            const QString tip = tooltipAt(cursorForPosition(help->pos()).position());
+            const QString tip = tooltipAt(charIndexAt(help->pos()));
             if (tip.isEmpty())
                 QToolTip::hideText();
             else
@@ -129,6 +171,9 @@ protected:
         }
         return QTextEdit::viewportEvent(e);
     }
+
+private:
+    bool m_followedLink = false;
 };
 
 DocumentView::DocumentView(Project *project, QWidget *parent)
@@ -175,8 +220,16 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
         for (const Segment &s : segmentsAt(position))
             lines << QStringLiteral("<span style='color:%1'>&#9632;</span> %2")
                          .arg(m_codes.value(s.codeId).color.name(), segmentLabel(s).toHtmlEscaped());
+        const QList<DocumentLink> here = linksAt(position);
+        for (const DocumentLink &l : here)
+            lines << QStringLiteral("&#8596; ") + linkLabel(l, position).toHtmlEscaped();
+        if (!here.isEmpty())
+            lines << QStringLiteral("<span style='color:gray'>%1</span>").arg(tr("Ctrl+clic per aprire il collegamento"));
         return lines.join(QStringLiteral("<br>"));
     };
+    m_edit->hasLinkAt = [this](int position) { return !linksAt(position).isEmpty(); };
+    m_edit->onLinkClicked = [this](int position) { return followLinkAt(position); };
+    m_edit->viewport()->setMouseTracking(true);
     connect(m_edit, &QTextEdit::selectionChanged, this, &DocumentView::selectionChanged);
     connect(m_stripe, &CodingStripe::segmentClicked, this, [this](qint64 id) {
         for (const Segment &s : m_segments)
@@ -215,6 +268,8 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     connect(m_project, &Project::segmentsChanged, this, &DocumentView::onSegmentsChanged);
     connect(m_project, &Project::codesChanged, this, &DocumentView::onCodesChanged);
     connect(m_project, &Project::documentsChanged, this, &DocumentView::onDocumentsChanged);
+    connect(m_project, &Project::linksChanged, this, &DocumentView::onLinksChanged);
+    connect(m_project, &Project::closed, this, &DocumentView::cancelPendingLink);
 
     m_stack->addWidget(placeholder);
     m_stack->addWidget(docPage);
@@ -238,6 +293,7 @@ void DocumentView::openDocument(qint64 id)
     setDisplayedText(m_project->documentText(id));
     m_edit->moveCursor(QTextCursor::Start);
     m_stack->setCurrentIndex(1);
+    m_links = m_project->linksForDocument(id);
     onDocumentsChanged();
     onCodesChanged();
     emit selectionChanged();
@@ -263,6 +319,7 @@ void DocumentView::closeDocument()
     hideFindBar();
     m_docId = 0;
     m_segments.clear();
+    m_links.clear();
     m_edit->clear();
     m_stripe->setSegments({}, {});
     m_stack->setCurrentIndex(0);
@@ -291,13 +348,7 @@ qint64 DocumentView::codeSelection(qint64 codeId)
         Ui::showError(this, tr("Termina la modifica del testo prima di codificare."));
         return 0;
     }
-    auto [start, end] = selection();
-    // Trim surrounding whitespace so segments start and end on text.
-    const QString text = rawText(m_edit);
-    while (start < end && text.at(start).isSpace())
-        ++start;
-    while (end > start && text.at(end - 1).isSpace())
-        --end;
+    const auto [start, end] = trimmedSelection();
     if (end <= start) {
         emit statusMessage(tr("Seleziona prima del testo da codificare."));
         return 0;
@@ -308,6 +359,167 @@ qint64 DocumentView::codeSelection(qint64 codeId)
     else
         Ui::showError(this, m_project->lastError());
     return id;
+}
+
+// Segments and link ends start and end on text, not on surrounding whitespace.
+std::pair<int, int> DocumentView::trimmedSelection() const
+{
+    auto [start, end] = selection();
+    const QString text = rawText(m_edit);
+    while (start < end && text.at(start).isSpace())
+        ++start;
+    while (end > start && text.at(end - 1).isSpace())
+        --end;
+    return {start, end};
+}
+
+// ---------------------------------------------------------------- links
+
+void DocumentView::startLink()
+{
+    if (!m_docId)
+        return;
+    if (m_editing) {
+        Ui::showError(this, tr("Termina la modifica del testo prima di creare un collegamento."));
+        return;
+    }
+    const auto [start, end] = trimmedSelection();
+    if (end <= start) {
+        emit statusMessage(tr("Seleziona prima il testo da cui parte il collegamento."));
+        return;
+    }
+    m_pendingLink = {m_docId, start, end};
+    refreshHighlights();
+    emit pendingLinkChanged();
+    emit statusMessage(tr("Inizio del collegamento impostato: seleziona il testo di destinazione, anche in un altro "
+                          "documento, e scegli \"Completa collegamento\"."));
+}
+
+qint64 DocumentView::completeLink()
+{
+    if (!m_docId || !hasPendingLink())
+        return 0;
+    if (m_editing) {
+        Ui::showError(this, tr("Termina la modifica del testo prima di creare un collegamento."));
+        return 0;
+    }
+    const auto [start, end] = trimmedSelection();
+    if (end <= start) {
+        emit statusMessage(tr("Seleziona prima il testo di destinazione del collegamento."));
+        return 0;
+    }
+    const qint64 id = m_project->addLink(m_pendingLink.documentId, m_pendingLink.start, m_pendingLink.end, m_docId,
+                                         start, end);
+    if (!id) {
+        Ui::showError(this, m_project->lastError());
+        return 0;
+    }
+    const QString origin = m_project->document(m_pendingLink.documentId).name;
+    cancelPendingLink();
+    emit statusMessage(tr("Collegamento creato con \"%1\". Ctrl+clic sul testo collegato per seguirlo.").arg(origin));
+    return id;
+}
+
+void DocumentView::cancelPendingLink()
+{
+    if (!hasPendingLink())
+        return;
+    m_pendingLink = {};
+    refreshHighlights();
+    emit pendingLinkChanged();
+}
+
+QList<DocumentLink> DocumentView::linksAt(int position) const
+{
+    QList<DocumentLink> out;
+    for (const DocumentLink &l : m_links) {
+        if ((l.fromDocumentId == m_docId && position >= l.fromStart && position < l.fromEnd)
+            || (l.toDocumentId == m_docId && position >= l.toStart && position < l.toEnd))
+            out << l;
+    }
+    return out;
+}
+
+DocumentView::LinkEnd DocumentView::otherEnd(const DocumentLink &l, int position) const
+{
+    const LinkEnd from{l.fromDocumentId, l.fromStart, l.fromEnd};
+    const LinkEnd to{l.toDocumentId, l.toStart, l.toEnd};
+    if (l.fromDocumentId == m_docId && position >= l.fromStart && position < l.fromEnd)
+        return to;
+    if (l.toDocumentId == m_docId && position >= l.toStart && position < l.toEnd)
+        return from;
+    return l.fromDocumentId == m_docId ? to : from;
+}
+
+QString DocumentView::linkLabel(const DocumentLink &l, int position) const
+{
+    const LinkEnd e = otherEnd(l, position);
+    // While editing, ends in the open document refer to the edited text.
+    const QString text = e.documentId == m_docId ? rawText(m_edit) : m_project->documentText(e.documentId);
+    QString label = tr("Collegamento a \"%1\": %2")
+                        .arg(m_project->document(e.documentId).name, TextUtils::excerpt(text, e.start, e.end, 60));
+    if (!l.comment.isEmpty())
+        label += QStringLiteral(" · «") + l.comment.left(80) + QStringLiteral("»");
+    return label;
+}
+
+bool DocumentView::followLink(qint64 linkId, int position)
+{
+    const auto it = std::find_if(m_links.cbegin(), m_links.cend(), [&](const DocumentLink &l) { return l.id == linkId; });
+    if (it == m_links.cend())
+        return false;
+    const LinkEnd e = otherEnd(*it, position); // a copy: opening a document replaces m_links
+    if (e.documentId != m_docId)
+        openDocument(e.documentId); // saves pending text edits first
+    if (e.documentId != m_docId)
+        return false; // the document could not be opened
+    selectRange(e.start, e.end);
+    emit linkFollowed(e.documentId);
+    return true;
+}
+
+bool DocumentView::followLinkAt(int position)
+{
+    const QList<DocumentLink> here = linksAt(position);
+    return !here.isEmpty() && followLink(here.first().id, position);
+}
+
+void DocumentView::reloadLinks()
+{
+    m_links = m_docId ? m_project->linksForDocument(m_docId) : QList<DocumentLink>{};
+    refreshHighlights();
+}
+
+void DocumentView::onLinksChanged()
+{
+    if (!m_docId)
+        return;
+    if (!m_editing) {
+        reloadLinks();
+        return;
+    }
+    // Editing: as for segments, links created elsewhere are mapped onto the edited text and
+    // deleted ones dropped, so that saving the text keeps the database's links.
+    const QList<DocumentLink> stored = m_project->linksForDocument(m_docId);
+    QHash<qint64, DocumentLink> storedById;
+    QList<DocumentLink> added;
+    for (const DocumentLink &l : stored) {
+        storedById.insert(l.id, l);
+        if (!m_editKnownLinkIds.contains(l.id))
+            added << l;
+    }
+    m_links.removeIf([&](const DocumentLink &l) { return !storedById.contains(l.id); });
+    for (DocumentLink &l : m_links)
+        l.comment = storedById.value(l.id).comment;
+    if (!added.isEmpty()) {
+        const auto [position, removed, inserted] = editedRange(m_editBaseText, rawText(m_edit));
+        TextUtils::adjustLinksForEdit(added, m_docId, position, removed, inserted);
+        m_links += added;
+    }
+    m_editKnownLinkIds.clear();
+    for (const DocumentLink &l : stored)
+        m_editKnownLinkIds.insert(l.id);
+    refreshHighlights();
 }
 
 void DocumentView::selectRange(int start, int end, qint64 segmentId)
@@ -359,6 +571,26 @@ void DocumentView::refreshHighlights()
             sel.format.setUnderlineStyle(QTextCharFormat::SingleUnderline);
         extras << sel;
     }
+    // Link ends look like hyperlinks; the start of a link being created gets a dotted underline.
+    auto addLinkEnd = [&](int start, int end, bool pending) {
+        QTextEdit::ExtraSelection sel;
+        sel.cursor = QTextCursor(m_edit->document());
+        sel.cursor.setPosition(qBound(0, start, len));
+        sel.cursor.setPosition(qBound(0, end, len), QTextCursor::KeepAnchor);
+        sel.format.setUnderlineStyle(pending ? QTextCharFormat::DotLine : QTextCharFormat::SingleUnderline);
+        sel.format.setUnderlineColor(QColor(0x1565c0));
+        if (!pending)
+            sel.format.setForeground(QColor(0x1565c0));
+        extras << sel;
+    };
+    for (const DocumentLink &l : std::as_const(m_links)) {
+        if (l.fromDocumentId == m_docId)
+            addLinkEnd(l.fromStart, l.fromEnd, false);
+        if (l.toDocumentId == m_docId)
+            addLinkEnd(l.toStart, l.toEnd, false);
+    }
+    if (m_pendingLink.documentId && m_pendingLink.documentId == m_docId)
+        addLinkEnd(m_pendingLink.start, m_pendingLink.end, true);
     // Find matches go last so they stay visible over the coding colours; warm tones never match a code.
     for (int i = 0; i < m_findMatches.size(); ++i) {
         QTextEdit::ExtraSelection sel;
@@ -427,6 +659,34 @@ void DocumentView::showTextMenu(const QPoint &globalPos, int position)
             }
         };
         add(0, 0);
+
+        menu.addSeparator();
+        QAction *start = menu.addAction(tr("Inizia collegamento"), this, &DocumentView::startLink);
+        start->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
+        start->setEnabled(selected);
+        QAction *complete = menu.addAction(tr("Completa collegamento"), this, &DocumentView::completeLink);
+        complete->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+        complete->setEnabled(selected && hasPendingLink());
+        if (hasPendingLink())
+            menu.addAction(tr("Annulla il collegamento in sospeso"), this, &DocumentView::cancelPendingLink);
+    }
+
+    const QList<DocumentLink> linksHere = linksAt(position);
+    if (!linksHere.isEmpty()) {
+        menu.addSeparator();
+        for (const DocumentLink &l : linksHere) {
+            QMenu *sub = menu.addMenu(QStringLiteral("↔ ") + linkLabel(l, position));
+            sub->addAction(tr("Vai all'altra estremità"), this, [this, id = l.id, position] { followLink(id, position); });
+            sub->addAction(tr("Commento…"), this, [this, l] {
+                bool ok = false;
+                const QString c = QInputDialog::getMultiLineText(this, tr("Commento al collegamento"), tr("Commento:"),
+                                                                 l.comment, &ok);
+                if (ok)
+                    m_project->setLinkComment(l.id, c.trimmed());
+            });
+            sub->addSeparator();
+            sub->addAction(tr("Elimina collegamento"), this, [this, id = l.id] { m_project->deleteLink(id); });
+        }
     }
 
     const QList<Segment> here = segmentsAt(position);
@@ -554,12 +814,16 @@ void DocumentView::setEditing(bool editing)
             return;
         }
         reloadSegments();
+        reloadLinks();
         m_editing = true;
         m_editSnapshot = rawText(m_edit);
         m_editBaseText = m_editSnapshot;
         m_editKnownIds.clear();
         for (const Segment &s : std::as_const(m_segments))
             m_editKnownIds.insert(s.id);
+        m_editKnownLinkIds.clear();
+        for (const DocumentLink &l : std::as_const(m_links))
+            m_editKnownLinkIds.insert(l.id);
         m_edit->setReadOnly(false);
         m_edit->setTextInteractionFlags(Qt::TextEditorInteraction);
         m_editConnection = connect(m_edit, &QTextEdit::textChanged, this, &DocumentView::onTextChangedWhileEditing);
@@ -581,6 +845,13 @@ void DocumentView::onTextChangedWhileEditing()
     const auto [prefix, removed, added] = editedRange(m_editSnapshot, now);
     if (removed || added) {
         TextUtils::adjustSegmentsForEdit(m_segments, prefix, removed, added);
+        TextUtils::adjustLinksForEdit(m_links, m_docId, prefix, removed, added);
+        // The start of a link being created follows the text too.
+        if (m_pendingLink.documentId == m_docId
+            && !TextUtils::adjustRangeForEdit(m_pendingLink.start, m_pendingLink.end, prefix, removed, added)) {
+            m_pendingLink = {};
+            emit pendingLinkChanged();
+        }
         m_stripe->setSegments(m_segments, m_codes);
         refreshHighlights();
     }
@@ -768,12 +1039,13 @@ bool DocumentView::commitEdits()
         const QSignalBlocker block(m_editButton);
         m_editButton->setChecked(false);
     }
-    const bool ok = m_project->updateDocumentText(m_docId, rawText(m_edit), m_segments);
+    const bool ok = m_project->updateDocumentText(m_docId, rawText(m_edit), m_segments, m_links);
     if (!ok)
         Ui::showError(this, tr("Impossibile salvare il testo: %1").arg(m_project->lastError()));
     else
         emit statusMessage(tr("Testo del documento salvato."));
     reloadSegments();
+    reloadLinks();
     emit editingChanged(false);
     return ok;
 }

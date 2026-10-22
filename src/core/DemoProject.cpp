@@ -116,6 +116,18 @@ bool populate(Project &project)
 
     project.addDocumentSet(QObject::tr("Senza figli"), {docs[1], docs[2]});
 
+    // A link between two passages that tell the same story from different sides.
+    {
+        const QString a = QStringLiteral("Mi mancano le chiacchiere alla macchinetta del caffè");
+        const QString b = QStringLiteral("I colleghi nuovi non li conosco quasi");
+        const int pa = int(project.documentText(docs[0]).indexOf(a));
+        const int pb = int(project.documentText(docs[1]).indexOf(b));
+        if (pa >= 0 && pb >= 0)
+            project.addLink(docs[0], pa, pa + int(a.size()), docs[1], pb, pb + int(b.size()),
+                            QObject::tr("Isolamento: lo stesso vissuto visto da chi c'era già e da chi è appena "
+                                        "arrivato"));
+    }
+
     Memo memo;
     memo.targetType = MemoTarget::Project;
     memo.title = QObject::tr("Domanda di ricerca");

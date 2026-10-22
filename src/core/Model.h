@@ -57,6 +57,22 @@ struct Segment {
     int length() const { return end - start; }
 };
 
+// Hyperlink between two passages, in two documents or in the same one. It can be followed from
+// either end, so "from" and "to" only record the order in which the ends were chosen.
+struct DocumentLink {
+    qint64 id = 0;
+    qint64 fromDocumentId = 0;
+    int fromStart = 0; // inclusive
+    int fromEnd = 0;   // exclusive
+    qint64 toDocumentId = 0;
+    int toStart = 0;
+    int toEnd = 0;
+    QString comment;
+    QString author;
+    QDateTime createdAt;
+    QString uuid;
+};
+
 enum class MemoTarget { Project, Group, Document, Code, Segment, DocumentSet };
 
 struct Memo {

@@ -13,6 +13,7 @@
 #include "ui/MatrixDialog.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/VariableFilterDialog.h"
+#include "ui/LinksDialog.h"
 #include "ui/MemoManager.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
@@ -168,6 +169,10 @@ void MainWindow::createActions()
                      QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
     m_editText = make(tr("&Modifica testo del documento"), [this](bool on) { m_view->setEditing(on); });
     m_editText->setCheckable(true);
+    m_startLink = make(tr("&Inizia collegamento"), [this] { m_view->startLink(); }, QKeySequence(Qt::CTRL | Qt::Key_L));
+    m_completeLink = make(tr("Completa co&llegamento"), [this] { m_view->completeLink(); },
+                          QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    m_links = make(tr("C&ollegamenti…"), &MainWindow::showLinks);
     m_exportCodebook = make(tr("Esporta &codebook…"), &MainWindow::exportCodebook);
 
     m_search = make(tr("&Ricerca lessicale…"), &MainWindow::showSearch,
@@ -215,6 +220,10 @@ void MainWindow::createMenus()
     docs->addAction(m_newGroup);
     docs->addSeparator();
     docs->addAction(m_editText);
+    docs->addSeparator();
+    docs->addAction(m_startLink);
+    docs->addAction(m_completeLink);
+    docs->addAction(m_links);
     docs->addSeparator();
     docs->addAction(m_variables);
     docs->addSeparator();
@@ -360,6 +369,8 @@ void MainWindow::connectProject()
     connect(m_view, &DocumentView::selectionChanged, this, &MainWindow::updateActions);
     connect(m_view, &DocumentView::statusMessage, this, [this](const QString &m) { statusBar()->showMessage(m, 5000); });
     connect(m_view, &DocumentView::newCodeForSelectionRequested, this, &MainWindow::codeWithNewCode);
+    connect(m_view, &DocumentView::pendingLinkChanged, this, &MainWindow::updateActions);
+    connect(m_view, &DocumentView::linkFollowed, m_documents, &DocumentTree::setCurrentDocument);
     connect(m_view, &DocumentView::editingChanged, this, [this](bool on) {
         const QSignalBlocker block(m_editText);
         m_editText->setChecked(on);
@@ -376,6 +387,8 @@ void MainWindow::updateActions()
     const bool canCode = open && m_view->hasSelection() && !m_view->isEditing();
     m_codeCurrent->setEnabled(canCode && m_codes->currentCodeId());
     m_codeNew->setEnabled(canCode);
+    m_startLink->setEnabled(canCode);
+    m_completeLink->setEnabled(canCode && m_view->hasPendingLink());
     m_newSubcode->setEnabled(open && m_codes->currentCodeId());
     m_editText->setEnabled(open && m_view->documentId());
 
@@ -784,6 +797,16 @@ void MainWindow::showMemos()
     auto *dlg = new MemoManager(m_project, this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &MemoManager::showTarget, this, &MainWindow::showMemoTarget);
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showLinks()
+{
+    auto *dlg = new LinksDialog(m_project, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &LinksDialog::endActivated, this,
+            [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

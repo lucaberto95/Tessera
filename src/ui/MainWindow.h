@@ -56,6 +56,7 @@ private:
     void showVariableFilter();
     void showVariables();
     void showMemos();
+    void showLinks();
     void editProjectMemo();
     void exportCodebook();
     void setUserName();
@@ -100,6 +101,9 @@ private:
     QAction *m_codeCurrent = nullptr;
     QAction *m_codeNew = nullptr;
     QAction *m_editText = nullptr;
+    QAction *m_startLink = nullptr;
+    QAction *m_completeLink = nullptr;
+    QAction *m_links = nullptr;
     QAction *m_exportCodebook = nullptr;
     QAction *m_search = nullptr;
     QAction *m_matrix = nullptr;

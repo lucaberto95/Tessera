@@ -82,8 +82,10 @@ public:
     bool renameDocument(qint64 id, const QString &name);
     bool moveDocument(qint64 id, qint64 groupId);
     bool deleteDocument(qint64 id);
-    // Replaces the text and the document's segments atomically (used by the text editing mode).
-    bool updateDocumentText(qint64 id, const QString &text, const QList<Segment> &segments);
+    // Replaces the text, the document's segments and the ends of its links atomically (used by the
+    // text editing mode). Segments and links of the document missing from the lists are deleted.
+    bool updateDocumentText(qint64 id, const QString &text, const QList<Segment> &segments,
+                            const QList<DocumentLink> &links);
 
     // Document sets: references to documents of any group; a document can be in several sets.
     QList<DocumentSet> documentSets() const;
@@ -125,6 +127,15 @@ public:
     QHash<qint64, int> segmentCountByDocument() const;
     QHash<qint64, QHash<qint64, int>> segmentCountByCodeAndDocument() const; // code -> document -> count
 
+    // Links between passages of documents
+    QList<DocumentLink> links() const;                              // in document tree order of the "from" end
+    QList<DocumentLink> linksForDocument(qint64 documentId) const;  // links with at least one end there
+    DocumentLink link(qint64 id) const;
+    qint64 addLink(qint64 fromDocumentId, int fromStart, int fromEnd, qint64 toDocumentId, int toStart, int toEnd,
+                   const QString &comment = {}, const QString &uuid = {});
+    bool setLinkComment(qint64 id, const QString &comment);
+    bool deleteLink(qint64 id);
+
     // Memos
     QList<Memo> memos() const;
     Memo memo(qint64 id) const;
@@ -152,6 +163,7 @@ signals:
     void segmentsChanged(qint64 documentId); // 0 = several documents
     void memosChanged();
     void variablesChanged();
+    void linksChanged();
     void undoStateChanged();
 
 private:

@@ -7,6 +7,7 @@
 #include "ui/StatsDialog.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
+#include "ui/LinksDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
 #include "ui/MemoManager.h"
@@ -23,6 +24,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSignalSpy>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -191,6 +193,110 @@ private slots:
         QCOMPARE(text.mid(p.segment(added).start, p.segment(added).length()), QString("tre"));
         QVERIFY(!p.segment(gone).id);
         QCOMPARE(p.segmentsForDocument(doc).size(), 2);
+    }
+
+    void documentLinks()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("links.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 a = p.addDocument(g, "A", "Il lavoro da remoto mi isola dai colleghi.");
+        const qint64 b = p.addDocument(g, "B", "Con il lavoro da remoto vedo di più la famiglia.");
+        const QString textA = p.documentText(a), textB = p.documentText(b);
+
+        DocumentView view(&p);
+        view.resize(700, 400);
+        view.show();
+        QSignalSpy followed(&view, &DocumentView::linkFollowed);
+        auto *edit = view.findChild<QTextEdit *>();
+
+        // Start in A (surrounding spaces are trimmed), complete in B.
+        view.openDocument(a);
+        const int isola = int(textA.indexOf("mi isola"));
+        view.selectRange(isola - 1, isola + 8);
+        QVERIFY(!view.hasPendingLink());
+        view.startLink();
+        QVERIFY(view.hasPendingLink());
+        view.openDocument(b);
+        const int famiglia = int(textB.indexOf("la famiglia"));
+        view.selectRange(famiglia, famiglia + 11);
+        const qint64 link = view.completeLink();
+        QVERIFY(link > 0);
+        QVERIFY(!view.hasPendingLink());
+        const DocumentLink l = p.link(link);
+        QCOMPARE(l.fromDocumentId, a);
+        QCOMPARE(textA.mid(l.fromStart, l.fromEnd - l.fromStart), QString("mi isola"));
+        QCOMPARE(l.toDocumentId, b);
+        QCOMPARE(textB.mid(l.toStart, l.toEnd - l.toStart), QString("la famiglia"));
+
+        // The linked text is marked in both documents.
+        QCOMPARE(view.links().size(), 1);
+        const int extrasWithLink = int(edit->extraSelections().size());
+        QCOMPARE(view.linksAt(famiglia + 3).size(), 1);
+        QVERIFY(view.linksAt(famiglia - 2).isEmpty());
+        shot(&view, "document_link");
+
+        // Ctrl+click on the link in B opens the other end in A, selected.
+        QTextCursor c(edit->document());
+        c.setPosition(famiglia + 3);
+        const QPoint inLink = edit->cursorRect(c).center() + QPoint(2, 0);
+        QTest::mouseClick(edit->viewport(), Qt::LeftButton, Qt::ControlModifier, inLink);
+        QCOMPARE(view.documentId(), a);
+        QCOMPARE(followed.count(), 1);
+        QCOMPARE(followed.last().first().toLongLong(), a);
+        QCOMPARE(edit->textCursor().selectedText(), QString("mi isola"));
+        // ...and back, through the API used by the context menu.
+        QVERIFY(view.followLinkAt(l.fromStart + 1));
+        QCOMPARE(view.documentId(), b);
+        QCOMPARE(edit->textCursor().selectedText(), QString("la famiglia"));
+        // A plain click is an ordinary click.
+        QTest::mouseClick(edit->viewport(), Qt::LeftButton, Qt::NoModifier, inLink);
+        QCOMPARE(view.documentId(), b);
+
+        // Editing A: the end follows its words.
+        view.openDocument(a);
+        view.setEditing(true);
+        QTextCursor e(edit->document());
+        e.setPosition(0);
+        e.insertText("Premessa. ");
+        QVERIFY(view.commitEdits());
+        const DocumentLink moved = p.link(link);
+        QCOMPARE(p.documentText(a).mid(moved.fromStart, moved.fromEnd - moved.fromStart), QString("mi isola"));
+        QCOMPARE(moved.toStart, l.toStart);
+
+        // The links window lists it, opens either end and deletes it.
+        LinksDialog dlg(&p);
+        dlg.show();
+        auto *table = dlg.findChild<QTableWidget *>();
+        QCOMPARE(table->rowCount(), 1);
+        QCOMPARE(table->item(0, 0)->text(), QString("A"));
+        QCOMPARE(table->item(0, 3)->text(), QString("la famiglia"));
+        QSignalSpy ends(&dlg, &LinksDialog::endActivated);
+        dlg.selectLink(link);
+        QCOMPARE(dlg.currentLinkId(), link);
+        emit table->cellDoubleClicked(0, 3);
+        QCOMPARE(ends.count(), 1);
+        QCOMPARE(ends.last().at(0).toLongLong(), b);
+        QCOMPARE(ends.last().at(1).toInt(), l.toStart);
+        dlg.openCurrentEnd(false);
+        QCOMPARE(ends.last().at(0).toLongLong(), a);
+        QCOMPARE(ends.last().at(1).toInt(), moved.fromStart);
+        shot(&dlg, "links");
+
+        QPushButton *remove = nullptr;
+        for (QPushButton *btn : dlg.findChildren<QPushButton *>())
+            if (btn->text() == QStringLiteral("Elimina"))
+                remove = btn;
+        QVERIFY(remove && remove->isEnabled());
+        remove->click();
+        QVERIFY(p.links().isEmpty());
+        QCOMPARE(table->rowCount(), 0);
+        QVERIFY(view.links().isEmpty());
+        QCOMPARE(int(edit->extraSelections().size()), extrasWithLink - 1);
+        // Undo restores it, in the window and in the view.
+        QVERIFY(p.undo());
+        QCOMPARE(table->rowCount(), 1);
+        QCOMPARE(view.links().size(), 1);
     }
 
     void namesAreNotRichText()

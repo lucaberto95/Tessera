@@ -62,7 +62,7 @@ Con `-platform offscreen` i test girano senza aprire finestre sullo schermo dell
 
 ```
 src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata da app e test)
-  Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, Memo, Variable
+  Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, DocumentLink, Memo, Variable
   Project        unica fonte di verità: file SQLite .tsra, CRUD, segnali, batch, undo/redo
   Importers      TXT/MD, DOCX, ODT (QZipReader privato + XML), RTF (parser proprio), PDF (QtPdf), HTML
   Retrieval      recupero complesso dei segmenti (intersezione, sovrapposizione, vicinanza...) su segmenti in memoria
@@ -71,12 +71,14 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata 
   VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
   Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
-  TextUtils      newline, UTF-16 <-> code point, adattamento segmenti dopo modifiche, frasi/paragrafi
+  TextUtils      newline, UTF-16 <-> code point, adattamento di intervalli/segmenti/link dopo modifiche, frasi/paragrafi
   DemoProject    progetto di esempio (3 interviste originali sul lavoro da remoto)
 src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWindow)
   MainWindow     menu, toolbar, azioni, collega i segnali del Project ai pannelli
   DocumentTree / CodeTree   alberi con caselle di "attivazione" per il recupero dei segmenti
-  DocumentView + CodingStripe   testo con evidenziazioni + barra laterale con le parentesi dei codici
+  DocumentView + CodingStripe   testo con evidenziazioni + barra laterale con le parentesi dei codici;
+                 collegamenti (inizio in sospeso in DocumentView, Ctrl+clic = `followLinkAt`)
+  LinksDialog    finestra "Collegamenti": elenco dei link, apre un'estremità (`endActivated`), commento, elimina
   SegmentsPanel  segmenti recuperati (codici attivi × documenti attivi; nessun documento attivo = tutti);
                  `setRetrieval(Query)` per il recupero complesso, `setPassages(...)` per passaggi già calcolati
   CooccurrenceDialog  matrice + mappa (QGraphicsScene, export PNG e SVG con Qt6::Svg); il doppio clic su una cella
@@ -91,7 +93,8 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - **Salvataggio immediato.** Ogni metodo di `Project` scrive subito nel file; non esiste "Salva".
   "Salva una copia" usa `VACUUM INTO`.
 - **Segnali.** Dopo ogni scrittura `Project` emette `groupsChanged`, `documentsChanged`,
-  `documentSetsChanged`, `codesChanged`, `segmentsChanged(docId|0)`, `memosChanged`, `variablesChanged`. Le viste si
+  `documentSetsChanged`, `codesChanged`, `segmentsChanged(docId|0)`, `memosChanged`, `variablesChanged`,
+  `linksChanged`. Le viste si
   ricostruiscono da questi segnali; non modificano mai il proprio stato al posto del Project
   (es. il drop nel `CodeTree` imposta `IgnoreAction` e chiama `moveCode`).
 - **Batch.** `beginBatch()/commitBatch()` = una transazione, segnali rimandati al commit e **un solo
@@ -113,12 +116,21 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   tornano gruppi; ogni altro `<Set>` diventa un set di documenti. I file di Tessera 0.1.0 (nessun
   GUID riconoscibile) vengono letti come solo gruppi. I memo di gruppi e set viaggiano nella
   `Description` del set, non come `<Note>`.
+- **Collegamenti** (`links`, migrazione v3): due estremità `from`/`to` (documento + intervallo), anche nello
+  stesso documento; si seguono in entrambe le direzioni, l'ordine registra solo quale estremità è stata
+  scelta per prima. FK `ON DELETE CASCADE` su entrambi i documenti. `updateDocumentText(id, testo, segmenti,
+  link)` sposta le estremità nel documento e cancella i link assenti dalla lista (come i segmenti).
+  In QDPX ogni estremità è una `PlainTextSelection` senza `Coding` con GUID derivato dall'uuid del link
+  (`linkEndGuid()`), più `<Links><Link originGUID targetGUID direction="Bidirectional">`; il commento
+  viaggia nell'attributo `name`. All'import i `<Link>` tra oggetti che non sono selezioni di testo
+  (codici, note…) sono ignorati e contati nel resoconto.
 - **Posizioni nel testo** = indici UTF-16 (`QString`) nel testo semplice con `\n`. QDPX usa code
   point Unicode: convertire con `TextUtils` (test con emoji). In import QDPX i CRLF vengono
   normalizzati rimappando le posizioni.
 - **Modifica del testo.** `DocumentView` in modalità modifica fa diff prefisso/suffisso a ogni
-  cambiamento e adatta i segmenti in memoria (`TextUtils::adjustSegmentsForEdit`); al salvataggio
-  `Project::updateDocumentText` scrive testo e segmenti insieme (un passo di undo). Durante la
+  cambiamento e adatta segmenti ed estremità dei link in memoria (`TextUtils::adjustSegmentsForEdit`,
+  `adjustLinksForEdit`, entrambe su `adjustRangeForEdit`); al salvataggio
+  `Project::updateDocumentText` scrive testo, segmenti e link insieme (un passo di undo). Durante la
   modifica Ctrl+Z appartiene all'editor e le azioni Annulla/Ripeti sono disattivate.
 - **Schema e migrazioni.** `kSchema` in `Project.cpp` è la versione 1 e non si modifica più. Ogni
   cambio di schema è una `Migration { toVersion, statements }` aggiunta a
@@ -161,7 +173,12 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - Gli attributi ODF hanno un namespace (`text:c`): `attributes().value(ns, "c")`, non `value("c")`.
 - `Project::addSegment` rifiuta posizioni fuori dal testo. Durante la modifica del testo,
   `DocumentView` incorpora i segmenti aggiunti da altre parti (codifica automatica), riportandoli
-  sul testo modificato: altrimenti il salvataggio li cancellerebbe.
+  sul testo modificato: altrimenti il salvataggio li cancellerebbe. Lo stesso vale per i link
+  (`onLinksChanged`); anche `addLink` rifiuta estremità fuori dal testo.
+- `QList::removeIf` passa al predicato un riferimento const: per modificare gli elementi mentre si
+  filtrano serve un ciclo esplicito (vedi `adjustSegmentsForEdit`).
+- Seguire un link può aprire un altro documento e sostituire `m_links`: copiare il link/estremità
+  prima di chiamare `openDocument` (vedi `DocumentView::followLink`).
 
 ## Flusso di lavoro per le issue
 
@@ -208,6 +225,9 @@ variabili…", logica in `src/core/VariableFilter.*`; un valore vuoto o non vali
 **#21** statistiche delle variabili e tabelle incrociate (menu Analisi ▸ "Statistiche e tabelle incrociate…", logica in
 `src/core/Stats.*`; grafico a barre/istogramma con Qt Charts, chi-quadrato con p-value dalla gamma incompleta, `codesToVariables`;
 non ci sono classi per le variabili di tipo data).
+**#8** collegamenti tra brani dei documenti (menu Documenti ▸ "Inizia collegamento" Ctrl+L, "Completa
+collegamento" Ctrl+Maiusc+L, "Collegamenti…"; Ctrl+clic sul testo collegato apre l'altra estremità;
+tabella `links`, migrazione v3; anche in QDPX).
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.

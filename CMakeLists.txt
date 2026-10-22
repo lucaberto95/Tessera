@@ -43,6 +43,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/SegmentsPanel.h src/ui/SegmentsPanel.cpp
     src/ui/MemoDialog.h src/ui/MemoDialog.cpp
     src/ui/MemoManager.h src/ui/MemoManager.cpp
+    src/ui/LinksDialog.h src/ui/LinksDialog.cpp
     src/ui/VariablesDialog.h src/ui/VariablesDialog.cpp
     src/ui/SearchDialog.h src/ui/SearchDialog.cpp
     src/ui/MatrixDialog.h src/ui/MatrixDialog.cpp

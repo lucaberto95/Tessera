@@ -19,6 +19,13 @@ int codePointToUtf16(const QString &text, int codePointIndex);
 // characters. Segments that end up empty are removed from the list.
 void adjustSegmentsForEdit(QList<Segment> &segments, int position, int removed, int added);
 
+// Same rule for one range [start, end): returns false when its text was entirely removed.
+bool adjustRangeForEdit(int &start, int &end, int position, int removed, int added);
+
+// Same rule for the ends of links that lie in `documentId` (a link can have both ends there).
+// Links with an end whose text was entirely removed are removed from the list.
+void adjustLinksForEdit(QList<DocumentLink> &links, qint64 documentId, int position, int removed, int added);
+
 // Single-line excerpt of [start, end), shortened in the middle when longer than maxLength.
 QString excerpt(const QString &text, int start, int end, int maxLength = 300);
 

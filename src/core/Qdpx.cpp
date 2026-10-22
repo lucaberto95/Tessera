@@ -93,6 +93,15 @@ QString groupSetGuid(qsizetype index)
     return QUuid::createUuidV5(ns, QString::number(index)).toString(QUuid::WithoutBraces);
 }
 
+// REFI-QDA links join objects with a GUID, so each end of a Tessera link is exported as a
+// PlainTextSelection without codings; its GUID derives from the link's, to stay stable.
+QString linkEndGuid(const QString &linkUuid, bool from)
+{
+    static const QUuid ns(QStringLiteral("{b3e7a1d2-5c4f-4a8e-9d61-7f2c0e8b4a19}"));
+    return QUuid::createUuidV5(ns, linkUuid + (from ? QStringLiteral(":from") : QStringLiteral(":to")))
+        .toString(QUuid::WithoutBraces);
+}
+
 } // namespace
 
 // ============================================================================ export
@@ -142,6 +151,18 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     QHash<qint64, QList<Segment>> segmentsByDoc;
     for (const Segment &s : segments)
         segmentsByDoc[s.documentId] << s;
+    const QList<DocumentLink> links = project.links();
+    struct LinkEnd {
+        QString guid;
+        int start, end;
+        const DocumentLink *link;
+    };
+    QHash<qint64, QList<LinkEnd>> linkEndsByDoc;
+    for (const DocumentLink &l : links) {
+        userGuid(l.author);
+        linkEndsByDoc[l.fromDocumentId].append({linkEndGuid(l.uuid, true), l.fromStart, l.fromEnd, &l});
+        linkEndsByDoc[l.toDocumentId].append({linkEndGuid(l.uuid, false), l.toStart, l.toEnd, &l});
+    }
 
     QByteArray xml;
     QXmlStreamWriter w(&xml);
@@ -238,6 +259,15 @@ bool exportProject(const Project &project, const QString &path, QString *error)
             writeNoteRefs(MemoTarget::Segment, s.id);
             w.writeEndElement(); // PlainTextSelection
         }
+        for (const LinkEnd &e : linkEndsByDoc.value(d.id)) {
+            w.writeEmptyElement(QStringLiteral("PlainTextSelection"));
+            w.writeAttribute(QStringLiteral("guid"), e.guid);
+            w.writeAttribute(QStringLiteral("name"), TextUtils::excerpt(text, e.start, e.end, 60));
+            w.writeAttribute(QStringLiteral("startPosition"), QString::number(TextUtils::utf16ToCodePoint(text, e.start)));
+            w.writeAttribute(QStringLiteral("endPosition"), QString::number(TextUtils::utf16ToCodePoint(text, e.end)));
+            w.writeAttribute(QStringLiteral("creatingUser"), userGuid(e.link->author));
+            w.writeAttribute(QStringLiteral("creationDateTime"), xmlDate(e.link->createdAt));
+        }
         for (const Variable &v : vars) {
             const QString value = values.value(d.id).value(v.id);
             if (value.isEmpty())
@@ -270,6 +300,20 @@ bool exportProject(const Project &project, const QString &path, QString *error)
             w.writeAttribute(QStringLiteral("modifiedDateTime"), xmlDate(m.modifiedAt));
             w.writeTextElement(QStringLiteral("PlainTextContent"), m.body);
             w.writeEndElement();
+        }
+        w.writeEndElement();
+    }
+
+    if (!links.isEmpty()) {
+        w.writeStartElement(QStringLiteral("Links"));
+        for (const DocumentLink &l : links) {
+            w.writeEmptyElement(QStringLiteral("Link"));
+            w.writeAttribute(QStringLiteral("guid"), l.uuid);
+            if (!l.comment.isEmpty())
+                w.writeAttribute(QStringLiteral("name"), l.comment);
+            w.writeAttribute(QStringLiteral("direction"), QStringLiteral("Bidirectional"));
+            w.writeAttribute(QStringLiteral("originGUID"), linkEndGuid(l.uuid, true));
+            w.writeAttribute(QStringLiteral("targetGUID"), linkEndGuid(l.uuid, false));
         }
         w.writeEndElement();
     }
@@ -371,6 +415,19 @@ struct PendingSet {
     QStringList members; // source guids
 };
 
+struct PendingLink {
+    QString guid;
+    QString name;
+    QString origin; // object guids
+    QString target;
+};
+
+struct TextRange {
+    qint64 documentId = 0;
+    int start = 0;
+    int end = 0;
+};
+
 struct Importer {
     Project &project;
     QZipReader &zip;
@@ -384,6 +441,7 @@ struct Importer {
     QList<PendingNote> notes;
     QString origin; // Project/@origin, e.g. "Tessera 0.1.0"
     QList<PendingSet> sets;
+    QList<PendingLink> links;
     QList<std::tuple<MemoTarget, QString, QString>> noteRefs; // target type, target guid, note guid
     QStringList projectNoteRefs;
     QStringList warnings;
@@ -581,6 +639,16 @@ struct Importer {
         }
     }
 
+    void parseLinks()
+    {
+        while (r.readNextStartElement()) {
+            if (r.name() == QLatin1String("Link"))
+                links.append({attr(QStringLiteral("guid")), attr(QStringLiteral("name")),
+                              attr(QStringLiteral("originGUID")), attr(QStringLiteral("targetGUID"))});
+            r.skipCurrentElement();
+        }
+    }
+
     QString readSourceText(const QString &path)
     {
         QByteArray data;
@@ -649,6 +717,8 @@ struct Importer {
                 parseNotes();
             } else if (n == QLatin1String("Sets")) {
                 parseSets();
+            } else if (n == QLatin1String("Links")) {
+                parseLinks();
             } else if (n == QLatin1String("NoteRef")) {
                 projectNoteRefs << attr(QStringLiteral("targetGUID"));
                 r.skipCurrentElement();
@@ -670,6 +740,7 @@ struct Importer {
                                                                : project.groups().first().id;
         QHash<QString, qint64> docIds;
         QHash<QString, qint64> segmentIds;
+        QHash<QString, TextRange> selectionRanges; // every valid selection, coded or not (link ends)
         int unresolvedCodes = 0;
         int invalidSelections = 0;
         for (const PendingSource &src : sources) {
@@ -712,6 +783,8 @@ struct Importer {
                     ++invalidSelections;
                     continue;
                 }
+                if (!sel.guid.isEmpty() && !selectionRanges.contains(sel.guid))
+                    selectionRanges.insert(sel.guid, {docId, start, end});
                 for (int i = 0; i < sel.codeGuids.size(); ++i) {
                     const qint64 codeId = codes.value(sel.codeGuids[i]);
                     if (!codeId) {
@@ -818,12 +891,36 @@ struct Importer {
                 makeMemo(MemoTarget::Project, 0, n);
         }
 
+        // Links between two text selections become document links; REFI-QDA also links other
+        // objects (codes, notes, whole sources), which Tessera cannot represent.
+        int importedLinks = 0, skippedLinks = 0;
+        QSet<QString> linkGuids;
+        for (const PendingLink &l : links) {
+            if (!selectionRanges.contains(l.origin) || !selectionRanges.contains(l.target)) {
+                ++skippedLinks;
+                continue;
+            }
+            const TextRange from = selectionRanges.value(l.origin), to = selectionRanges.value(l.target);
+            const bool repeatedGuid = l.guid.isEmpty() || linkGuids.contains(l.guid);
+            if (project.addLink(from.documentId, from.start, from.end, to.documentId, to.start, to.end, l.name,
+                                repeatedGuid ? QString() : l.guid)) {
+                ++importedLinks;
+                linkGuids.insert(l.guid);
+            } else {
+                ++skippedLinks;
+            }
+        }
+
         report = QObject::tr("Importati: %1 documenti, %2 codici, %3 segmenti, %4 memo, %5 variabili.")
                      .arg(sources.size())
                      .arg(codes.size())
                      .arg(project.allSegments().size())
                      .arg(project.memos().size())
                      .arg(variables.size());
+        if (importedLinks)
+            report += QLatin1Char(' ') + QObject::tr("Collegamenti tra documenti: %1.").arg(importedLinks);
+        if (skippedLinks)
+            warnings << QObject::tr("%1 collegamenti tra oggetti diversi da brani di testo ignorati.").arg(skippedLinks);
         if (skippedSources)
             warnings << QObject::tr("%1 fonti non testuali (immagini, audio, video, PDF senza testo) ignorate.")
                             .arg(skippedSources);

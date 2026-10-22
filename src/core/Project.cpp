@@ -152,6 +152,26 @@ Memo readMemo(const QSqlQuery &q)
     return m;
 }
 
+DocumentLink readLink(const QSqlQuery &q)
+{
+    DocumentLink l;
+    l.id = q.value(0).toLongLong();
+    l.fromDocumentId = q.value(1).toLongLong();
+    l.fromStart = q.value(2).toInt();
+    l.fromEnd = q.value(3).toInt();
+    l.toDocumentId = q.value(4).toLongLong();
+    l.toStart = q.value(5).toInt();
+    l.toEnd = q.value(6).toInt();
+    l.comment = q.value(7).toString();
+    l.author = q.value(8).toString();
+    l.createdAt = fromIso(q.value(9));
+    l.uuid = q.value(10).toString();
+    return l;
+}
+
+const QString kLinkColumns = QStringLiteral(
+    "l.id, l.from_document_id, l.from_start, l.from_end, l.to_document_id, l.to_start, l.to_end, l.comment,"
+    " l.author, l.created_at, l.uuid");
 const QString kDocumentColumns = QStringLiteral(
     "d.id, d.group_id, d.name, d.source_path, d.imported_at, d.position, d.uuid");
 const QString kCodeColumns = QStringLiteral("id, parent_id, name, color, description, position, uuid");
@@ -351,6 +371,7 @@ void Project::emitAllChanged()
     emit segmentsChanged(0);
     emit memosChanged();
     emit variablesChanged();
+    emit linksChanged();
 }
 
 // ---------------------------------------------------------------- undo / redo
@@ -368,7 +389,7 @@ bool Project::installUndoTriggers()
         return false;
     static const char *const tables[] = {"document_groups", "documents", "codes", "segments",
                                          "memos", "variables", "variable_values",
-                                         "document_sets", "document_set_members"};
+                                         "document_sets", "document_set_members", "links"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -548,6 +569,18 @@ QList<Project::Migration> Project::builtInMigrations()
                          " document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,"
                          " PRIMARY KEY (set_id, document_id))"),
           QStringLiteral("CREATE INDEX idx_document_set_members_document ON document_set_members(document_id)")}},
+        {3,
+         {// Links between passages of documents (issue #8).
+          QStringLiteral("CREATE TABLE links ("
+                         " id INTEGER PRIMARY KEY,"
+                         " from_document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,"
+                         " from_start INTEGER NOT NULL, from_end INTEGER NOT NULL,"
+                         " to_document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,"
+                         " to_start INTEGER NOT NULL, to_end INTEGER NOT NULL,"
+                         " comment TEXT NOT NULL DEFAULT '', author TEXT, created_at TEXT, uuid TEXT NOT NULL,"
+                         " CHECK (from_end > from_start AND to_end > to_start))"),
+          QStringLiteral("CREATE INDEX idx_links_from ON links(from_document_id)"),
+          QStringLiteral("CREATE INDEX idx_links_to ON links(to_document_id)")}},
     };
 }
 
@@ -765,6 +798,7 @@ bool Project::deleteGroup(qint64 id)
     notify(&Project::documentsChanged);
     notify(&Project::documentSetsChanged);
     notify(&Project::memosChanged);
+    notify(&Project::linksChanged);
     notifySegments(0);
     return commitBatch();
 }
@@ -858,11 +892,13 @@ bool Project::deleteDocument(qint64 id)
     notify(&Project::documentSetsChanged);
     notify(&Project::memosChanged);
     notify(&Project::variablesChanged);
+    notify(&Project::linksChanged);
     notifySegments(id);
     return commitBatch();
 }
 
-bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Segment> &segments)
+bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Segment> &segments,
+                                 const QList<DocumentLink> &links)
 {
     setUndoLabel(tr("Modifica testo"));
     beginBatch();
@@ -885,6 +921,29 @@ bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Seg
                 ok = exec(QStringLiteral("DELETE FROM segments WHERE id = ?"), {s.id});
         }
     }
+    // Link ends in this document move like segments; a link whose end lost all its text goes away.
+    auto validEnd = [&](int start, int end) { return end > start && start >= 0 && end <= text.size(); };
+    QSet<qint64> keptLinks;
+    for (const DocumentLink &l : links) {
+        if (!ok)
+            break;
+        const bool from = l.fromDocumentId == id, to = l.toDocumentId == id;
+        if ((!from && !to) || (from && !validEnd(l.fromStart, l.fromEnd)) || (to && !validEnd(l.toStart, l.toEnd)))
+            continue;
+        keptLinks.insert(l.id);
+        if (from)
+            ok = exec(QStringLiteral("UPDATE links SET from_start = ?, from_end = ? WHERE id = ? AND from_document_id = ?"),
+                      {l.fromStart, l.fromEnd, l.id, id});
+        if (ok && to)
+            ok = exec(QStringLiteral("UPDATE links SET to_start = ?, to_end = ? WHERE id = ? AND to_document_id = ?"),
+                      {l.toStart, l.toEnd, l.id, id});
+    }
+    if (ok) {
+        for (const DocumentLink &l : linksForDocument(id)) {
+            if (!keptLinks.contains(l.id) && ok)
+                ok = exec(QStringLiteral("DELETE FROM links WHERE id = ?"), {l.id});
+        }
+    }
     if (!ok) {
         rollbackBatch();
         return false;
@@ -892,6 +951,7 @@ bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Seg
     removeOrphanMemos();
     notify(&Project::documentsChanged);
     notify(&Project::memosChanged);
+    notify(&Project::linksChanged);
     notifySegments(id);
     return commitBatch();
 }
@@ -1325,6 +1385,89 @@ QHash<qint64, QHash<qint64, int>> Project::segmentCountByCodeAndDocument() const
     while (q.next())
         out[q.value(0).toLongLong()].insert(q.value(1).toLongLong(), q.value(2).toInt());
     return out;
+}
+
+// ---------------------------------------------------------------- links
+
+QList<DocumentLink> Project::links() const
+{
+    QList<DocumentLink> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT ") + kLinkColumns +
+           QStringLiteral(" FROM links l JOIN documents d ON d.id = l.from_document_id"
+                          " JOIN document_groups g ON g.id = d.group_id"
+                          " ORDER BY g.position, g.id, d.position, d.id, l.from_start, l.id"));
+    while (q.next())
+        out << readLink(q);
+    return out;
+}
+
+QList<DocumentLink> Project::linksForDocument(qint64 documentId) const
+{
+    QList<DocumentLink> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT ") + kLinkColumns +
+              QStringLiteral(" FROM links l WHERE l.from_document_id = ? OR l.to_document_id = ? ORDER BY l.id"));
+    q.addBindValue(documentId);
+    q.addBindValue(documentId);
+    q.exec();
+    while (q.next())
+        out << readLink(q);
+    return out;
+}
+
+DocumentLink Project::link(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT ") + kLinkColumns + QStringLiteral(" FROM links l WHERE l.id = ?"));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return readLink(q);
+    return {};
+}
+
+qint64 Project::addLink(qint64 fromDocumentId, int fromStart, int fromEnd, qint64 toDocumentId, int toStart,
+                        int toEnd, const QString &comment, const QString &uuid)
+{
+    setUndoLabel(tr("Nuovo collegamento"));
+    // Both ends must be non-empty passages of existing documents (positions may be stale).
+    auto validEnd = [this](qint64 doc, int start, int end) {
+        return end > start && start >= 0 && document(doc).id && end <= documentText(doc).size();
+    };
+    if (!validEnd(fromDocumentId, fromStart, fromEnd) || !validEnd(toDocumentId, toStart, toEnd)) {
+        fail(tr("Le estremità del collegamento devono essere brani di testo dei documenti"));
+        return 0;
+    }
+    if (fromDocumentId == toDocumentId && fromStart == toStart && fromEnd == toEnd) {
+        fail(tr("Un brano non può essere collegato a se stesso"));
+        return 0;
+    }
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO links(from_document_id, from_start, from_end, to_document_id, to_start, to_end,"
+                       " comment, author, created_at, uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+        {fromDocumentId, fromStart, fromEnd, toDocumentId, toStart, toEnd, comment, m_author, isoNow(),
+         uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notify(&Project::linksChanged);
+    return id;
+}
+
+bool Project::setLinkComment(qint64 id, const QString &comment)
+{
+    setUndoLabel(tr("Commento al collegamento"));
+    if (!exec(QStringLiteral("UPDATE links SET comment = ? WHERE id = ?"), {comment, id}))
+        return false;
+    notify(&Project::linksChanged);
+    return true;
+}
+
+bool Project::deleteLink(qint64 id)
+{
+    setUndoLabel(tr("Elimina collegamento"));
+    if (!exec(QStringLiteral("DELETE FROM links WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::linksChanged);
+    return true;
 }
 
 // ---------------------------------------------------------------- memos

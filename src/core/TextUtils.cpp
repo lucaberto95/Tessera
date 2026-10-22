@@ -37,30 +37,53 @@ int codePointToUtf16(const QString &text, int codePointIndex)
     return i;
 }
 
-void adjustSegmentsForEdit(QList<Segment> &segments, int position, int removed, int added)
+bool adjustRangeForEdit(int &start, int &end, int position, int removed, int added)
 {
     const int removedEnd = position + removed;
     const int delta = added - removed;
-    for (Segment &s : segments) {
-        auto mapPos = [&](int p, bool isEnd) {
-            if (p < position)
-                return p;
-            if (p >= removedEnd) {
-                // Text typed exactly at a segment's end stays outside it; at its start it shifts it.
-                return p + delta;
-            }
-            // Inside the replaced range: collapse to the edges of the inserted text.
-            return isEnd ? position + added : position;
-        };
-        if (removed == 0 && s.end == position) {
-            continue; // insertion right after the segment: unchanged
+    auto mapPos = [&](int p, bool isEnd) {
+        if (p < position)
+            return p;
+        if (p >= removedEnd) {
+            // Text typed exactly at a range's end stays outside it; at its start it shifts it.
+            return p + delta;
         }
-        const int newStart = mapPos(s.start, false);
-        const int newEnd = mapPos(s.end, true);
-        s.start = newStart;
-        s.end = newEnd;
+        // Inside the replaced range: collapse to the edges of the inserted text.
+        return isEnd ? position + added : position;
+    };
+    if (removed == 0 && end == position)
+        return end > start; // insertion right after the range: unchanged
+    const int newStart = mapPos(start, false);
+    const int newEnd = mapPos(end, true);
+    start = newStart;
+    end = newEnd;
+    return end > start;
+}
+
+void adjustSegmentsForEdit(QList<Segment> &segments, int position, int removed, int added)
+{
+    QList<Segment> kept;
+    kept.reserve(segments.size());
+    for (Segment s : std::as_const(segments))
+        if (adjustRangeForEdit(s.start, s.end, position, removed, added))
+            kept << s;
+    segments = kept;
+}
+
+void adjustLinksForEdit(QList<DocumentLink> &links, qint64 documentId, int position, int removed, int added)
+{
+    QList<DocumentLink> kept;
+    kept.reserve(links.size());
+    for (DocumentLink l : std::as_const(links)) {
+        bool keep = true;
+        if (l.fromDocumentId == documentId)
+            keep = adjustRangeForEdit(l.fromStart, l.fromEnd, position, removed, added);
+        if (l.toDocumentId == documentId)
+            keep = adjustRangeForEdit(l.toStart, l.toEnd, position, removed, added) && keep;
+        if (keep)
+            kept << l;
     }
-    segments.removeIf([](const Segment &s) { return s.end <= s.start; });
+    links = kept;
 }
 
 QString excerpt(const QString &text, int start, int end, int maxLength)

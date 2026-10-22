@@ -307,6 +307,10 @@ private slots:
         QVERIFY(p.addDocumentSet("Set", {p.documents().first().id}) > 0);
         QVERIFY(p.undo());
         QVERIFY(p.documentSets().isEmpty());
+        const qint64 doc = p.documents().first().id;
+        QVERIFY(p.addLink(doc, 0, 2, doc, 3, 5) > 0);
+        QVERIFY(p.undo());
+        QVERIFY(p.links().isEmpty());
     }
 
     void documentSets()
@@ -473,7 +477,7 @@ private slots:
         QList<Segment> segs = p.segmentsForDocument(d);
         segs.first().start += 3;
         segs.first().end += 3;
-        QVERIFY(p.updateDocumentText(d, "XX abc def ghi", segs));
+        QVERIFY(p.updateDocumentText(d, "XX abc def ghi", segs, {}));
         QCOMPARE(p.undoLabel(), QString("Modifica testo"));
         QVERIFY(p.undo());
         QCOMPARE(p.documentText(d), QString("abc def ghi"));
@@ -532,6 +536,128 @@ private slots:
         QVERIFY(run(5, 20, 0).isEmpty());                // delete everything around it
         QCOMPARE(run(5, 10, 0).first().start, 5);        // delete overlapping start
         QCOMPARE(run(5, 10, 0).first().end, 10);
+    }
+
+    void adjustLinks()
+    {
+        // Link 1: both ends in document 1; link 2: one end there, the other in document 2.
+        DocumentLink same;
+        same.id = 1;
+        same.fromDocumentId = same.toDocumentId = 1;
+        same.fromStart = 0;
+        same.fromEnd = 5;
+        same.toStart = 20;
+        same.toEnd = 30;
+        DocumentLink across;
+        across.id = 2;
+        across.fromDocumentId = 2;
+        across.fromStart = 3;
+        across.fromEnd = 8;
+        across.toDocumentId = 1;
+        across.toStart = 10;
+        across.toEnd = 15;
+
+        auto run = [&](int pos, int removed, int added) {
+            QList<DocumentLink> copy{same, across};
+            TextUtils::adjustLinksForEdit(copy, 1, pos, removed, added);
+            return copy;
+        };
+        // Insertion at the very beginning shifts every end in document 1, not the one in document 2.
+        QList<DocumentLink> r = run(0, 0, 4);
+        QCOMPARE(r.size(), 2);
+        QCOMPARE(r[0].fromStart, 4); // text typed at an end's start stays outside it, as for segments
+        QCOMPARE(r[0].fromEnd, 9);
+        QCOMPARE(r[0].toStart, 24);
+        QCOMPARE(r[0].toEnd, 34);
+        QCOMPARE(r[1].toStart, 14);
+        QCOMPARE(r[1].fromStart, 3); // other document: untouched
+        QCOMPARE(r[1].fromEnd, 8);
+
+        // Insertion between the ends moves only the later ones.
+        r = run(17, 0, 2);
+        QCOMPARE(r[0].fromEnd, 5);
+        QCOMPARE(r[0].toStart, 22);
+        QCOMPARE(r[1].toEnd, 15);
+
+        // Deleting the text of one end removes the whole link.
+        r = run(9, 7, 0); // [9, 16) contains [10, 15)
+        QCOMPARE(r.size(), 1);
+        QCOMPARE(r[0].id, qint64(1));
+        QCOMPARE(r[0].toStart, 13);
+
+        // Single range: same rule as segments.
+        int s = 10, e = 20;
+        QVERIFY(TextUtils::adjustRangeForEdit(s, e, 20, 0, 3));
+        QCOMPARE(e, 20);
+        QVERIFY(!TextUtils::adjustRangeForEdit(s, e, 5, 20, 0));
+    }
+
+    void documentLinks()
+    {
+        Project p;
+        QVERIFY(p.create(path("links.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 a = p.addDocument(g, "A", "uno due tre quattro");
+        const qint64 b = p.addDocument(g, "B", "alfa beta gamma");
+
+        QSignalSpy spy(&p, &Project::linksChanged);
+        const qint64 l = p.addLink(a, 4, 7, b, 5, 9, "contraddice"); // "due" -> "beta"
+        QVERIFY(l > 0);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(p.undoLabel(), QString("Nuovo collegamento"));
+        const DocumentLink link = p.link(l);
+        QCOMPARE(link.fromDocumentId, a);
+        QCOMPARE(link.toDocumentId, b);
+        QCOMPARE(p.documentText(b).mid(link.toStart, link.toEnd - link.toStart), QString("beta"));
+        QCOMPARE(link.comment, QString("contraddice"));
+        QVERIFY(!link.uuid.isEmpty());
+        QCOMPARE(link.author, p.author());
+        // Found from both ends.
+        QCOMPARE(p.linksForDocument(a).size(), 1);
+        QCOMPARE(p.linksForDocument(b).size(), 1);
+        QCOMPARE(p.links().size(), 1);
+
+        // Invalid ends are rejected.
+        QCOMPARE(p.addLink(a, 4, 4, b, 0, 4), qint64(0));      // empty
+        QCOMPARE(p.addLink(a, 0, 3, b, 10, 99), qint64(0));    // outside the text
+        QCOMPARE(p.addLink(a, 0, 3, 9999, 0, 3), qint64(0));   // unknown document
+        QCOMPARE(p.addLink(a, 0, 3, a, 0, 3), qint64(0));      // a passage linked to itself
+        QVERIFY(p.addLink(a, 0, 3, a, 8, 11) > 0);              // same document, other passage
+        QCOMPARE(p.linksForDocument(a).size(), 2);
+        QVERIFY(p.undo());
+
+        QVERIFY(p.setLinkComment(l, "conferma"));
+        QCOMPARE(p.link(l).comment, QString("conferma"));
+        QVERIFY(p.undo());
+        QCOMPARE(p.link(l).comment, QString("contraddice"));
+
+        QVERIFY(p.deleteLink(l));
+        QVERIFY(p.links().isEmpty());
+        QVERIFY(p.undo());
+        QCOMPARE(p.link(l).toStart, 5);
+
+        // Deleting either document deletes the link; undo brings it back.
+        QVERIFY(p.deleteDocument(b));
+        QVERIFY(p.links().isEmpty());
+        QVERIFY(p.undo());
+        QCOMPARE(p.links().size(), 1);
+
+        // Editing the text: the ends move with it and still cover the same words.
+        const QString edited = "ZERO uno due tre quattro";
+        QList<DocumentLink> links = p.linksForDocument(a);
+        TextUtils::adjustLinksForEdit(links, a, 0, 0, 5);
+        QVERIFY(p.updateDocumentText(a, edited, p.segmentsForDocument(a), links));
+        const DocumentLink moved = p.link(l);
+        QCOMPARE(edited.mid(moved.fromStart, moved.fromEnd - moved.fromStart), QString("due"));
+        QCOMPARE(moved.toStart, 5); // the end in the other document does not move
+        QVERIFY(p.undo());
+        QCOMPARE(p.link(l).fromStart, 4);
+
+        // A link missing from the list (its text was deleted) is deleted with the edit.
+        QVERIFY(p.updateDocumentText(a, "uno tre quattro", {}, {}));
+        QVERIFY(p.links().isEmpty());
+        QVERIFY(p.undo());
+        QCOMPARE(p.links().size(), 1);
     }
 
     void codePoints()
@@ -1311,6 +1437,75 @@ private slots:
         QCOMPARE(q.memoFor(MemoTarget::DocumentSet, qs.id).body, QString("memo del set"));
         QCOMPARE(q.memoFor(MemoTarget::Group, q.groups().last().id).body, QString("memo del gruppo"));
         QCOMPARE(q.memos().size(), 2);
+    }
+
+    void qdpxLinks()
+    {
+        Project p;
+        QVERIFY(p.create(path("links_src.tsra")));
+        const qint64 g = p.groups().first().id;
+        const QString text = QString::fromUtf8("😀 prima frase. Seconda frase.");
+        const qint64 a = p.addDocument(g, "A", text);
+        const qint64 b = p.addDocument(g, "B", "altro documento");
+        const int s1 = int(text.indexOf("prima")), s2 = int(text.indexOf("Seconda"));
+        const qint64 across = p.addLink(a, s1, s1 + 5, b, 0, 5, "contraddice");
+        const qint64 inside = p.addLink(a, s2, s2 + 7, a, s1, s1 + 5);
+        QVERIFY(across && inside);
+        // A coded passage can also be a link end.
+        QVERIFY(p.addSegment(a, p.addCode(0, "C", Qt::red), s1, s1 + 5) > 0);
+
+        QString err, report;
+        QVERIFY2(Qdpx::exportProject(p, path("links.qdpx"), &err), qPrintable(err));
+        Project q;
+        QVERIFY(q.create(path("links_dst.tsra")));
+        QVERIFY2(Qdpx::importProject(q, path("links.qdpx"), &report, &err), qPrintable(err));
+        QVERIFY2(report.contains("Collegamenti tra documenti: 2"), qPrintable(report));
+        QCOMPARE(q.allSegments().size(), 1); // link ends are not codings
+
+        QCOMPARE(q.links().size(), 2);
+        qint64 qa = 0, qb = 0;
+        for (const Document &d : q.documents())
+            (d.name == "A" ? qa : qb) = d.id;
+        for (const DocumentLink &l : q.links()) {
+            const DocumentLink orig = p.link(l.uuid == p.link(across).uuid ? across : inside);
+            QCOMPARE(l.uuid, orig.uuid);
+            QCOMPARE(l.comment, orig.comment);
+            QCOMPARE(l.fromDocumentId, orig.fromDocumentId == a ? qa : qb);
+            QCOMPARE(l.toDocumentId, orig.toDocumentId == a ? qa : qb);
+            QCOMPARE(l.fromStart, orig.fromStart); // after the emoji: code points converted back
+            QCOMPARE(l.fromEnd, orig.fromEnd);
+            QCOMPARE(l.toStart, orig.toStart);
+            QCOMPARE(l.toEnd, orig.toEnd);
+        }
+
+        // Links between other kinds of objects (here a code) are reported and skipped.
+        const QString xml = QStringLiteral(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+            "<Project xmlns=\"urn:QDA-XML:project:1.0\" name=\"Altro\">"
+            "<CodeBook><Codes><Code guid=\"44444444-4444-4444-8444-444444444444\" name=\"K\" isCodable=\"true\"/>"
+            "</Codes></CodeBook><Sources>"
+            "<TextSource guid=\"11111111-1111-4111-8111-111111111111\" name=\"Uno\">"
+            "<PlainTextContent>uno due</PlainTextContent>"
+            "<PlainTextSelection guid=\"55555555-5555-4555-8555-555555555555\" startPosition=\"0\" endPosition=\"3\"/>"
+            "<PlainTextSelection guid=\"66666666-6666-4666-8666-666666666666\" startPosition=\"4\" endPosition=\"7\"/>"
+            "</TextSource></Sources><Links>"
+            "<Link guid=\"77777777-7777-4777-8777-777777777777\" name=\"ok\" direction=\"OneWay\""
+            " originGUID=\"55555555-5555-4555-8555-555555555555\" targetGUID=\"66666666-6666-4666-8666-666666666666\"/>"
+            "<Link guid=\"88888888-8888-4888-8888-888888888888\" direction=\"Associative\""
+            " originGUID=\"44444444-4444-4444-8444-444444444444\" targetGUID=\"66666666-6666-4666-8666-666666666666\"/>"
+            "</Links></Project>");
+        {
+            QZipWriter zip(path("foreign_links.qdpx"));
+            zip.addFile("project.qde", xml.toUtf8());
+            zip.close();
+        }
+        Project f;
+        QVERIFY(f.create(path("foreign_links.tsra")));
+        QVERIFY2(Qdpx::importProject(f, path("foreign_links.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(f.links().size(), 1);
+        QCOMPARE(f.links().first().comment, QString("ok"));
+        QCOMPARE(f.links().first().toStart, 4);
+        QVERIFY2(report.contains("1 collegamenti"), qPrintable(report));
     }
 
     void qdpxForeignSets()

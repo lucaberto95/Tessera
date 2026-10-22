@@ -25,13 +25,14 @@ da remoto, già codificate, con variabili e memo.
 | **Progetti** | Ogni progetto è un singolo file (`.tsra`, SQLite) salvato automaticamente a ogni modifica. Ci sono i progetti recenti e "Salva una copia come…". |
 | **Annulla / Ripeti** | `Ctrl+Z` / `Ctrl+Y` funzionano su ogni operazione della sessione (fino a 200 passi), anche su eliminazioni, importazioni e codifica automatica. |
 | **Documenti** | I documenti si organizzano in gruppi e si importano da TXT/MD, DOCX, ODT, RTF, PDF (con testo) e HTML. I **set di documenti** raccolgono documenti di gruppi diversi (trascinandoli su un set o dai documenti attivi) e si attivano con un clic. Si possono creare documenti incollando del testo e modificarne il testo: le codifiche si adattano da sole. |
+| **Collegamenti** | Un brano si collega a un altro brano, dello stesso documento o di un altro: seleziona il testo e scegli «Inizia collegamento» (`Ctrl+L`), poi seleziona la destinazione e scegli «Completa collegamento» (`Ctrl+Shift+L`). Il testo collegato è blu e sottolineato; `Ctrl+clic` apre l'altra estremità. La finestra «Collegamenti…» (menu Documenti) li elenca tutti con commento. Le estremità seguono le modifiche del testo. |
 | **Codici** | Sistema di codici gerarchico con colori, descrizioni e memo, riorganizzabile con il trascinamento e con le frequenze sempre visibili. |
 | **Codifica** | Seleziona il testo e trascinaci sopra un codice, oppure usa `Ctrl+E` (codice selezionato), `Ctrl+Shift+E` (nuovo codice) o il menu contestuale. Il testo codificato è evidenziato con il colore del codice e una barra laterale mostra le parentesi dei codici. Ogni segmento può avere commento e peso. |
 | **Recupero segmenti** | Attiva documenti e codici con le caselle di spunta: il pannello in basso raccoglie i segmenti corrispondenti, con filtro ed esportazione in HTML o Excel (CSV). |
 | **Memo** | Memo su progetto, gruppi, documenti, codici e segmenti, con una finestra che li raccoglie tutti ed esportazione. |
 | **Variabili** | Variabili dei documenti tipizzate (testo, intero, decimale, sì/no, data), modificabili in una tabella, con import/export CSV (all'import il tipo di ogni colonna viene riconosciuto e si può correggere in un'anteprima). «Attiva per variabili…» attiva i documenti che soddisfano condizioni sulle variabili (es. Genere = F E Età ≥ 40). |
 | **Analisi** | Ricerca lessicale (più termini con OR, parole intere, espressioni regolari) con codifica automatica della parola, della frase o del paragrafo. Matrice codici × documenti con heatmap, frequenze dei codici e grafico. |
-| **Interoperabilità** | Importazione ed esportazione QDPX (REFI-QDA) di documenti testuali, codici, codifiche, memo, variabili e gruppi. |
+| **Interoperabilità** | Importazione ed esportazione QDPX (REFI-QDA) di documenti testuali, codici, codifiche, memo, variabili, gruppi e collegamenti tra brani. |
 
 ### Scorciatoie
 
@@ -42,6 +43,8 @@ da remoto, già codificate, con variabili e memo.
 | `Ctrl+K` | Nuovo codice |
 | `Ctrl+E` | Codifica la selezione con il codice selezionato |
 | `Ctrl+Shift+E` | Codifica la selezione con un nuovo codice |
+| `Ctrl+L` / `Ctrl+Shift+L` | Inizia / completa un collegamento dalla selezione |
+| `Ctrl+clic` | Su un testo collegato: apre l'altra estremità del collegamento |
 | `Ctrl+Z` / `Ctrl+Y` | Annulla / ripeti |
 | `Ctrl+F` | Cerca nel documento aperto (barra di ricerca; `F3` / `Maiusc+F3` per scorrere, `Esc` per chiudere) |
 | `Ctrl+Shift+F` | Ricerca lessicale su tutto il progetto |

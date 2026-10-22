@@ -52,17 +52,42 @@ public:
 
     void showSegmentMenu(qint64 segmentId, const QPoint &globalPos);
 
+    // Links: the selection becomes the first end ("Inizia collegamento"), then a selection in any
+    // document completes the link. Ctrl+click on a linked passage opens the other end.
+    void startLink();
+    qint64 completeLink(); // returns the new link id or 0
+    void cancelPendingLink();
+    bool hasPendingLink() const { return m_pendingLink.documentId != 0; }
+    QList<DocumentLink> links() const { return m_links; } // links with an end in the open document
+    QList<DocumentLink> linksAt(int position) const;
+    // Opens the end of the link opposite to the one at `position` (-1: the end in another document,
+    // or the second one). Returns false if the link does not exist.
+    bool followLink(qint64 linkId, int position = -1);
+    bool followLinkAt(int position); // the first link at `position`
+
     void onSegmentsChanged(qint64 documentId);
     void onCodesChanged();
     void onDocumentsChanged();
+    void onLinksChanged();
 
 signals:
     void selectionChanged();
     void editingChanged(bool editing);
     void newCodeForSelectionRequested();
     void statusMessage(const QString &message);
+    void pendingLinkChanged();
+    void linkFollowed(qint64 documentId); // the view now shows that document
 
 private:
+    struct LinkEnd {
+        qint64 documentId = 0;
+        int start = 0;
+        int end = 0;
+    };
+    LinkEnd otherEnd(const DocumentLink &link, int position) const;
+    QString linkLabel(const DocumentLink &link, int position) const;
+    std::pair<int, int> trimmedSelection() const; // selection without surrounding whitespace
+    void reloadLinks();
     void reloadSegments();
     void setDisplayedText(const QString &text);
     void refreshHighlights();
@@ -95,7 +120,11 @@ private:
     // added from elsewhere (they refer to the stored text) instead of deleting them on save.
     QString m_editBaseText;
     QSet<qint64> m_editKnownIds;
+    QSet<qint64> m_editKnownLinkIds;
     QMetaObject::Connection m_editConnection;
+
+    QList<DocumentLink> m_links;
+    LinkEnd m_pendingLink; // first end of a link being created (documentId 0 = none)
 
     QWidget *m_findBar = nullptr;
     QLineEdit *m_findField = nullptr;
