@@ -177,6 +177,8 @@ Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` 
 
 ## Rilasci
 
+`CHANGELOG.md` va aggiornato a ogni release (una voce per versione, con commit e issue).
+
 1. Aggiornare `project(Tessera VERSION x.y.z)` in `CMakeLists.txt`.
 2. `build.cmd Release`, eseguire i test, `deploy.cmd zip`.
 3. Commit su `main`, tag `vx.y.z`, push del tag, poi
