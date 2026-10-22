@@ -3,6 +3,7 @@
 #include "core/DemoProject.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
+#include "ui/AgreementDialog.h"
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
@@ -845,6 +846,66 @@ private slots:
         QVERIFY(p.undo());
         QVERIFY(p.codes().isEmpty());
         QVERIFY(p.allSegments().isEmpty());
+    }
+
+    void agreementDialog()
+    {
+        const QString fileA = m_dir.filePath("agreement-a.tsra"), fileB = m_dir.filePath("agreement-b.tsra");
+        Project p;
+        p.setAuthor("Anna");
+        QVERIFY(p.create(fileA));
+        const qint64 doc = p.addDocument(p.groups().first().id, "D", "Una frase di prova per i due codificatori.");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        p.addSegment(doc, code, 0, 10);
+        p.addSegment(doc, code, 20, 30);
+        QVERIFY(p.saveCopyAs(fileB));
+        p.setAuthor("Bruno");
+        p.addSegment(doc, code, 0, 9);
+
+        AgreementDialog dlg(&p, {}, {});
+        dlg.show();
+        QSignalSpy spy(&dlg, &AgreementDialog::disagreementActivated);
+        // Anna (A) and Bruno (B): the frequency differs (2 vs 1) in the one document; existence agrees.
+        QCOMPARE(dlg.result().total.units, 1);
+        QCOMPARE(dlg.result().total.agreements, 1);
+        dlg.setLevel(Agreement::Level::Segments);
+        QCOMPARE(dlg.result().total.units, 3);
+        QCOMPARE(dlg.result().total.agreements, 2);
+        const auto tables = dlg.findChildren<QTableWidget *>();
+        QCOMPARE(tables.size(), 2);
+        QCOMPARE(tables[0]->rowCount(), 2); // the code and the total
+        QCOMPARE(tables[0]->item(1, 0)->text(), QString("Totale"));
+        QCOMPARE(tables[1]->rowCount(), 1);
+        QVERIFY(tables[1]->item(0, 5)->text().contains("due"));
+        emit tables[1]->cellDoubleClicked(0, 0);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.last()[0].toLongLong(), doc);
+        QCOMPARE(spy.last()[1].toInt(), 20);
+        QCOMPARE(spy.last()[2].toInt(), 30);
+        QVERIFY(spy.last()[3].toLongLong() != 0);
+
+        // Against another file: Bruno's copy has one more coding.
+        {
+            Project b;
+            b.setAuthor("Carla");
+            QVERIFY(b.open(fileB));
+            b.addSegment(doc, b.findCode(0, "Tema"), 10, 15);
+        }
+        QString error;
+        QVERIFY2(dlg.setOtherProject(fileB, &error), qPrintable(error));
+        dlg.setCoders("Anna", "Carla");
+        dlg.setLevel(Agreement::Level::Segments);
+        QCOMPARE(dlg.comparedDocuments(), 1);
+        QCOMPARE(dlg.result().total.units, 3); // Anna's 2 against Carla's 1
+        QCOMPARE(dlg.result().total.agreements, 0);
+        QCOMPARE(tables[1]->rowCount(), 3);
+        spy.clear();
+        for (int r = 0; r < 3; ++r)
+            if (tables[1]->item(r, 2)->text() == "Solo B")
+                emit tables[1]->cellDoubleClicked(r, 0);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.last()[1].toInt(), 10);
+        QCOMPARE(spy.last()[3].toLongLong(), qint64(0)); // the segment belongs to the other project
     }
 
     void cooccurrenceDialog()

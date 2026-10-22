@@ -1,3 +1,4 @@
+#include "core/Agreement.h"
 #include "core/Cooccurrence.h"
 #include "core/Dictionaries.h"
 #include "core/Exporters.h"
@@ -1396,6 +1397,170 @@ private slots:
         QCOMPARE(r[0].end, 14); // from the start of A to the end of B
         QCOMPARE(r[0].codeIds, (QList<qint64>{1, 2}));
         QCOMPARE(Retrieval::run(fol, {seg(1, 10, 1, 10, 14), seg(2, 10, 2, 0, 4)}, textOf).size(), 0); // B before A
+    }
+
+    void agreementExistence()
+    {
+        using namespace Agreement;
+        // Code 1 over documents 1..10: both coders in 1-5, only A in 6, only B in 7-8, neither in 9-10.
+        // Code 2: nobody used it.
+        QList<Segment> a, b;
+        for (int d = 1; d <= 6; ++d)
+            a << seg(d, d, 1, 0, 5);
+        for (int d : {1, 2, 3, 4, 5, 7, 8})
+            b << seg(100 + d, d, 1, 2, 4);
+        Options o;
+        o.level = Level::Existence;
+        for (int d = 1; d <= 10; ++d)
+            o.documents << d;
+        o.codes = {1, 2};
+        const Result r = compute(o, a, b);
+
+        const CodeResult *c1 = r.forCode(1);
+        QVERIFY(c1);
+        QCOMPARE(c1->units, 10);
+        QCOMPARE(c1->agreements, 7);
+        QVERIFY(qFuzzyCompare(c1->percent, 70.0));
+        // po = .7, pe = .6*.7 + .4*.3 = .54 -> (.7 - .54) / .46
+        QVERIFY(qAbs(c1->kappa - 0.16 / 0.46) < 1e-9);
+        QVERIFY(qAbs(c1->kappaBP - 0.4) < 1e-9); // 2 * .7 - 1
+        // Code 2: full agreement, but no variation -> Cohen undefined.
+        const CodeResult *c2 = r.forCode(2);
+        QCOMPARE(c2->agreements, 10);
+        QVERIFY(std::isnan(c2->kappa));
+        QVERIFY(qAbs(c2->kappaBP - 1.0) < 1e-9);
+        // Total pools the units: po = 17/20, pe = .3*.35 + .7*.65 = .56
+        QCOMPARE(r.total.units, 20);
+        QCOMPARE(r.total.agreements, 17);
+        QVERIFY(qAbs(r.total.kappa - (0.85 - 0.56) / 0.44) < 1e-9);
+
+        QCOMPARE(r.disagreements.size(), 3);
+        QCOMPARE(r.disagreements[0].documentId, qint64(6));
+        QCOMPARE(int(r.disagreements[0].kind), int(DisagreementKind::OnlyA));
+        QCOMPARE(r.disagreements[0].segment.start, 0);
+        QCOMPARE(r.disagreements[1].documentId, qint64(7));
+        QCOMPARE(int(r.disagreements[1].kind), int(DisagreementKind::OnlyB));
+        QCOMPARE(r.disagreements[1].segment.start, 2);
+    }
+
+    void agreementFrequency()
+    {
+        using namespace Agreement;
+        // Segments of code 1 per document: A (2,1,0,3), B (2,2,0,1).
+        QList<Segment> a, b;
+        int id = 1;
+        const int na[] = {2, 1, 0, 3}, nb[] = {2, 2, 0, 1};
+        for (int d = 0; d < 4; ++d) {
+            for (int i = 0; i < na[d]; ++i)
+                a << seg(id++, d + 1, 1, i * 10, i * 10 + 5);
+            for (int i = 0; i < nb[d]; ++i)
+                b << seg(id++, d + 1, 1, i * 10 + 1, i * 10 + 6);
+        }
+        Options o;
+        o.level = Level::Frequency;
+        o.documents = {1, 2, 3, 4};
+        o.codes = {1};
+        const Result r = compute(o, a, b);
+        QCOMPARE(r.total.units, 4);
+        QCOMPARE(r.total.agreements, 2);
+        QVERIFY(qFuzzyCompare(r.total.percent, 50.0));
+        // pe = 1/16 * (1*2 + 1*1 + 1*1 + 0) = .25 -> (.5 - .25) / .75
+        QVERIFY(qAbs(r.total.kappa - 1.0 / 3) < 1e-9);
+        QCOMPARE(r.total.categories, 4);
+        QVERIFY(qAbs(r.total.kappaBP - 1.0 / 3) < 1e-9);
+        QCOMPARE(r.disagreements.size(), 2);
+        QCOMPARE(int(r.disagreements[0].kind), int(DisagreementKind::Count));
+        QCOMPARE(r.disagreements[0].documentId, qint64(2));
+        QCOMPARE(r.disagreements[0].countA, 1);
+        QCOMPARE(r.disagreements[0].countB, 2);
+        QCOMPARE(r.disagreements[1].documentId, qint64(4));
+        QCOMPARE(r.disagreements[1].segment.start, 0); // the coder with more segments (A)
+        QCOMPARE(r.disagreements[1].countA, 3);
+    }
+
+    void agreementSegments()
+    {
+        using namespace Agreement;
+        // Document 1, code 1. A: 0-10, 20-30, 50-60. B: 0-10, 21-30, 100-110.
+        // 20-30 vs 21-30: overlap 9, union 10 -> .9.
+        QList<Segment> a{seg(1, 1, 1, 0, 10), seg(2, 1, 1, 20, 30), seg(3, 1, 1, 50, 60)};
+        QList<Segment> b{seg(4, 1, 1, 0, 10), seg(5, 1, 1, 21, 30), seg(6, 1, 1, 100, 110)};
+        Segment area = seg(7, 1, 1, 0, 1); // non-text segments are not compared at this level
+        area.kind = SegmentKind::Area;
+        a << area;
+        Options o;
+        o.level = Level::Segments;
+        o.documents = {1};
+        o.codes = {1};
+        o.minOverlap = 0.9;
+        Result r = compute(o, a, b);
+        QCOMPARE(r.total.units, 6);
+        QCOMPARE(r.total.agreements, 4);
+        QVERIFY(qAbs(r.total.percent - 100.0 * 4 / 6) < 1e-9);
+        QVERIFY(std::isnan(r.total.kappa));
+        QVERIFY(qAbs(r.total.kappaBP - (4.0 / 6 - 0.5) / 0.5) < 1e-9);
+        QCOMPARE(r.disagreements.size(), 2);
+        QCOMPARE(int(r.disagreements[0].kind), int(DisagreementKind::OnlyA));
+        QCOMPARE(r.disagreements[0].segment.start, 50);
+        QCOMPARE(int(r.disagreements[1].kind), int(DisagreementKind::OnlyB));
+        QCOMPARE(r.disagreements[1].segment.start, 100);
+
+        o.minOverlap = 0.95; // 20-30 / 21-30 no longer agree
+        r = compute(o, a, b);
+        QCOMPARE(r.total.agreements, 2);
+        QCOMPARE(r.disagreements.size(), 4);
+        QVERIFY(qAbs(r.total.kappaBP - (2.0 / 6 - 0.5) / 0.5) < 1e-9);
+
+        // A code only the other coder used elsewhere does not match; a different code never does.
+        QList<Segment> other{seg(8, 1, 2, 0, 10)};
+        o.codes = {1, 2};
+        r = compute(o, {seg(1, 1, 1, 0, 10)}, other);
+        QCOMPARE(r.forCode(1)->agreements, 0);
+        QCOMPARE(r.forCode(2)->agreements, 0);
+        QCOMPARE(r.total.units, 2);
+    }
+
+    void agreementTwoCodersAndProjects()
+    {
+        // Two copies of a project coded by different people; ids differ, uuids and names match.
+        const QString fileA = m_dir.filePath("agree-a.tsra"), fileB = m_dir.filePath("agree-b.tsra");
+        Project a;
+        a.setAuthor("Anna");
+        QVERIFY(a.create(fileA));
+        const qint64 d1 = a.addDocument(a.groups().first().id, "Uno", "Primo testo da codificare.");
+        const qint64 d2 = a.addDocument(a.groups().first().id, "Due", "Secondo testo da codificare.");
+        const qint64 parent = a.addCode(0, "Tema", Qt::red);
+        const qint64 sub = a.addCode(parent, "Sotto", Qt::blue);
+        a.addSegment(d1, sub, 0, 5);
+        a.addSegment(d2, parent, 0, 7);
+        QVERIFY(a.saveCopyAs(fileB));
+        a.addSegment(d1, parent, 6, 11); // Anna's second coding
+
+        QCOMPARE(Agreement::authors(a), (QStringList{"Anna"}));
+        Project b;
+        b.setAuthor("Bruno");
+        QVERIFY(b.open(fileB));
+        b.addSegment(d1, b.findCode(b.findCode(0, "Tema"), "Sotto"), 0, 4);
+        QCOMPARE(Agreement::authors(b), (QStringList{"Anna", "Bruno"})); // the copy kept Anna's codings
+        QCOMPARE(Agreement::byAuthor(b.allSegments(true), "Bruno").size(), 1);
+
+        const auto docs = Agreement::mapDocuments(b, a);
+        const auto codes = Agreement::mapCodes(b, a);
+        QCOMPARE(docs.size(), 2);
+        QCOMPARE(docs.value(d2), d2);
+        QCOMPARE(codes.value(b.findCode(b.findCode(0, "Tema"), "Sotto")), sub);
+        const QList<Segment> mapped = Agreement::remap(Agreement::byAuthor(b.allSegments(true), "Bruno"), docs, codes);
+        QCOMPARE(mapped.size(), 1);
+        QCOMPARE(mapped.first().documentId, d1);
+        QCOMPARE(mapped.first().codeId, sub);
+
+        Agreement::Options o;
+        o.level = Agreement::Level::Existence;
+        o.documents = {d1, d2};
+        o.codes = {parent, sub};
+        const Agreement::Result r = Agreement::compute(o, Agreement::byAuthor(a.allSegments(true), "Anna"), mapped);
+        QCOMPARE(r.forCode(sub)->agreements, 2);   // d1 both; d2 neither
+        QCOMPARE(r.forCode(parent)->agreements, 0); // Anna coded it in both documents, Bruno never
     }
 
     void cooccurrenceMatrix()

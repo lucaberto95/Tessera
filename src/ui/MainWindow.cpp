@@ -12,6 +12,7 @@
 #include "ui/CodeTree.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
+#include "ui/AgreementDialog.h"
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
@@ -195,6 +196,7 @@ void MainWindow::createActions()
     m_matrix = make(tr("&Matrice codici × documenti…"), &MainWindow::showMatrix, QKeySequence(Qt::CTRL | Qt::Key_M));
     m_retrieval = make(tr("Recupero &complesso…"), &MainWindow::showRetrieval, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
     m_cooccurrence = make(tr("Co-&occorrenze dei codici…"), &MainWindow::showCooccurrence);
+    m_agreement = make(tr("Accordo tra codi&ficatori…"), &MainWindow::showAgreement);
     m_statsAction = make(tr("&Statistiche e tabelle incrociate…"), &MainWindow::showStats);
     m_summaryGrid = make(tr("&Griglia delle sintesi…"), &MainWindow::showSummaryGrid);
     m_summaryTables = make(tr("Tabelle &riassuntive…"), &MainWindow::showSummaryTables);
@@ -273,6 +275,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_matrix);
     analysis->addAction(m_retrieval);
     analysis->addAction(m_cooccurrence);
+    analysis->addAction(m_agreement);
     analysis->addAction(m_statsAction);
     analysis->addAction(m_summaryGrid);
     analysis->addAction(m_summaryTables);
@@ -894,6 +897,21 @@ void MainWindow::showCooccurrence()
     auto *dlg = new CooccurrenceDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &CooccurrenceDialog::passagesRequested, m_segments, &SegmentsPanel::setPassages);
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showAgreement()
+{
+    auto *dlg = new AgreementDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &AgreementDialog::disagreementActivated, this, [this](qint64 doc, int start, int end, qint64 seg) {
+        if (start < 0)
+            m_view->openDocument(doc);
+        else
+            openSegment(doc, start, end, seg);
+        m_documents->setCurrentDocument(doc);
+    });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

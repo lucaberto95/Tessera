@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Tessera VERSION 0.21.0 LANGUAGES CXX)
+project(Tessera VERSION 0.22.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,6 +22,7 @@ qt_add_library(tessera_core STATIC
     src/core/Qdpx.h src/core/Qdpx.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
     src/core/Retrieval.h src/core/Retrieval.cpp
+    src/core/Agreement.h src/core/Agreement.cpp
     src/core/Cooccurrence.h src/core/Cooccurrence.cpp
     src/core/Stats.h src/core/Stats.cpp
     src/core/Summaries.h src/core/Summaries.cpp
@@ -58,6 +59,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/SearchDialog.h src/ui/SearchDialog.cpp
     src/ui/MatrixDialog.h src/ui/MatrixDialog.cpp
     src/ui/RetrievalDialog.h src/ui/RetrievalDialog.cpp
+    src/ui/AgreementDialog.h src/ui/AgreementDialog.cpp
     src/ui/CooccurrenceDialog.h src/ui/CooccurrenceDialog.cpp
     src/ui/StatsDialog.h src/ui/StatsDialog.cpp
     src/ui/SummaryGridDialog.h src/ui/SummaryGridDialog.cpp

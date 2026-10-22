@@ -62,6 +62,8 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   WordFrequencies  (`Words::`) frequenze con filtri e colonne di confronto, `keywordInContext`, liste di parole
                  escluse (it/en scritte da zero; lista del progetto in meta `word_stoplist`, prefisso `#` = "impostata"),
                  `cloudLayout` (spirale con collisioni). Funzioni pure su testi già letti: girano in un thread
+  Agreement      accordo tra codificatori (#23): `compute` a tre livelli (presenza, frequenza, segmenti), kappa di Cohen e Brennan-Prediger,
+                 disaccordi; `mapDocuments/mapCodes/remap` portano un secondo progetto nello stesso spazio di id
   Exporters      CSV per Excel (UTF-8 BOM, ';'), HTML, import variabili CSV, tabelle/fogli .xlsx (`*Sheet`, `projectSheets`)
   Images         (`Images::`) suffissi/lettura file immagine, `crop` di un'area, miniature, PNG, `areaLabel`
   Pdfs           (`Pdfs::`) `Doc` (PDF da memoria: testo di pagina, `select` tra due punti, `textInArea`, `render`,
@@ -176,6 +178,8 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   dopo `flush()`). Le sintesi **non** vanno nel QDPX (REFI-QDA non ha un elemento adatto): si esportano da "Tabelle riassuntive"
   in Excel/CSV/HTML. Le conferme di eliminazione di codici e documenti citano le sintesi che si perderebbero.
 
+- **Accordo tra codificatori** (#23, Agreement.*): i due codificatori sono due autori (`Segment::author`) dello stesso progetto o questo progetto e un altro file (aperto con `Merge::Source`, documenti/codici abbinati per uuid poi nome/percorso; gli id dell'altro progetto si azzerano). Formule nell'header: unità (documento, codice) per presenza e frequenza, segmenti reciproci con soglia overlap/unione per il livello segmenti (solo testo; aree e tempi non confrontati). Cohen indefinito (NaN, "n.d.") quando pe = 1 e al livello segmenti. `addSegment` non duplica un segmento identico: nei test i due codificatori devono usare posizioni diverse.
+
 - **Unione di progetti** (#22, Merge.*): legge l'altro progetto con un secondo Project su una **copia** in cartella temporanea
   (aprirlo potrebbe migrarlo e lasciare un backup accanto al file; un .qdpx è importato in un progetto temporaneo) e scrive nel
   progetto aperto solo con l'API pubblica di Project, quindi trigger di undo e segnali funzionano da soli. Chiavi: documenti per
@@ -246,7 +250,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 Aggiornare questo elenco quando una issue viene chiusa.
 

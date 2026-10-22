@@ -58,6 +58,7 @@ private:
     void showMatrix();
     void showRetrieval();
     void showCooccurrence();
+    void showAgreement();
     void showStats();
     void showSummaryGrid();
     void showSummaryTables();
@@ -122,6 +123,7 @@ private:
     QAction *m_matrix = nullptr;
     QAction *m_retrieval = nullptr;
     QAction *m_cooccurrence = nullptr;
+    QAction *m_agreement = nullptr;
     QAction *m_statsAction = nullptr;
     QAction *m_summaryGrid = nullptr;
     QAction *m_summaryTables = nullptr;
