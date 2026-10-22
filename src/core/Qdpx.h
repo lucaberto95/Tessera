@@ -5,7 +5,7 @@
 class Project;
 
 // REFI-QDA project exchange (.qdpx = zip with project.qde + sources/), see
-// https://www.qdasoftware.org. Text sources, codes, codings, notes, variables and sets.
+// https://www.qdasoftware.org. Text, PDF and picture sources (with their area selections), codes, codings, notes, variables, sets and links.
 namespace Qdpx {
 
 bool exportProject(const Project &project, const QString &path, QString *error);

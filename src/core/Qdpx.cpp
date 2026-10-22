@@ -1,4 +1,5 @@
 #include "core/Qdpx.h"
+#include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
 
@@ -7,6 +8,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QImageReader>
+#include <QMap>
 #include <QSaveFile>
 #include <QSet>
 #include <QUuid>
@@ -109,14 +112,19 @@ QString linkEndGuid(const QString &linkUuid, bool from)
 bool exportProject(const Project &project, const QString &path, QString *error)
 {
     const QList<Code> codes = project.codes();
-    // Only text documents are exported for now: pdf/image/audio/video sources and their selections come with #46.
+    // Text, PDF and image documents. Audio/video (DocumentKind::Audio/Video, issue #28) are not exported
+    // yet: they will become AudioSource/VideoSource with AudioSelection/VideoSelection (begin/end in ms,
+    // Segment::tStartMs/tEndMs) plus Transcript/SyncPoint (issue #29), written next to the PDF and
+    // picture branches in the Sources loop below, and read in Importer::parseSources().
     QList<Document> docs = project.documents();
-    docs.removeIf([](const Document &d) { return d.kind != DocumentKind::Text; });
+    docs.removeIf([](const Document &d) {
+        return d.kind != DocumentKind::Text && d.kind != DocumentKind::Pdf && d.kind != DocumentKind::Image;
+    });
     const QList<DocumentGroup> groups = project.groups();
     const QList<Variable> vars = project.variables();
     const auto values = project.allVariableValues();
     const QList<Memo> memos = project.memos();
-    const QList<Segment> segments = project.allSegments();
+    const QList<Segment> segments = project.allSegments(true);
 
     // Users: one per distinct author name.
     QHash<QString, QString> userGuids;
@@ -139,19 +147,10 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     for (const Variable &v : vars)
         varGuid.insert(v.id, v.uuid.isEmpty() ? newUuid() : v.uuid);
 
-    // memo lookups: (type, target) -> list of memos
-    QHash<QString, QList<Memo>> memosByTarget;
-    for (const Memo &m : memos)
-        memosByTarget[memoTargetToString(m.targetType) + QLatin1Char(':') + QString::number(m.targetId)] << m;
-    auto memosFor = [&](MemoTarget t, qint64 id) {
-        return memosByTarget.value(memoTargetToString(t) + QLatin1Char(':') + QString::number(id));
-    };
-    // NoteRefs: a note is referenced by every element it is linked to. Memos of groups and sets
-    // travel as the set's Description (see below), so they and their links have no NoteRefs.
+    // NoteRefs: a note is referenced by every element it is linked to. Groups and sets have no
+    // NoteRef in REFI-QDA: they list their notes as MemberNote.
     QHash<QString, QStringList> noteRefsByTarget; // "type:id" -> note guids
     for (const Memo &m : memos) {
-        if (m.targetType == MemoTarget::Group || m.targetType == MemoTarget::DocumentSet)
-            continue;
         if (m.targetType == MemoTarget::Project)
             noteRefsByTarget[memoTargetToString(MemoTarget::Project) + QStringLiteral(":0")] << m.uuid;
         for (const MemoLink &l : project.memoLinks(m.id))
@@ -164,7 +163,15 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     QHash<qint64, QList<Segment>> segmentsByDoc;
     for (const Segment &s : segments)
         segmentsByDoc[s.documentId] << s;
-    const QList<DocumentLink> links = project.links();
+    // Link ends are text selections: links touching a picture (or a document not exported) are left out.
+    QSet<qint64> textDocIds;
+    for (const Document &d : docs)
+        if (d.kind != DocumentKind::Image)
+            textDocIds.insert(d.id);
+    QList<DocumentLink> links = project.links();
+    links.removeIf([&](const DocumentLink &l) {
+        return !textDocIds.contains(l.fromDocumentId) || !textDocIds.contains(l.toDocumentId);
+    });
     struct LinkEnd {
         QString guid;
         int start, end;
@@ -205,6 +212,13 @@ bool exportProject(const Project &project, const QString &path, QString *error)
         }
     };
 
+    auto writeMemberNotes = [&](MemoTarget t, qint64 id) {
+        for (const QString &guid : noteRefsByTarget.value(memoTargetToString(t) + QLatin1Char(':') + QString::number(id))) {
+            w.writeEmptyElement(QStringLiteral("MemberNote"));
+            w.writeAttribute(QStringLiteral("targetGUID"), guid);
+        }
+    };
+
     w.writeStartElement(QStringLiteral("CodeBook"));
     w.writeStartElement(QStringLiteral("Codes"));
     std::function<void(qint64)> writeCodes = [&](qint64 parent) {
@@ -238,21 +252,21 @@ bool exportProject(const Project &project, const QString &path, QString *error)
 
     QHash<QString, QByteArray> sourceFiles;
     QHash<qint64, QString> docGuid;
-    w.writeStartElement(QStringLiteral("Sources"));
-    for (const Document &d : docs) {
-        const QString guid = d.uuid.isEmpty() ? newUuid() : d.uuid;
-        docGuid.insert(d.id, guid);
-        const QString text = project.documentText(d.id);
-        const QString fileName = guid + QStringLiteral(".txt");
-        sourceFiles.insert(fileName, text.toUtf8());
 
-        w.writeStartElement(QStringLiteral("TextSource"));
-        w.writeAttribute(QStringLiteral("guid"), guid);
-        w.writeAttribute(QStringLiteral("name"), d.name);
-        w.writeAttribute(QStringLiteral("plainTextPath"), QStringLiteral("internal://") + fileName);
-        w.writeAttribute(QStringLiteral("creatingUser"), userGuid(project.author()));
-        w.writeAttribute(QStringLiteral("creationDateTime"), xmlDate(d.importedAt));
+    auto writeCoding = [&](const Segment &s) {
+        w.writeStartElement(QStringLiteral("Coding"));
+        w.writeAttribute(QStringLiteral("guid"), newUuid());
+        w.writeAttribute(QStringLiteral("creatingUser"), userGuid(s.author));
+        w.writeAttribute(QStringLiteral("creationDateTime"), xmlDate(s.createdAt));
+        w.writeEmptyElement(QStringLiteral("CodeRef"));
+        w.writeAttribute(QStringLiteral("targetGUID"), codeGuid.value(s.codeId));
+        w.writeEndElement(); // Coding
+    };
+    // PlainTextSelections of a text (a text source, or the text representation of a PDF).
+    auto writeTextSelections = [&](const Document &d, const QString &text) {
         for (const Segment &s : segmentsByDoc.value(d.id)) {
+            if (s.kind != SegmentKind::Text)
+                continue;
             w.writeStartElement(QStringLiteral("PlainTextSelection"));
             w.writeAttribute(QStringLiteral("guid"), s.uuid.isEmpty() ? newUuid() : s.uuid);
             w.writeAttribute(QStringLiteral("name"), TextUtils::excerpt(text, s.start, s.end, 60));
@@ -262,13 +276,7 @@ bool exportProject(const Project &project, const QString &path, QString *error)
             w.writeAttribute(QStringLiteral("creationDateTime"), xmlDate(s.createdAt));
             if (!s.comment.isEmpty())
                 w.writeTextElement(QStringLiteral("Description"), s.comment);
-            w.writeStartElement(QStringLiteral("Coding"));
-            w.writeAttribute(QStringLiteral("guid"), newUuid());
-            w.writeAttribute(QStringLiteral("creatingUser"), userGuid(s.author));
-            w.writeAttribute(QStringLiteral("creationDateTime"), xmlDate(s.createdAt));
-            w.writeEmptyElement(QStringLiteral("CodeRef"));
-            w.writeAttribute(QStringLiteral("targetGUID"), codeGuid.value(s.codeId));
-            w.writeEndElement(); // Coding
+            writeCoding(s);
             writeNoteRefs(MemoTarget::Segment, s.id);
             w.writeEndElement(); // PlainTextSelection
         }
@@ -281,6 +289,80 @@ bool exportProject(const Project &project, const QString &path, QString *error)
             w.writeAttribute(QStringLiteral("creatingUser"), userGuid(e.link->author));
             w.writeAttribute(QStringLiteral("creationDateTime"), xmlDate(e.link->createdAt));
         }
+    };
+    // PDFSelection / PictureSelection: coordinates are integers in the schema (PDF points, or image
+    // pixels, origin at the top left), so the fractions of a PDF area are rounded to the point. For a PDF
+    // the selected text travels in the (otherwise unused) name, which Tessera reads back.
+    auto writeAreaSelections = [&](const Document &d) {
+        const bool pdf = d.kind == DocumentKind::Pdf;
+        for (const Segment &s : segmentsByDoc.value(d.id)) {
+            if (s.kind != SegmentKind::Area)
+                continue;
+            w.writeStartElement((pdf ? QStringLiteral("PDFSelection") : QStringLiteral("PictureSelection")));
+            w.writeAttribute(QStringLiteral("guid"), s.uuid.isEmpty() ? newUuid() : s.uuid);
+            if (pdf && !s.areaText.isEmpty())
+                w.writeAttribute(QStringLiteral("name"), s.areaText);
+            if (pdf)
+                w.writeAttribute(QStringLiteral("page"), QString::number(s.page));
+            w.writeAttribute(QStringLiteral("firstX"), QString::number(qRound(s.x1)));
+            w.writeAttribute(QStringLiteral("firstY"), QString::number(qRound(s.y1)));
+            w.writeAttribute(QStringLiteral("secondX"), QString::number(qRound(s.x2)));
+            w.writeAttribute(QStringLiteral("secondY"), QString::number(qRound(s.y2)));
+            w.writeAttribute(QStringLiteral("creatingUser"), userGuid(s.author));
+            w.writeAttribute(QStringLiteral("creationDateTime"), xmlDate(s.createdAt));
+            if (!s.comment.isEmpty())
+                w.writeTextElement(QStringLiteral("Description"), s.comment);
+            writeCoding(s);
+            writeNoteRefs(MemoTarget::Segment, s.id);
+            w.writeEndElement();
+        }
+    };
+
+    w.writeStartElement(QStringLiteral("Sources"));
+    for (const Document &d : docs) {
+        const QString guid = d.uuid.isEmpty() ? newUuid() : d.uuid;
+        docGuid.insert(d.id, guid);
+        const bool isPdf = d.kind == DocumentKind::Pdf, isImage = d.kind == DocumentKind::Image;
+        const QString text = isImage ? QString() : project.documentText(d.id);
+        const QString textFile = guid + QStringLiteral(".txt");
+
+        w.writeStartElement((isPdf ? QStringLiteral("PDFSource") : isImage ? QStringLiteral("PictureSource") : QStringLiteral("TextSource")));
+        w.writeAttribute(QStringLiteral("guid"), guid);
+        w.writeAttribute(QStringLiteral("name"), d.name);
+        if (isPdf || isImage) {
+            const QByteArray data = project.documentData(d.id);
+            QString ext = QStringLiteral("pdf");
+            if (isImage) {
+                QBuffer probe;
+                probe.setData(data);
+                probe.open(QIODevice::ReadOnly);
+                ext = QString::fromLatin1(QImageReader::imageFormat(&probe)).toLower();
+                if (ext == QLatin1String("jpeg"))
+                    ext = QStringLiteral("jpg");
+                if (ext.isEmpty())
+                    ext = QStringLiteral("png");
+            }
+            sourceFiles.insert(guid + QLatin1Char('.') + ext, data);
+            w.writeAttribute(QStringLiteral("path"), QStringLiteral("internal://") + guid + QLatin1Char('.') + ext);
+        } else {
+            sourceFiles.insert(textFile, text.toUtf8());
+            w.writeAttribute(QStringLiteral("plainTextPath"), QStringLiteral("internal://") + textFile);
+        }
+        w.writeAttribute(QStringLiteral("creatingUser"), userGuid(project.author()));
+        w.writeAttribute(QStringLiteral("creationDateTime"), xmlDate(d.importedAt));
+        if (isPdf || isImage)
+            writeAreaSelections(d);
+        if (isPdf) {
+            // The text layer (pages joined by form feeds) and the codings of its passages.
+            sourceFiles.insert(textFile, text.toUtf8());
+            w.writeStartElement(QStringLiteral("Representation"));
+            w.writeAttribute(QStringLiteral("guid"), newUuid());
+            w.writeAttribute(QStringLiteral("plainTextPath"), QStringLiteral("internal://") + textFile);
+            writeTextSelections(d, text);
+            w.writeEndElement();
+        } else if (!isImage) {
+            writeTextSelections(d, text);
+        }
         for (const Variable &v : vars) {
             const QString value = values.value(d.id).value(v.id);
             if (value.isEmpty())
@@ -292,16 +374,12 @@ bool exportProject(const Project &project, const QString &path, QString *error)
             w.writeEndElement();
         }
         writeNoteRefs(MemoTarget::Document, d.id);
-        w.writeEndElement(); // TextSource
+        w.writeEndElement(); // TextSource / PDFSource / PictureSource
     }
     w.writeEndElement(); // Sources
 
-    // Memos of groups and sets travel as the set's Description: as notes nothing would refer to
-    // them, and an importer would add them again as project memos.
-    QList<Memo> notes;
-    for (const Memo &m : memos)
-        if (m.targetType != MemoTarget::Group && m.targetType != MemoTarget::DocumentSet)
-            notes << m;
+    // Every memo is a Note. Those of groups and sets are listed by the set as MemberNote (see Sets).
+    QList<Memo> notes = memos;
     if (!notes.isEmpty()) {
         w.writeStartElement(QStringLiteral("Notes"));
         for (const Memo &m : notes) {
@@ -337,30 +415,26 @@ bool exportProject(const Project &project, const QString &path, QString *error)
         w.writeStartElement(QStringLiteral("Set"));
         w.writeAttribute(QStringLiteral("guid"), groupSetGuid(i));
         w.writeAttribute(QStringLiteral("name"), g.name);
-        const QList<Memo> groupMemos = memosFor(MemoTarget::Group, g.id);
-        if (!groupMemos.isEmpty())
-            w.writeTextElement(QStringLiteral("Description"), groupMemos.first().body);
         for (const Document &d : docs) {
             if (d.groupId != g.id)
                 continue;
             w.writeEmptyElement(QStringLiteral("MemberSource"));
             w.writeAttribute(QStringLiteral("targetGUID"), docGuid.value(d.id));
         }
+        writeMemberNotes(MemoTarget::Group, g.id);
         w.writeEndElement();
     }
     for (const DocumentSet &s : project.documentSets()) {
         w.writeStartElement(QStringLiteral("Set"));
         w.writeAttribute(QStringLiteral("guid"), s.uuid);
         w.writeAttribute(QStringLiteral("name"), s.name);
-        const QList<Memo> setMemos = memosFor(MemoTarget::DocumentSet, s.id);
-        if (!setMemos.isEmpty())
-            w.writeTextElement(QStringLiteral("Description"), setMemos.first().body);
         for (qint64 id : project.documentSetMembers(s.id)) {
             if (!docGuid.contains(id))
                 continue;
             w.writeEmptyElement(QStringLiteral("MemberSource"));
             w.writeAttribute(QStringLiteral("targetGUID"), docGuid.value(id));
         }
+        writeMemberNotes(MemoTarget::DocumentSet, s.id);
         w.writeEndElement();
     }
     w.writeEndElement(); // Sets
@@ -402,11 +476,18 @@ struct PendingSelection {
     QDateTime created;
     QStringList codeGuids;
     QStringList noteGuids;
+    // PDFSelection / PictureSelection: PDF points or image pixels, origin at the top left.
+    bool isArea = false;
+    int page = 0;
+    double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    QString areaText;
 };
 
 struct PendingSource {
     QString guid;
     QString name;
+    DocumentKind kind = DocumentKind::Text;
+    QString binaryPath; // PDFSource/PictureSource path
     QString plainTextPath;
     QString inlineText;
     QDateTime created;
@@ -428,6 +509,7 @@ struct PendingSet {
     QString name;
     QString description;
     QStringList members; // source guids
+    QStringList noteGuids; // MemberNote
 };
 
 struct PendingLink {
@@ -460,7 +542,8 @@ struct Importer {
     QList<std::tuple<MemoTarget, QString, QString>> noteRefs; // target type, target guid, note guid
     QStringList projectNoteRefs;
     QStringList warnings;
-    int skippedSources = 0;
+    QMap<QString, int> skipped; // reason -> count of sources left out
+    int skippedCases = 0, skippedGraphs = 0, pdfsAsText = 0;
 
     Importer(Project &p, QZipReader &z, const QString &dir, const QByteArray &xml)
         : project(p), zip(z), qdpxDir(dir), r(xml) {}
@@ -502,12 +585,24 @@ struct Importer {
         }
     }
 
-    void parseSelection(PendingSource &src)
+    void parseSelection(PendingSource &src, bool area = false)
     {
         PendingSelection sel;
         sel.guid = attr(QStringLiteral("guid"));
-        sel.start = attr(QStringLiteral("startPosition")).toInt();
-        sel.end = attr(QStringLiteral("endPosition")).toInt();
+        if (area) {
+            sel.isArea = true;
+            sel.page = attr(QStringLiteral("page")).toInt();
+            sel.x1 = attr(QStringLiteral("firstX")).toDouble();
+            sel.y1 = attr(QStringLiteral("firstY")).toDouble();
+            sel.x2 = attr(QStringLiteral("secondX")).toDouble();
+            sel.y2 = attr(QStringLiteral("secondY")).toDouble();
+            // Tessera keeps the selected text of a PDF area in the name; elsewhere it is just a label.
+            if (src.kind == DocumentKind::Pdf && origin.startsWith(QLatin1String("Tessera ")))
+                sel.areaText = attr(QStringLiteral("name"));
+        } else {
+            sel.start = attr(QStringLiteral("startPosition")).toInt();
+            sel.end = attr(QStringLiteral("endPosition")).toInt();
+        }
         sel.user = attr(QStringLiteral("creatingUser"));
         sel.created = date(QStringLiteral("creationDateTime"));
         while (r.readNextStartElement()) {
@@ -579,8 +674,10 @@ struct Importer {
                 sources << src;
             } else if (n == QLatin1String("PDFSource")) {
                 PendingSource src;
+                src.kind = DocumentKind::Pdf;
                 src.guid = attr(QStringLiteral("guid"));
                 src.name = attr(QStringLiteral("name"));
+                src.binaryPath = attr(QStringLiteral("path"));
                 src.created = date(QStringLiteral("creationDateTime"));
                 bool hasRepresentation = false;
                 while (r.readNextStartElement()) {
@@ -588,23 +685,54 @@ struct Importer {
                         hasRepresentation = true;
                         src.plainTextPath = attr(QStringLiteral("plainTextPath"));
                         parseTextSourceBody(src);
+                    } else if (r.name() == QLatin1String("PDFSelection")) {
+                        parseSelection(src, true);
                     } else if (r.name() == QLatin1String("VariableValue")) {
                         parseVariableValue(src);
+                    } else if (r.name() == QLatin1String("NoteRef")) {
+                        src.noteGuids << attr(QStringLiteral("targetGUID"));
+                        r.skipCurrentElement();
                     } else {
                         r.skipCurrentElement();
                     }
                 }
-                if (hasRepresentation)
+                // Without the file itself the text representation alone is imported (as before).
+                if (hasRepresentation || !src.binaryPath.isEmpty())
                     sources << src;
                 else
-                    ++skippedSources;
+                    ++skipped[QObject::tr("PDF senza file né testo")];
+            } else if (n == QLatin1String("PictureSource")) {
+                PendingSource src;
+                src.kind = DocumentKind::Image;
+                src.guid = attr(QStringLiteral("guid"));
+                src.name = attr(QStringLiteral("name"));
+                src.binaryPath = attr(QStringLiteral("path"));
+                src.created = date(QStringLiteral("creationDateTime"));
+                while (r.readNextStartElement()) {
+                    if (r.name() == QLatin1String("PictureSelection")) {
+                        parseSelection(src, true);
+                    } else if (r.name() == QLatin1String("VariableValue")) {
+                        parseVariableValue(src);
+                    } else if (r.name() == QLatin1String("NoteRef")) {
+                        src.noteGuids << attr(QStringLiteral("targetGUID"));
+                        r.skipCurrentElement();
+                    } else {
+                        r.skipCurrentElement();
+                    }
+                }
+                sources << src;
             } else {
-                ++skippedSources; // pictures, audio, video
+                // Audio and video sources (with their transcripts) arrive with issues #28 and #29.
+                if (n == QLatin1String("AudioSource"))
+                    ++skipped[QObject::tr("audio")];
+                else if (n == QLatin1String("VideoSource"))
+                    ++skipped[QObject::tr("video")];
+                else
+                    ++skipped[QObject::tr("fonti di tipo %1").arg(n.toString())];
                 r.skipCurrentElement();
             }
         }
     }
-
     void parseNotes()
     {
         while (r.readNextStartElement()) {
@@ -644,6 +772,9 @@ struct Importer {
                 if (r.name() == QLatin1String("MemberSource")) {
                     set.members << attr(QStringLiteral("targetGUID"));
                     r.skipCurrentElement();
+                } else if (r.name() == QLatin1String("MemberNote")) {
+                    set.noteGuids << attr(QStringLiteral("targetGUID"));
+                    r.skipCurrentElement();
                 } else if (r.name() == QLatin1String("Description")) {
                     set.description = r.readElementText();
                 } else {
@@ -666,6 +797,15 @@ struct Importer {
 
     QString readSourceText(const QString &path)
     {
+        QByteArray data = readSourceBytes(path);
+        if (data.startsWith("\xEF\xBB\xBF"))
+            data.remove(0, 3);
+        return QString::fromUtf8(data);
+    }
+
+    // Content of a source file: inside the archive (internal://) or next to the .qdpx file.
+    QByteArray readSourceBytes(const QString &path)
+    {
         QByteArray data;
         if (path.startsWith(QLatin1String("internal://"))) {
             const QString name = path.mid(11);
@@ -680,9 +820,7 @@ struct Importer {
             if (isReadableSourcePath(file, qdpxDir) && f.open(QIODevice::ReadOnly))
                 data = f.readAll();
         }
-        if (data.startsWith("\xEF\xBB\xBF"))
-            data.remove(0, 3);
-        return QString::fromUtf8(data);
+        return data;
     }
 
     bool run(QString *error)
@@ -734,6 +872,14 @@ struct Importer {
                 parseSets();
             } else if (n == QLatin1String("Links")) {
                 parseLinks();
+            } else if (n == QLatin1String("Cases") || n == QLatin1String("Graphs")) {
+                // Tessera has no cases (the document is the case) and no graphs yet (issue #15).
+                int count = 0;
+                while (r.readNextStartElement()) {
+                    ++count;
+                    r.skipCurrentElement();
+                }
+                (n == QLatin1String("Cases") ? skippedCases : skippedGraphs) += count;
             } else if (n == QLatin1String("NoteRef")) {
                 projectNoteRefs << attr(QStringLiteral("targetGUID"));
                 r.skipCurrentElement();
@@ -762,6 +908,30 @@ struct Importer {
             QString raw = src.inlineText;
             if (raw.isEmpty() && !src.plainTextPath.isEmpty())
                 raw = readSourceText(src.plainTextPath);
+            DocumentKind kind = src.kind;
+            QByteArray data;
+            int pdfPages = 0;
+            if (kind == DocumentKind::Image) {
+                data = readSourceBytes(src.binaryPath);
+                if (QImage::fromData(data).isNull()) {
+                    ++skipped[QObject::tr("immagini mancanti o illeggibili")];
+                    continue;
+                }
+            } else if (kind == DocumentKind::Pdf) {
+                data = readSourceBytes(src.binaryPath);
+                Pdfs::Doc pdf;
+                if (!data.isEmpty() && pdf.load(data)) {
+                    pdfPages = pdf.pageCount();
+                    if (raw.isEmpty())
+                        raw = Pdfs::joinPages(Pdfs::pageTexts(pdf)); // a PDF from another program
+                } else if (raw.isEmpty()) {
+                    ++skipped[QObject::tr("PDF mancanti o illeggibili")];
+                    continue;
+                } else {
+                    kind = DocumentKind::Text; // only the text representation can be kept
+                    ++pdfsAsText;
+                }
+            }
             // Selection positions refer to the raw text; line endings are normalized to LF and
             // positions remapped through `map` (raw UTF-16 index -> normalized index).
             QString text;
@@ -781,11 +951,46 @@ struct Importer {
             }
             map << int(text.size());
             const bool repeatedGuid = docIds.contains(src.guid);
+            const QString guid = repeatedGuid ? QString() : src.guid;
             const qint64 docId =
-                project.addDocument(defaultGroup, src.name, text, {}, repeatedGuid ? QString() : src.guid);
+                kind == DocumentKind::Image ? project.addImageDocument(defaultGroup, src.name, data, {}, guid)
+                : kind == DocumentKind::Pdf ? project.addPdfDocument(defaultGroup, src.name, data, text, {}, guid)
+                                            : project.addDocument(defaultGroup, src.name, text, {}, guid);
+            if (!docId) {
+                ++skipped[QObject::tr("documenti non registrabili")];
+                continue;
+            }
             if (!repeatedGuid)
                 docIds.insert(src.guid, docId);
             for (const PendingSelection &sel : src.selections) {
+                if (sel.isArea || kind == DocumentKind::Image) {
+                    // Areas belong to PDFs and pictures; text passages to text and to the PDF text layer.
+                    const bool pdf = kind == DocumentKind::Pdf;
+                    if (!sel.isArea || !(pdf || kind == DocumentKind::Image) || (pdf && (sel.page < 1 || sel.page > pdfPages))
+                        || sel.x1 < 0 || sel.y1 < 0 || sel.x2 == sel.x1 || sel.y2 == sel.y1) {
+                        ++invalidSelections;
+                        continue;
+                    }
+                    for (int i = 0; i < sel.codeGuids.size(); ++i) {
+                        const qint64 codeId = codes.value(sel.codeGuids[i]);
+                        if (!codeId) {
+                            ++unresolvedCodes;
+                            continue;
+                        }
+                        const qint64 segId =
+                            project.addAreaSegment(docId, codeId, pdf ? sel.page : 0, sel.x1, sel.y1, sel.x2, sel.y2, 0,
+                                                   sel.description, i == 0 ? sel.guid : QString(), sel.areaText);
+                        if (!segId) {
+                            ++invalidSelections;
+                            continue;
+                        }
+                        if (i == 0)
+                            segmentIds.insert(sel.guid, segId);
+                    }
+                    for (const QString &note : sel.noteGuids)
+                        noteRefs.append({MemoTarget::Segment, sel.guid, note});
+                    continue;
+                }
                 if (sel.start < 0) {
                     ++invalidSelections;
                     continue;
@@ -844,18 +1049,18 @@ struct Importer {
             project.saveMemo(memo);
         };
         QSet<QString> grouped;
+        QHash<QString, qint64> groupIdOfSet, setIdOfSet; // set guid -> group / document set
         bool createdGroups = false;
         for (const PendingSet &set : sets) {
             if (onlyGroups || groupGuids.contains(QUuid(set.guid))) {
-                qint64 groupId = 0;
+                // Created even when empty, so that the groups of the project survive the round trip.
+                const qint64 groupId = project.addGroup(set.name);
+                createdGroups = true;
+                groupIdOfSet.insert(set.guid, groupId);
+                addSetMemo(MemoTarget::Group, groupId, set);
                 for (const QString &m : set.members) {
                     if (!docIds.contains(m) || grouped.contains(m))
                         continue;
-                    if (!groupId) {
-                        groupId = project.addGroup(set.name);
-                        createdGroups = true;
-                        addSetMemo(MemoTarget::Group, groupId, set);
-                    }
                     project.moveDocument(docIds.value(m), groupId);
                     grouped.insert(m);
                 }
@@ -866,7 +1071,10 @@ struct Importer {
                         members << docIds.value(m);
                 const qint64 setId = project.addDocumentSet(set.name, members, set.guid);
                 addSetMemo(MemoTarget::DocumentSet, setId, set);
+                setIdOfSet.insert(set.guid, setId);
             }
+            for (const QString &note : set.noteGuids)
+                noteRefs.append({groupIdOfSet.contains(set.guid) ? MemoTarget::Group : MemoTarget::DocumentSet, set.guid, note});
         }
         if (createdGroups && project.documentsInGroup(defaultGroup).isEmpty())
             project.deleteGroup(defaultGroup);
@@ -899,6 +1107,10 @@ struct Importer {
                 target = docIds.value(targetGuid);
             else if (type == MemoTarget::Segment)
                 target = segmentIds.value(targetGuid);
+            else if (type == MemoTarget::Group)
+                target = groupIdOfSet.value(targetGuid);
+            else if (type == MemoTarget::DocumentSet)
+                target = setIdOfSet.value(targetGuid);
             if (!target)
                 continue;
             if (const qint64 memo = memoOfNote.value(noteGuid))
@@ -936,7 +1148,7 @@ struct Importer {
         }
 
         report = QObject::tr("Importati: %1 documenti, %2 codici, %3 segmenti, %4 memo, %5 variabili.")
-                     .arg(sources.size())
+                     .arg(project.documents().size())
                      .arg(codes.size())
                      .arg(project.allSegments().size())
                      .arg(project.memos().size())
@@ -945,9 +1157,19 @@ struct Importer {
             report += QLatin1Char(' ') + QObject::tr("Collegamenti tra documenti: %1.").arg(importedLinks);
         if (skippedLinks)
             warnings << QObject::tr("%1 collegamenti tra oggetti diversi da brani di testo ignorati.").arg(skippedLinks);
-        if (skippedSources)
-            warnings << QObject::tr("%1 fonti non testuali (immagini, audio, video, PDF senza testo) ignorate.")
-                            .arg(skippedSources);
+        if (!skipped.isEmpty()) {
+            QStringList parts;
+            for (auto it = skipped.cbegin(); it != skipped.cend(); ++it)
+                parts << QStringLiteral("%1 %2").arg(it.value()).arg(it.key());
+            warnings << QObject::tr("Fonti ignorate perché non ancora supportate o non leggibili: %1.")
+                            .arg(parts.join(QStringLiteral(", ")));
+        }
+        if (pdfsAsText)
+            warnings << QObject::tr("%1 PDF senza file importati solo come testo.").arg(pdfsAsText);
+        if (skippedCases)
+            warnings << QObject::tr("%1 casi ignorati (in Tessera il caso è il documento).").arg(skippedCases);
+        if (skippedGraphs)
+            warnings << QObject::tr("%1 mappe (grafi) ignorate.").arg(skippedGraphs);
         if (unresolvedCodes)
             warnings << QObject::tr("%1 codifiche con codice inesistente ignorate.").arg(unresolvedCodes);
         if (invalidSelections)

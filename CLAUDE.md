@@ -65,7 +65,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   Images         (`Images::`) suffissi/lettura file immagine, `crop` di un'area, miniature, PNG, `areaLabel`
   Pdfs           (`Pdfs::`) `Doc` (PDF da memoria: testo di pagina, `select` tra due punti, `textInArea`, `render`,
                  `cropArea`), `readFile`, `pageTexts/joinPages/pageOfOffset` (pagine separate da `\f`)
-  Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
+  Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/: .txt, .pdf, immagini)
   Xlsx           lettore (fogli, stringhe condivise/inline, date dai formati) e scrittore `writeWorkbook(Sheet...)`
   Survey         import di sondaggi (.xlsx/.csv): ruoli colonna, un documento per rispondente, variabili tipizzate
   TextUtils      newline, UTF-16 <-> code point, adattamento di segmenti/link dopo modifiche, frasi/paragrafi
@@ -107,8 +107,8 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   segmenti di testo** salvo `includeNonText=true`: il codice basato sul testo (vista, recupero, co-occorrenze,
   export) conta su start/end reali. API: `addMediaDocument`, `addAreaSegment`, `addTimeSegment`. Le query sui
   segmenti richiedono le colonne della v6: i test con migrazioni personalizzate devono includerle (nei test la v6 è
-  `builtInMigrations().at(4)`, non più `.last()`). Ancora non fatti (per #28/#46): UI per audio/video e
-  tempi, QDPX di documenti/segmenti non testuali (l'export li omette, immagini e PDF compresi).
+  `builtInMigrations().at(4)`, non più `.last()`). Ancora non fatti (per #28): UI per audio/video e
+  tempi, e il loro QDPX (l'export omette audio/video, l'import li conta come saltati: punto d'aggancio in `Qdpx.cpp`).
 - **Documenti immagine** (v7, #27): i byte originali del file stanno in `document_data(document_id, data BLOB)`
   (tabella separata: un blob in `documents` finirebbe nel log di undo a ogni rinomina). `documentImage()` è l'unico
   punto che decodifica e applica l'orientamento EXIF (`setAutoTransform`): visualizzazione, coordinate delle aree e
@@ -136,7 +136,16 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   `activeDocumentIds()` legge solo i gruppi.
 - **Gruppi e set in QDPX.** REFI-QDA ha solo `<Set>`: i gruppi sono set con GUID derivati (UUID v5, `groupSetGuid()`
   in `Qdpx.cpp`), ogni altro `<Set>` è un set di documenti; i file 0.1.0 si leggono come solo gruppi. I memo di
-  gruppi e set viaggiano nella `Description` del set.
+  gruppi e set sono `<Note>` elencate dal set come `<MemberNote>` (i vecchi file Tessera usavano la `Description`,
+  ancora letta); i gruppi, anche vuoti, tornano tutti all'import.
+- **PDF e immagini in QDPX** (#46): `PDFSource` (`path` = `sources/<guid>.pdf`, `Representation` col testo a pagine
+  separate da `\f`, `PDFSelection`) e `PictureSource` (`sources/<guid>.<ext>`, `PictureSelection`). Le coordinate
+  sono interi nello schema: punti PDF / pixel, origine in alto a sinistra, come in Tessera (le frazioni delle aree PDF
+  si arrotondano; non verificato con file di altri programmi). Il testo di un'area PDF viaggia nel `name`
+  della selezione, letto solo se `origin` è Tessera. Un PDF senza file ma col testo si importa come testo; file
+  mancanti o illeggibili sono "fonti ignorate" nel rapporto, come audio/video, `Cases` e `Graphs`. Non coperti: audio/video
+  e trascrizioni (#28/#29: aggiungere `AudioSource`/`VideoSource` accanto ai rami PDF/Picture), grafi (#15), casi, barra
+  di avanzamento per file molto grandi, memo liberi con collegamenti (tornano come memo del primo elemento collegato).
 - **Collegamenti** (`links`, v3): estremità `from`/`to` (documento + intervallo), cascata sui documenti.
   `updateDocumentText(id, testo, segmenti, link)` sposta le estremità e cancella i link assenti dalla lista.
   In QDPX: `PlainTextSelection` senza `Coding` (`linkEndGuid()`) + `<Link>` bidirezionale, commento in `name`;
@@ -215,7 +224,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#21, #25 (modello e API), #26 (PDF a pagine e aree; non nel QDPX), #27 (immagini e aree; non nel QDPX), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 Aggiornare questo elenco quando una issue viene chiusa.
 

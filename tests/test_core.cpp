@@ -2261,6 +2261,198 @@ private slots:
         QCOMPARE(q.groups().last().name, QString("Donne"));
     }
 
+    void qdpxPdfAndImageRoundTrip()
+    {
+        Project p;
+        QVERIFY(p.create(path("media_src.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 emptyGroup = p.addGroup("Vuoto");
+        p.addGroup("Davvero vuoto");
+        const QByteArray pdfBytes = makePdf({{"Primo paragrafo sul lavoro"}, {"Pagina due"}});
+        const QByteArray png = encodeImage(twoColorImage(100, 60), "PNG");
+        const QByteArray jpg = encodeImage(twoColorImage(40, 30), "JPEG");
+        const qint64 text = p.addDocument(g, "Testo", "un testo da codificare");
+        const qint64 pdf = p.addPdfDocument(g, "Rapporto", pdfBytes, "Primo paragrafo sul lavoro\fPagina due");
+        const qint64 img = p.addImageDocument(g, "Foto", png);
+        const qint64 img2 = p.addImageDocument(emptyGroup, "Scatto", jpg);
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        const qint64 b = p.addCode(0, "B", Qt::green);
+        const qint64 pdfArea = p.addAreaSegment(pdf, a, 2, 72, 90, 200, 120, 3, "nota area", {}, "Pagina due");
+        p.addAreaSegment(pdf, b, 1, 10, 20, 110, 220);
+        const qint64 imgArea = p.addAreaSegment(img, a, 0, 10, 5, 60, 40, 0, "commento");
+        p.addAreaSegment(img2, b, 0, 1, 2, 30, 20);
+        p.setVariableValue(img, p.addVariable("Anno", VariableType::Integer), "2020");
+        p.addLink(text, 0, 2, pdf, 0, 7, "legame");
+        p.addDocumentSet("Visuali", {pdf, img});
+        // Memos of groups and sets (several per element, and links from a memo to a group).
+        Memo gm;
+        gm.targetType = MemoTarget::Group;
+        gm.targetId = emptyGroup;
+        gm.title = "Gruppo";
+        gm.body = "memo del gruppo";
+        const qint64 gmId = p.saveMemo(gm);
+        Memo gm2 = gm;
+        gm2.title = "Altro";
+        gm2.body = "secondo memo";
+        gm2.targetType = MemoTarget::Code;
+        gm2.targetId = a;
+        const qint64 gm2Id = p.saveMemo(gm2);
+        QVERIFY(p.addMemoLink(gm2Id, MemoTarget::Group, emptyGroup));
+        QVERIFY(p.addMemoLink(gm2Id, MemoTarget::DocumentSet, p.documentSets().first().id));
+        Q_UNUSED(gmId);
+        Q_UNUSED(pdfArea);
+        Q_UNUSED(imgArea);
+
+        QString err, report;
+        QVERIFY2(Qdpx::exportProject(p, path("media.qdpx"), &err), qPrintable(err));
+        // The files travel inside the archive with the guid as name.
+        QZipReader zip(path("media.qdpx"));
+        QVERIFY(!zip.fileData("sources/" + p.document(pdf).uuid.toUtf8() + ".pdf").isEmpty());
+        QVERIFY(!zip.fileData("sources/" + p.document(img2).uuid.toUtf8() + ".jpg").isEmpty());
+        QVERIFY(zip.fileData("project.qde").contains("<PDFSelection"));
+        QVERIFY(zip.fileData("project.qde").contains("<PictureSelection"));
+
+        Project q;
+        QVERIFY(q.create(path("media_dst.tsra")));
+        QVERIFY2(Qdpx::importProject(q, path("media.qdpx"), &report, &err), qPrintable(err));
+        QVERIFY2(!report.contains("ignorat"), qPrintable(report));
+        QCOMPARE(q.documents().size(), 4);
+        auto byName = [&](const QString &name) {
+            for (const Document &d : q.documents())
+                if (d.name == name)
+                    return d;
+            return Document();
+        };
+        const Document qpdf = byName("Rapporto"), qimg = byName("Foto"), qimg2 = byName("Scatto");
+        QCOMPARE(qpdf.kind, DocumentKind::Pdf);
+        QCOMPARE(qpdf.uuid, p.document(pdf).uuid);
+        QCOMPARE(q.documentData(qpdf.id), pdfBytes);
+        QCOMPARE(q.documentText(qpdf.id), p.documentText(pdf));
+        QCOMPARE(qimg.kind, DocumentKind::Image);
+        QCOMPARE(q.documentData(qimg.id), png);
+        QCOMPARE(q.documentData(qimg2.id), jpg);
+        QCOMPARE(q.documentImage(qimg2.id).size(), QSize(40, 30));
+        QCOMPARE(q.groups().size(), 3); // empty groups survive too (the default one was replaced)
+        QCOMPARE(q.groups().last().name, QString("Davvero vuoto"));
+        QCOMPARE(q.document(qimg2.id).groupId, q.groups().at(1).id);
+
+        // Areas: coordinates, page, comment, selected text and code.
+        QList<Segment> pdfSegs;
+        for (const Segment &s : q.segmentsForDocument(qpdf.id, true))
+            pdfSegs << s;
+        QCOMPARE(pdfSegs.size(), 2);
+        int areas = 0;
+        for (const Segment &s : pdfSegs) {
+            if (s.kind == SegmentKind::Text) {
+                QCOMPARE(s.start, 0);
+                QCOMPARE(s.end, 7);
+            } else if (s.page == 2) {
+                ++areas;
+                QCOMPARE(s.x1, 72.0);
+                QCOMPARE(s.y2, 120.0);
+                QCOMPARE(s.comment, QString("nota area"));
+                QCOMPARE(s.areaText, QString("Pagina due"));
+                QCOMPARE(q.code(s.codeId).name, QString("A"));
+            }
+        }
+        QCOMPARE(areas, 1);
+        const QList<Segment> imgSegs = q.segmentsForDocument(qimg.id, true);
+        QCOMPARE(imgSegs.size(), 1);
+        QCOMPARE(imgSegs.first().kind, SegmentKind::Area);
+        QCOMPARE(imgSegs.first().page, 0);
+        QCOMPARE(imgSegs.first().x1, 10.0);
+        QCOMPARE(imgSegs.first().y1, 5.0);
+        QCOMPARE(imgSegs.first().x2, 60.0);
+        QCOMPARE(imgSegs.first().y2, 40.0);
+        QCOMPARE(imgSegs.first().comment, QString("commento"));
+        QCOMPARE(imgSegs.first().uuid, p.segment(imgArea).uuid);
+        QCOMPARE(q.allVariableValues().value(qimg.id).size(), 1);
+
+        // Link to the PDF text, sets, and memos of groups and sets.
+        QCOMPARE(q.links().size(), 1);
+        QCOMPARE(q.documentSets().size(), 1);
+        QCOMPARE(q.documentSetMembers(q.documentSets().first().id).size(), 2);
+        qint64 qEmpty = 0;
+        for (const DocumentGroup &x : q.groups())
+            if (x.name == "Vuoto")
+                qEmpty = x.id;
+        QVERIFY(qEmpty);
+        QCOMPARE(q.memos().size(), 2);
+        QCOMPARE(q.memoFor(MemoTarget::Group, qEmpty).body, QString("memo del gruppo"));
+        Memo second;
+        for (const Memo &m : q.memos())
+            if (m.title == "Altro")
+                second = m;
+        QVERIFY(second.id);
+        QVERIFY(q.memoLinks(second.id).contains(MemoLink{MemoTarget::Group, qEmpty}));
+        QVERIFY(q.memoLinks(second.id).contains(MemoLink{MemoTarget::DocumentSet, q.documentSets().first().id}));
+        QCOMPARE(q.memoLinks(second.id).size(), 3);
+
+        // Exporting the imported project again keeps everything.
+        QVERIFY2(Qdpx::exportProject(q, path("media2.qdpx"), &err), qPrintable(err));
+        Project r;
+        QVERIFY(r.create(path("media_dst2.tsra")));
+        QVERIFY2(Qdpx::importProject(r, path("media2.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(r.documents().size(), 4);
+        QCOMPARE(r.allSegments(true).size(), p.allSegments(true).size());
+        QCOMPARE(r.memos().size(), 2);
+    }
+
+    void qdpxForeignMediaSources()
+    {
+        const QByteArray png = encodeImage(twoColorImage(50, 40), "PNG");
+        const QString xml = QStringLiteral(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+            "<Project xmlns=\"urn:QDA-XML:project:1.0\" name=\"Altro\" origin=\"Altro software 1.0\">"
+            "<CodeBook><Codes><Code guid=\"44444444-4444-4444-8444-444444444444\" name=\"K\" isCodable=\"true\"/>"
+            "</Codes></CodeBook><Sources>"
+            "<PictureSource guid=\"11111111-1111-4111-8111-111111111111\" name=\"Foto\" path=\"internal://pic.png\">"
+            "<PictureSelection guid=\"55555555-5555-4555-8555-555555555555\" name=\"etichetta\""
+            " firstX=\"30\" firstY=\"20\" secondX=\"5\" secondY=\"2\">"
+            "<Coding guid=\"66666666-6666-4666-8666-666666666666\">"
+            "<CodeRef targetGUID=\"44444444-4444-4444-8444-444444444444\"/></Coding></PictureSelection>"
+            "<PictureSelection guid=\"55555555-5555-4555-8555-555555555556\""
+            " firstX=\"1\" firstY=\"1\" secondX=\"1\" secondY=\"9\"/>"
+            "</PictureSource>"
+            "<PictureSource guid=\"11111111-1111-4111-8111-111111111112\" name=\"Mancante\" path=\"internal://no.png\"/>"
+            "<PDFSource guid=\"11111111-1111-4111-8111-111111111113\" name=\"PdfSolotesto\" path=\"internal://no.pdf\">"
+            "<Representation guid=\"77777777-7777-4777-8777-777777777777\">"
+            "<PlainTextContent>solo il testo</PlainTextContent></Representation></PDFSource>"
+            "<AudioSource guid=\"11111111-1111-4111-8111-111111111114\" name=\"Voce\" path=\"internal://v.mp3\"/>"
+            "<VideoSource guid=\"11111111-1111-4111-8111-111111111115\" name=\"Film\" path=\"internal://f.mp4\"/>"
+            "<VideoSource guid=\"11111111-1111-4111-8111-111111111116\" name=\"Film2\" path=\"internal://g.mp4\"/>"
+            "</Sources><Cases><Case guid=\"88888888-8888-4888-8888-888888888888\" name=\"Caso\"/></Cases>"
+            "<Graphs><Graph guid=\"99999999-9999-4999-8999-999999999999\" name=\"Mappa\"/></Graphs></Project>");
+        {
+            QZipWriter zip(path("foreign_media.qdpx"));
+            zip.addFile("project.qde", xml.toUtf8());
+            zip.addFile("sources/pic.png", png);
+            zip.close();
+        }
+        Project p;
+        QVERIFY(p.create(path("foreign_media.tsra")));
+        QString err, report;
+        QVERIFY2(Qdpx::importProject(p, path("foreign_media.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(p.documents().size(), 2); // picture + text-only PDF
+        const Document foto = p.documents().first();
+        QCOMPARE(foto.kind, DocumentKind::Image);
+        QCOMPARE(p.documentData(foto.id), png);
+        const QList<Segment> segs = p.segmentsForDocument(foto.id, true);
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(segs.first().x1, 5.0); // corners in any order
+        QCOMPARE(segs.first().y2, 20.0);
+        QCOMPARE(p.documents().last().kind, DocumentKind::Text);
+        QCOMPARE(p.documentText(p.documents().last().id), QString("solo il testo"));
+        // What was left out is reported.
+        QVERIFY2(report.contains("1 audio"), qPrintable(report));
+        QVERIFY2(report.contains("2 video"), qPrintable(report));
+        QVERIFY2(report.contains("1 immagini"), qPrintable(report));
+        QVERIFY2(report.contains("1 casi"), qPrintable(report));
+        QVERIFY2(report.contains("1 mappe"), qPrintable(report));
+        QVERIFY2(report.contains("1 selezioni"), qPrintable(report));
+        QVERIFY2(report.contains("1 PDF senza file"), qPrintable(report));
+    }
+
     void qdpxSourcePaths()
     {
         // Network paths are refused without touching the network; local files are read.
