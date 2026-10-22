@@ -129,7 +129,7 @@ void SearchDialog::search()
             const auto m = it.next();
             if (m.capturedLength() == 0)
                 continue;
-            m_hits.append({d.id, int(m.capturedStart()), int(m.capturedEnd())});
+            m_hits.append({d.id, int(m.capturedStart()), int(m.capturedEnd()), m.captured()});
             docsWithHits.insert(d.id);
             rows << QStringList{d.name, QString::number(m.capturedStart()),
                                 TextUtils::keywordInContext(text, int(m.capturedStart()), int(m.capturedEnd()))};
@@ -164,12 +164,17 @@ void SearchDialog::autocode()
 
     QHash<qint64, QString> texts;
     const qsizetype before = m_project->allSegments().size();
+    int stale = 0;
     m_project->setUndoLabel(tr("Codifica automatica"));
     m_project->beginBatch();
     for (const Hit &h : m_hits) {
         if (!texts.contains(h.documentId))
             texts.insert(h.documentId, m_project->documentText(h.documentId));
         const QString &text = texts[h.documentId];
+        if (text.mid(h.start, h.end - h.start) != h.match) {
+            ++stale;
+            continue;
+        }
         auto range = std::pair<int, int>{h.start, h.end};
         if (m_extent->currentIndex() == 1)
             range = TextUtils::sentenceBounds(text, h.start, h.end);
@@ -179,5 +184,9 @@ void SearchDialog::autocode()
     }
     m_project->commitBatch();
     const int created = int(m_project->allSegments().size() - before);
-    QMessageBox::information(this, tr("Codifica automatica"), tr("%n nuovi segmenti codificati.", nullptr, created));
+    QString message = tr("%n nuovi segmenti codificati.", nullptr, created);
+    if (stale)
+        message += QLatin1Char('\n') + tr("%n risultati ignorati perché il testo è cambiato dopo la ricerca: "
+                                          "ripeti la ricerca.", nullptr, stale);
+    QMessageBox::information(this, tr("Codifica automatica"), message);
 }

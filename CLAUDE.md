@@ -143,7 +143,25 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - `findChild<QTableWidget*>()` in un dialogo con più tabelle restituisce quella sbagliata: nei test
   filtrare con `findChildren`.
 - `QZipReader/QZipWriter` sono header privati di QtCore (`Qt6::CorePrivate`): possono cambiare tra
-  versioni di Qt.
+  versioni di Qt. `QZipWriter::close()` chiude il dispositivo: niente `QSaveFile` diretto (fatale),
+  si scrive in un `QBuffer` e poi nel `QSaveFile`.
+- **Testo dell'utente e rich text.** Nomi, testi e valori possono arrivare da file importati. Tooltip,
+  `QLabel` e `QMessageBox` interpretano come HTML un testo che sembra HTML, e il rich text legge i file
+  di `<img src>` (da `\\host\share` parte l'hash NTLM). Quindi: tooltip con `Ui::plainToolTip()`,
+  etichette con `setTextFormat(Qt::PlainText)`, messaggi con `Ui::showInfo/showError/confirm`
+  (già in testo semplice), etichette e titoli di Qt Charts con `toHtmlEscaped()` (sono sempre HTML).
+  Un `QTextDocument::setDefaultResourceProvider` non basta: Qt lo consulta *dopo* aver letto il file.
+- `QString::arg()` a catena con testo dell'utente prima di altri argomenti sostituisce anche i `%N`
+  scritti dall'utente: usare un solo `arg()` con più argomenti.
+- Percorsi esterni nei `.qdpx` (`absolute://`, `relative://`) solo tramite `Qdpx::isReadableSourcePath`
+  (rifiuta i percorsi di rete fuori dalla cartella del file). Le strutture annidate dei file importati
+  hanno un limite di profondità (codici QDPX: 200).
+- L'export CSV mette un apostrofo davanti alle celle che Excel eseguirebbe come formule (`= + - @`,
+  non i numeri); `readCsv` lo toglie.
+- Gli attributi ODF hanno un namespace (`text:c`): `attributes().value(ns, "c")`, non `value("c")`.
+- `Project::addSegment` rifiuta posizioni fuori dal testo. Durante la modifica del testo,
+  `DocumentView` incorpora i segmenti aggiunti da altre parti (codifica automatica), riportandoli
+  sul testo modificato: altrimenti il salvataggio li cancellerebbe.
 
 ## Flusso di lavoro per le issue
 

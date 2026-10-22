@@ -227,7 +227,7 @@ void MatrixDialog::rebuild()
     int maxSegs = 1;
     for (int i = 0; i < chartData.size(); ++i) {
         const Code code = codes.value(chartData[i].first);
-        categories << code.name;
+        categories << code.name.toHtmlEscaped(); // Qt Charts draws axis labels as rich text
         auto *set = new QBarSet(code.name);
         set->setColor(code.color);
         set->setBorderColor(code.color.darker(120));

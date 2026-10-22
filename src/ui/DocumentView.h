@@ -3,6 +3,7 @@
 #include "core/Model.h"
 
 #include <QHash>
+#include <QSet>
 #include <QWidget>
 
 #include <functional>
@@ -90,6 +91,10 @@ private:
     qint64 m_highlighted = 0;
     bool m_editing = false;
     QString m_editSnapshot;
+    // While editing: the stored text and the segments known to the view, to take in codings
+    // added from elsewhere (they refer to the stored text) instead of deleting them on save.
+    QString m_editBaseText;
+    QSet<qint64> m_editKnownIds;
     QMetaObject::Connection m_editConnection;
 
     QWidget *m_findBar = nullptr;

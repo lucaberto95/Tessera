@@ -26,6 +26,7 @@ private:
         qint64 documentId;
         int start;
         int end;
+        QString match; // to skip hits whose document changed after the search
     };
     void search();
     void autocode();

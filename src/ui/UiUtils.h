@@ -11,6 +11,13 @@ namespace Ui {
 
 inline constexpr const char *CodeMimeType = "application/x-tessera-code-id";
 
+// Names, document text and other values may come from imported files. Qt renders tooltips,
+// labels and message boxes as rich text when the text looks like HTML, and rich text loads the
+// files named by <img src>: from \\host\share that sends the user's credentials to the host. So
+// such text is shown only through these helpers (or a QLabel set to Qt::PlainText).
+QString plainToolTip(const QString &text); // rich text that shows `text` literally
+void showInfo(QWidget *parent, const QString &title, const QString &text);
+
 QIcon colorIcon(const QColor &color, int size = 14);
 QIcon memoIcon();
 

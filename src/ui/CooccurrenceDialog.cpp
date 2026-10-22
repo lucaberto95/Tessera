@@ -283,8 +283,8 @@ void CooccurrenceDialog::rebuildMap()
             QColor line = palette().text().color();
             line.setAlpha(110);
             auto *edge = m_scene->addLine(QLineF(pos[i], pos[j]), QPen(line, 1 + 6 * w / maxWeight));
-            edge->setToolTip(tr("%1 × %2: %3").arg(m_project->codePath(m_codeIds[i]), m_project->codePath(m_codeIds[j]),
-                                                   cellText(w)));
+            edge->setToolTip(Ui::plainToolTip(tr("%1 × %2: %3").arg(m_project->codePath(m_codeIds[i]),
+                                                                    m_project->codePath(m_codeIds[j]), cellText(w))));
             edge->setZValue(0);
             ++m_mapEdges;
         }
@@ -298,7 +298,8 @@ void CooccurrenceDialog::rebuildMap()
         const double radius = 8 + 20 * std::sqrt(freq / maxFrequency);
         auto *node = m_scene->addEllipse(QRectF(pos[i].x() - radius, pos[i].y() - radius, 2 * radius, 2 * radius),
                                          QPen(code.color.darker(130), 1.5), QBrush(code.color));
-        node->setToolTip(tr("%1: frequenza %2").arg(m_project->codePath(m_codeIds[i])).arg(int(freq)));
+        node->setToolTip(Ui::plainToolTip(
+            tr("%1: frequenza %2").arg(m_project->codePath(m_codeIds[i]), QString::number(int(freq)))));
         node->setZValue(1);
         auto *label = m_scene->addSimpleText(code.name);
         label->setBrush(palette().text());

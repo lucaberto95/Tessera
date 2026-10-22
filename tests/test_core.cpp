@@ -9,6 +9,7 @@
 #include "core/VariableFilter.h"
 
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QSignalSpy>
@@ -16,6 +17,7 @@
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QUuid>
 #include <QtCore/private/qzipwriter_p.h>
 
 namespace VF = VariableFilter;
@@ -1355,6 +1357,178 @@ private slots:
         QVERIFY(q.documentSets().isEmpty());
         QCOMPARE(q.groups().size(), 2);
         QCOMPARE(q.groups().last().name, QString("Donne"));
+    }
+
+    void qdpxSourcePaths()
+    {
+        // Network paths are refused without touching the network; local files are read.
+        QVERIFY(!Qdpx::isReadableSourcePath("//host/share/a.txt", m_dir.path()));
+        QVERIFY(!Qdpx::isReadableSourcePath("\\\\host\\share\\a.txt", m_dir.path()));
+        QVERIFY(!Qdpx::isReadableSourcePath("//?/UNC/host/share/a.txt", m_dir.path()));
+        QVERIFY(!Qdpx::isReadableSourcePath(m_dir.path(), m_dir.path())); // a directory
+        writeFile("external.txt", "testo esterno");
+        QVERIFY(Qdpx::isReadableSourcePath(path("external.txt"), m_dir.path()));
+
+        const QString xml = QStringLiteral(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+            "<Project xmlns=\"urn:QDA-XML:project:1.0\" name=\"P\"><Sources>"
+            "<TextSource guid=\"11111111-1111-4111-8111-111111111111\" name=\"Locale\" plainTextPath=\"absolute://%1\"/>"
+            "<TextSource guid=\"22222222-2222-4222-8222-222222222222\" name=\"Relativo\" plainTextPath=\"relative://external.txt\"/>"
+            "</Sources></Project>").arg(path("external.txt"));
+        {
+            QZipWriter zip(path("paths.qdpx"));
+            zip.addFile("project.qde", xml.toUtf8());
+        }
+        Project p;
+        QVERIFY(p.create(path("paths.tsra")));
+        QString report, err;
+        QVERIFY2(Qdpx::importProject(p, path("paths.qdpx"), &report, &err), qPrintable(err));
+        for (const Document &d : p.documents())
+            QCOMPARE(p.documentText(d.id), QString("testo esterno"));
+    }
+
+    void qdpxMalformedInput()
+    {
+        // Repeated GUIDs, a negative position and codes nested deeper than the import limit.
+        QString nested;
+        for (int i = 0; i < 300; ++i)
+            nested += QStringLiteral("<Code guid=\"%1\" name=\"N%2\">").arg(QUuid::createUuid().toString(QUuid::WithoutBraces)).arg(i);
+        for (int i = 0; i < 300; ++i)
+            nested += QStringLiteral("</Code>");
+        const QString xml = QStringLiteral(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+            "<Project xmlns=\"urn:QDA-XML:project:1.0\" name=\"P\"><CodeBook><Codes>"
+            "<Code guid=\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\" name=\"A\"/>"
+            "<Code guid=\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\" name=\"B\"/>%1"
+            "</Codes></CodeBook><Sources>"
+            "<TextSource guid=\"11111111-1111-4111-8111-111111111111\" name=\"Uno\"><PlainTextContent>uno due</PlainTextContent>"
+            "<PlainTextSelection guid=\"33333333-3333-4333-8333-333333333333\" startPosition=\"-2\" endPosition=\"3\">"
+            "<Coding guid=\"44444444-4444-4444-8444-444444444444\"><CodeRef targetGUID=\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"/></Coding>"
+            "</PlainTextSelection></TextSource>"
+            "<TextSource guid=\"11111111-1111-4111-8111-111111111111\" name=\"Due\"><PlainTextContent>tre</PlainTextContent></TextSource>"
+            "</Sources></Project>").arg(nested);
+        {
+            QZipWriter zip(path("malformed.qdpx"));
+            zip.addFile("project.qde", xml.toUtf8());
+        }
+        Project p;
+        QVERIFY(p.create(path("malformed.tsra")));
+        QString report, err;
+        QVERIFY2(Qdpx::importProject(p, path("malformed.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(p.codes().size(), 2 + 200);
+        QSet<QString> codeGuids, docGuids;
+        for (const Code &c : p.codes())
+            codeGuids.insert(c.uuid);
+        for (const Document &d : p.documents())
+            docGuids.insert(d.uuid);
+        QCOMPARE(codeGuids.size(), p.codes().size());
+        QCOMPARE(p.documents().size(), 2);
+        QCOMPARE(docGuids.size(), 2);
+        QVERIFY(p.allSegments().isEmpty());
+        QVERIFY(report.contains("1 selezioni fuori dal testo"));
+    }
+
+    void qdpxExportReplacesFile()
+    {
+        Project p;
+        QVERIFY(p.create(path("keep.tsra")));
+        writeFile("keep.qdpx", "vecchio");
+        QString err;
+        // A directory with the same name cannot be written: the export fails with an error.
+        QVERIFY(QDir(m_dir.path()).mkpath("dir.qdpx"));
+        QVERIFY(!Qdpx::exportProject(p, path("dir.qdpx"), &err));
+        QVERIFY(Qdpx::exportProject(p, path("keep.qdpx"), &err));
+        QVERIFY(QFileInfo(path("keep.qdpx")).size() > 7);
+    }
+
+    void odtSpaceCountIsBounded()
+    {
+        const QByteArray xml =
+            "<?xml version=\"1.0\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\""
+            " xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"><office:body><office:text>"
+            "<text:p>a<text:s text:c=\"3\"/>b<text:s text:c=\"2000000000\"/>c</text:p>"
+            "</office:text></office:body></office:document-content>";
+        {
+            QZipWriter zip(path("spaces.odt"));
+            zip.addFile("content.xml", xml);
+        }
+        const auto r = Importers::importFile(path("spaces.odt"));
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QVERIFY(r.text.startsWith("a   b "));
+        QCOMPARE(r.text.size(), 3 + 3 + 1000);
+    }
+
+    void undoWithUnusualColumnNames()
+    {
+        // A file whose tables have column names with quotes must not break (or inject into) the undo triggers.
+        {
+            Project p;
+            QVERIFY(p.create(path("columns.tsra")));
+        }
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("alter"));
+            db.setDatabaseName(path("columns.tsra"));
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("ALTER TABLE codes ADD COLUMN \"x\"\"y'z\" TEXT DEFAULT 'v'"));
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("alter"));
+        Project p;
+        QVERIFY2(p.open(path("columns.tsra")), qPrintable(p.lastError()));
+        const qint64 c = p.addCode(0, "Codice", Qt::red);
+        QVERIFY(p.renameCode(c, "Nuovo"));
+        QVERIFY(p.deleteCode(c));
+        QVERIFY(p.undo());
+        QCOMPARE(p.code(c).name, QString("Nuovo"));
+        QVERIFY(p.undo());
+        QCOMPARE(p.code(c).name, QString("Codice"));
+    }
+
+    void segmentsStayInsideText()
+    {
+        Project p;
+        QVERIFY(p.create(path("bounds.tsra")));
+        const qint64 d = p.addDocument(p.groups().first().id, "D", "abc");
+        const qint64 c = p.addCode(0, "C", Qt::red);
+        QVERIFY(p.addSegment(d, c, 0, 3) > 0);
+        QCOMPARE(p.addSegment(d, c, 1, 4), 0);
+        QCOMPARE(p.addSegment(d, c, -1, 2), 0);
+    }
+
+    void csvFormulaCells()
+    {
+        const Exporters::Table t{{"=HYPERLINK(\"x\")", "-3", "+4,5", "@SUM(A1)", "-", "testo"}};
+        QString err;
+        QVERIFY(Exporters::writeCsv(path("formula.csv"), t, &err));
+        QFile f(path("formula.csv"));
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QString written = QString::fromUtf8(f.readAll());
+        QVERIFY(written.contains("\"'=HYPERLINK(\"\"x\"\")\""));
+        QVERIFY(written.contains(";-3;"));
+        QVERIFY(written.contains("'@SUM(A1)"));
+        QVERIFY(written.contains(";'-;"));
+        QCOMPARE(Exporters::readCsv(path("formula.csv"), &err), t);
+    }
+
+    void placeholdersInNames()
+    {
+        Project p;
+        QVERIFY(p.create(path("percent.tsra")));
+        const qint64 d = p.addDocument(p.groups().first().id, "Intervista %5", "testo del documento");
+        const qint64 c = p.addCode(0, "Tema %2", Qt::red);
+        QVERIFY(p.addSegment(d, c, 0, 5) > 0);
+        QString err;
+        QVERIFY(Exporters::exportSegmentsHtml(p, p.allSegments(), path("percent.html"), &err));
+        QFile f(path("percent.html"));
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QString html = QString::fromUtf8(f.readAll());
+        QVERIFY(html.contains("Intervista %5"));
+        QVERIFY(html.contains("Tema %2"));
+
+        p.addVariable("Segmenti: Tema %2", VariableType::Integer); // forces the " (2)" suffix
+        const QList<qint64> vars = Stats::codesToVariables(p, {c}, Stats::Measure::Segments);
+        QCOMPARE(vars.size(), 1);
+        QCOMPARE(p.variables().last().name, QString("Segmenti: Tema %2 (2)"));
     }
 };
 

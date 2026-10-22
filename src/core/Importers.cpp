@@ -16,6 +16,8 @@ namespace Importers {
 
 namespace {
 
+const QString kOdfTextNamespace = QStringLiteral("urn:oasis:names:tc:opendocument:xmlns:text:1.0");
+
 Result failure(const QString &message) { return {false, {}, message}; }
 
 Result success(const QString &text)
@@ -162,8 +164,10 @@ Result importOdt(const QString &path)
             const auto name = r.name();
             if (name == QLatin1String("p") || name == QLatin1String("h"))
                 ++paragraphDepth;
-            else if (name == QLatin1String("s"))
-                out += QString(qMax(1, r.attributes().value(QLatin1String("c")).toInt()), QLatin1Char(' '));
+            else if (name == QLatin1String("s")) { // text:c spaces, bounded: c="2000000000" would exhaust memory
+                const int count = r.attributes().value(kOdfTextNamespace, QLatin1String("c")).toInt();
+                out += QString(qBound(1, count, 1000), QLatin1Char(' '));
+            }
             else if (name == QLatin1String("tab"))
                 out += QLatin1Char('\t');
             else if (name == QLatin1String("line-break"))

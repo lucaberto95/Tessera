@@ -377,7 +377,7 @@ QList<qint64> codesToVariables(Project &project, const QList<qint64> &codes, Mea
         const QString base = tr("Segmenti: ") + project.codePath(code);
         QString name = base;
         for (int n = 2; names.contains(name.toLower()); ++n)
-            name = QStringLiteral("%1 (%2)").arg(base).arg(n);
+            name = QStringLiteral("%1 (%2)").arg(base, QString::number(n));
         names.insert(name.toLower());
 
         const qint64 id = project.addVariable(name, VariableType::Integer);

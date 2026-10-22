@@ -381,9 +381,13 @@ bool Project::installUndoTriggers()
             continue;
 
         QStringList sets, names, values;
-        for (const QString &c : columns) {
-            sets << QStringLiteral("\"%1\"='||quote(OLD.\"%1\")||'").arg(c);
-            names << QStringLiteral("\"%1\"").arg(c);
+        for (QString c : columns) {
+            // Column names come from the file: quote them as identifiers, and again inside the
+            // string literal that builds the inverse statement, so no name can inject SQL.
+            c.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+            const QString inLiteral = QString(c).replace(QLatin1Char('\''), QStringLiteral("''"));
+            sets << QStringLiteral("\"%1\"='||quote(OLD.\"%2\")||'").arg(inLiteral, c);
+            names << QStringLiteral("\"%1\"").arg(inLiteral);
             values << QStringLiteral("'||quote(OLD.\"%1\")||'").arg(c);
         }
         // Trigger bodies may not qualify table names; undo_log only exists in the temp schema.
@@ -1229,6 +1233,11 @@ qint64 Project::addSegment(qint64 documentId, qint64 codeId, int start, int end,
     setUndoLabel(tr("Codifica"));
     if (end <= start) {
         fail(tr("Segmento vuoto"));
+        return 0;
+    }
+    // Positions computed on an older version of the text could fall outside it.
+    if (start < 0 || end > documentText(documentId).size()) {
+        fail(tr("Il segmento è fuori dal testo del documento"));
         return 0;
     }
     const qint64 existing = scalar(QStringLiteral("SELECT id FROM segments WHERE document_id = ? AND code_id = ? "

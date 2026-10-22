@@ -134,7 +134,7 @@ void SegmentsPanel::refresh()
         }
         auto *code = new QTableWidgetItem(Ui::colorIcon(codes.value(s.codeId).color), codeLabel);
         auto *text = new QTableWidgetItem(TextUtils::excerpt(texts.value(s.documentId), s.start, s.end, 600));
-        text->setToolTip(texts.value(s.documentId).mid(s.start, qMin(s.length(), 3000)));
+        text->setToolTip(Ui::plainToolTip(texts.value(s.documentId).mid(s.start, qMin(s.length(), 3000))));
         auto *weight = new QTableWidgetItem(s.weight ? QString::number(s.weight) : QString());
         weight->setTextAlignment(Qt::AlignCenter);
         auto *comment = new QTableWidgetItem(s.comment);
@@ -148,7 +148,7 @@ void SegmentsPanel::refresh()
 
     if (m_hasQuery)
         m_summary->setText(tr("<b>%n risultati</b>", nullptr, int(m_segments.size())) + QStringLiteral(" · ") +
-                           (m_fixed ? m_fixedLabel
+                           (m_fixed ? m_fixedLabel.toHtmlEscaped() // contains code names; the label is rich text
                                     : tr("Recupero complesso: %1").arg(Retrieval::modeLabel(m_query.mode))) +
                            QStringLiteral(" · ") +
                            (m_documentIds.isEmpty() ? tr("tutti i documenti")

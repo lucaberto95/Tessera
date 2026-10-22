@@ -263,8 +263,9 @@ void StatsDialog::rebuildChart()
     } else {
         for (int i = 0; i < s.frequencies.size() && i < 25; ++i) {
             const Stats::Frequency &f = s.frequencies[i];
+            // Qt Charts draws axis labels as rich text.
             categories << (s.type == VariableType::Boolean ? (f.value == QLatin1String("1") ? tr("Vero") : tr("Falso"))
-                                                           : f.value);
+                                                           : f.value.toHtmlEscaped());
             values << f.count;
         }
     }
@@ -295,7 +296,7 @@ void StatsDialog::rebuildChart()
         series->attachAxis(axisY);
     }
     chart->legend()->hide();
-    chart->setTitle(m_variable->currentText());
+    chart->setTitle(m_variable->currentText().toHtmlEscaped());
     QChart *old = m_chart->chart();
     m_chart->setChart(chart);
     delete old;

@@ -88,7 +88,7 @@ void CodeTree::rebuild()
             if (!c.description.isEmpty())
                 tip += QStringLiteral("\n\n") + c.description;
             tip += QStringLiteral("\n\n") + tr("Segmenti: %1 (con sottocodici: %2)").arg(own).arg(own + sub);
-            item->setToolTip(0, tip);
+            item->setToolTip(0, Ui::plainToolTip(tip));
             item->setExpanded(!m_collapsed.contains(c.id));
             if (c.id == current)
                 currentItemPtr = item;

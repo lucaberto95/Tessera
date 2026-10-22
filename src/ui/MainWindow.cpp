@@ -440,10 +440,10 @@ bool MainWindow::openProject(const QString &path)
     }
     addRecent(m_project->filePath());
     if (!m_project->migrationBackupPath().isEmpty()) {
-        QMessageBox::information(this, tr("Progetto aggiornato"),
-                                 tr("Il progetto è stato aggiornato al formato di questa versione di Tessera.\n"
-                                    "Una copia del file originale è stata salvata in:\n%1")
-                                     .arg(QDir::toNativeSeparators(m_project->migrationBackupPath())));
+        Ui::showInfo(this, tr("Progetto aggiornato"),
+                     tr("Il progetto è stato aggiornato al formato di questa versione di Tessera.\n"
+                        "Una copia del file originale è stata salvata in:\n%1")
+                         .arg(QDir::toNativeSeparators(m_project->migrationBackupPath())));
     }
     statusBar()->showMessage(tr("Progetto aperto: %1").arg(m_project->filePath()), 5000);
     return true;
@@ -561,7 +561,7 @@ void MainWindow::importQdpx()
     }
     m_project->clearUndoHistory(); // the import is the starting point of the new project
     addRecent(m_project->filePath());
-    QMessageBox::information(this, tr("Importa QDPX"), report);
+    Ui::showInfo(this, tr("Importa QDPX"), report);
 }
 
 void MainWindow::exportQdpx()
@@ -611,8 +611,7 @@ void MainWindow::importDocuments(qint64 groupId)
     if (lastId)
         m_view->openDocument(lastId);
     if (!failures.isEmpty())
-        QMessageBox::warning(this, tr("Importa documenti"),
-                             tr("Alcuni file non sono stati importati:\n\n%1").arg(failures.join(QLatin1Char('\n'))));
+        Ui::showError(this, tr("Alcuni file non sono stati importati:\n\n%1").arg(failures.join(QLatin1Char('\n'))));
 }
 
 void MainWindow::newTextDocument(qint64 groupId)

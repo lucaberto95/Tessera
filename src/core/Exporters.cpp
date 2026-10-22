@@ -19,8 +19,24 @@ namespace Exporters {
 
 namespace {
 
+// Spreadsheets run a cell starting with = + - @ as a formula: imported text could carry one
+// (=HYPERLINK, DDE). Such cells get a leading apostrophe, unless they are plain numbers.
+bool looksLikeFormula(const QString &s)
+{
+    if (s.isEmpty())
+        return false;
+    const QChar c = s.front();
+    if (c != QLatin1Char('=') && c != QLatin1Char('+') && c != QLatin1Char('-') && c != QLatin1Char('@')
+        && c != QLatin1Char('\t') && c != QLatin1Char('\r'))
+        return false;
+    static const QRegularExpression number(QStringLiteral("^[+-]?\\d+([.,]\\d+)?$"));
+    return !number.match(s).hasMatch();
+}
+
 QString csvField(QString s)
 {
+    if (looksLikeFormula(s))
+        s.prepend(QLatin1Char('\''));
     const bool quote = s.contains(QLatin1Char(';')) || s.contains(QLatin1Char('"')) ||
                        s.contains(QLatin1Char('\n')) || s.contains(QLatin1Char(',')) || s.startsWith(QLatin1Char(' '));
     if (!quote)
@@ -137,6 +153,11 @@ Table readCsv(const QString &path, QString *error)
         row << field;
         rows << row;
     }
+    // Undo the apostrophe writeCsv puts before formula-like cells.
+    for (QStringList &r : rows)
+        for (QString &f : r)
+            if (f.startsWith(QLatin1Char('\'')) && looksLikeFormula(f.mid(1)))
+                f.remove(0, 1);
     return rows;
 }
 
@@ -205,13 +226,13 @@ bool exportSegmentsHtml(const Project &project, const QList<Segment> &segments, 
         if (!texts.contains(s.documentId))
             texts.insert(s.documentId, project.documentText(s.documentId));
         const Code c = codes.value(s.codeId);
+        // One multi-argument arg(): chained calls would also replace a "%5" typed in a name.
         html += QStringLiteral("<div class=\"seg\" style=\"border-left-color:%1\"><div class=\"meta\">"
                                "<span class=\"code\">%2</span> · %3 · %4–%5%6</div><div class=\"text\">%7</div>")
-                    .arg(c.color.name(), htmlEscape(project.codePath(s.codeId)), htmlEscape(docs.value(s.documentId).name))
-                    .arg(s.start)
-                    .arg(s.end)
-                    .arg(s.weight ? QStringLiteral(" · ") + QObject::tr("peso %1").arg(s.weight) : QString())
-                    .arg(htmlEscape(texts.value(s.documentId).mid(s.start, s.length())));
+                    .arg(c.color.name(), htmlEscape(project.codePath(s.codeId)), htmlEscape(docs.value(s.documentId).name),
+                         QString::number(s.start), QString::number(s.end),
+                         s.weight ? QStringLiteral(" · ") + QObject::tr("peso %1").arg(s.weight) : QString(),
+                         htmlEscape(texts.value(s.documentId).mid(s.start, s.length())));
         if (!s.comment.isEmpty())
             html += QStringLiteral("<div class=\"comment\">") + htmlEscape(s.comment) + QStringLiteral("</div>");
         html += QStringLiteral("</div>");

@@ -101,7 +101,7 @@ void DocumentTree::rebuild()
         QString tip = d.name;
         if (!d.sourcePath.isEmpty())
             tip += QLatin1Char('\n') + d.sourcePath;
-        di->setToolTip(0, tip);
+        di->setToolTip(0, Ui::plainToolTip(tip));
         restoreSelection(di);
         return n;
     };
@@ -298,8 +298,7 @@ void DocumentTree::deleteItem(QTreeWidgetItem *item)
         }
         if (!Ui::confirm(this, tr("Elimina gruppo"),
                          tr("Eliminare il gruppo \"%1\" con tutti i suoi %2 documenti e le relative codifiche?")
-                             .arg(item->text(0))
-                             .arg(item->childCount())))
+                             .arg(item->text(0), QString::number(item->childCount()))))
             return;
         m_project->deleteGroup(id);
         break;

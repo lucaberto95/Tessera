@@ -19,13 +19,16 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QImage>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextDocument>
 #include <QTextEdit>
+#include <QUrl>
 
 class TestUi : public QObject {
     Q_OBJECT
@@ -155,6 +158,67 @@ private slots:
         QVERIFY(m_project->redo());
         QVERIFY(m_project->redo());
         QVERIFY(edit->toPlainText().startsWith("PREMESSA."));
+    }
+
+    void codingFromElsewhereWhileEditing()
+    {
+        // A separate project: the shared one is used by later tests.
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("editing.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Doc", "uno due tre quattro");
+        const qint64 code = p.addCode(0, "C", Qt::red);
+        const qint64 kept = p.addSegment(doc, code, 0, 3); // "uno"
+        const qint64 gone = p.addSegment(doc, code, 4, 7); // "due"
+
+        DocumentView view(&p);
+        view.resize(600, 400);
+        view.show();
+        view.openDocument(doc);
+        view.setEditing(true);
+        auto *edit = view.findChild<QTextEdit *>();
+        QTextCursor c(edit->document());
+        c.setPosition(0);
+        c.insertText("XX ");
+        // Automatic coding while the text is being edited: positions refer to the stored text.
+        const qint64 added = p.addSegment(doc, code, 8, 11); // "tre"
+        QVERIFY(added > 0);
+        QVERIFY(p.deleteSegment(gone));
+        QVERIFY(view.commitEdits());
+
+        const QString text = p.documentText(doc);
+        QCOMPARE(text, QString("XX uno due tre quattro"));
+        QCOMPARE(text.mid(p.segment(kept).start, p.segment(kept).length()), QString("uno"));
+        QCOMPARE(text.mid(p.segment(added).start, p.segment(added).length()), QString("tre"));
+        QVERIFY(!p.segment(gone).id);
+        QCOMPARE(p.segmentsForDocument(doc).size(), 2);
+    }
+
+    void namesAreNotRichText()
+    {
+        // Rich text reads the files named by <img src> (a network share would get the user's credentials).
+        const QString file = m_dir.filePath("pixel.png");
+        QImage image(1, 1, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(file));
+        const QString name = QStringLiteral("<img src=\"%1\"> & co").arg(QUrl::fromLocalFile(file).toString());
+        QVERIFY(Qt::mightBeRichText(name));
+
+        // Tooltips built from names are rich text that shows the name literally, with no image.
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("names.tsra")));
+        p.addCode(0, name, Qt::red);
+        p.addDocument(p.groups().first().id, name, "testo");
+        CodeTree codes(&p);
+        codes.rebuild();
+        DocumentTree docs(&p);
+        docs.rebuild();
+        for (const QString &tip : {codes.topLevelItem(0)->toolTip(0), docs.topLevelItem(0)->child(0)->toolTip(0)}) {
+            QVERIFY(Qt::mightBeRichText(tip));
+            QTextDocument doc;
+            doc.setHtml(tip);
+            QVERIFY2(doc.toPlainText().startsWith(name), qPrintable(doc.toPlainText()));
+            QVERIFY(!doc.toPlainText().contains(QChar::ObjectReplacementCharacter));
+        }
     }
 
     void findInDocument()

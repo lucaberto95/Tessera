@@ -33,6 +33,7 @@ MemoDialog::MemoDialog(Project *project, const Memo &memo, const QString &target
     m_body->setTabChangesFocus(false);
 
     auto *info = new QLabel;
+    info->setTextFormat(Qt::PlainText); // the author's name may come from an imported file
     if (memo.id) {
         info->setText(tr("Autore: %1 · creato %2 · modificato %3")
                           .arg(memo.author, QLocale().toString(memo.createdAt.toLocalTime(), QLocale::ShortFormat),

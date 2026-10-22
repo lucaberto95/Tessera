@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QSaveFile>
 #include <QSet>
 #include <QUuid>
 #include <QXmlStreamReader>
@@ -23,6 +24,7 @@ namespace Qdpx {
 namespace {
 
 const QString kNamespace = QStringLiteral("urn:QDA-XML:project:1.0");
+constexpr int kMaxCodeDepth = 200;
 
 QString xmlDate(const QDateTime &dt)
 {
@@ -308,20 +310,21 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     w.writeEndElement(); // Project
     w.writeEndDocument();
 
-    QFile::remove(path);
-    QZipWriter zip(path);
-    if (zip.status() != QZipWriter::NoError) {
-        *error = QObject::tr("Impossibile scrivere %1").arg(path);
-        return false;
-    }
+    // The archive is built in memory and saved with QSaveFile, so an existing file is replaced only
+    // once the new one is complete (QZipWriter::close() closes its device, which QSaveFile forbids).
+    QBuffer buffer;
+    buffer.open(QIODevice::WriteOnly);
+    QZipWriter zip(&buffer);
     zip.setCompressionPolicy(QZipWriter::AutoCompress);
     zip.addFile(QStringLiteral("project.qde"), xml);
     zip.addDirectory(QStringLiteral("sources"));
     for (auto it = sourceFiles.cbegin(); it != sourceFiles.cend(); ++it)
         zip.addFile(QStringLiteral("sources/") + it.key(), it.value());
     zip.close();
-    if (zip.status() != QZipWriter::NoError) {
-        *error = QObject::tr("Errore durante la scrittura di %1").arg(path);
+    QSaveFile file(path);
+    if (zip.status() != QZipWriter::NoError || !file.open(QIODevice::WriteOnly)
+        || file.write(buffer.data()) != buffer.data().size() || !file.commit()) {
+        *error = QObject::tr("Impossibile scrivere %1").arg(path);
         return false;
     }
     return true;
@@ -395,19 +398,26 @@ struct Importer {
     }
     QString attr(const QString &name) const { return r.attributes().value(name).toString(); }
 
-    void parseCode(qint64 parentId, int index)
+    void parseCode(qint64 parentId, int index, int depth)
     {
         const QString guid = attr(QStringLiteral("guid"));
         const QString name = attr(QStringLiteral("name"));
         QColor color(attr(QStringLiteral("color")));
         if (!color.isValid())
             color = TextUtils::paletteColor(index);
-        const qint64 id = project.addCode(parentId, name.isEmpty() ? QObject::tr("(senza nome)") : name, color, guid);
-        codes.insert(guid, id);
+        // A repeated GUID gets a new one, so a later export stays valid.
+        const qint64 id = project.addCode(parentId, name.isEmpty() ? QObject::tr("(senza nome)") : name, color,
+                                          codes.contains(guid) ? QString() : guid);
+        if (!codes.contains(guid))
+            codes.insert(guid, id);
         int childIndex = 0;
         while (r.readNextStartElement()) {
             if (r.name() == QLatin1String("Code")) {
-                parseCode(id, childIndex++);
+                // Deeper nesting is skipped: a crafted file could otherwise exhaust the stack.
+                if (depth + 1 < kMaxCodeDepth)
+                    parseCode(id, childIndex++, depth + 1);
+                else
+                    r.skipCurrentElement();
             } else if (r.name() == QLatin1String("Description")) {
                 project.setCodeDescription(id, r.readElementText());
             } else if (r.name() == QLatin1String("NoteRef")) {
@@ -579,13 +589,12 @@ struct Importer {
             data = zip.fileData(QStringLiteral("sources/") + name);
             if (data.isEmpty())
                 data = zip.fileData(name);
-        } else if (path.startsWith(QLatin1String("relative://"))) {
-            QFile f(QDir(qdpxDir).filePath(path.mid(11)));
-            if (f.open(QIODevice::ReadOnly))
-                data = f.readAll();
-        } else if (path.startsWith(QLatin1String("absolute://"))) {
-            QFile f(path.mid(11));
-            if (f.open(QIODevice::ReadOnly))
+        } else if (path.startsWith(QLatin1String("relative://")) || path.startsWith(QLatin1String("absolute://"))) {
+            const QString file = path.startsWith(QLatin1String("relative://"))
+                ? QDir(qdpxDir).filePath(path.mid(11))
+                : path.mid(11);
+            QFile f(file);
+            if (isReadableSourcePath(file, qdpxDir) && f.open(QIODevice::ReadOnly))
                 data = f.readAll();
         }
         if (data.startsWith("\xEF\xBB\xBF"))
@@ -613,7 +622,7 @@ struct Importer {
                     if (r.name() == QLatin1String("Codes")) {
                         while (r.readNextStartElement()) {
                             if (r.name() == QLatin1String("Code"))
-                                parseCode(0, topIndex++);
+                                parseCode(0, topIndex++, 0);
                             else
                                 r.skipCurrentElement();
                         }
@@ -685,9 +694,16 @@ struct Importer {
                 }
             }
             map << int(text.size());
-            const qint64 docId = project.addDocument(defaultGroup, src.name, text, {}, src.guid);
-            docIds.insert(src.guid, docId);
+            const bool repeatedGuid = docIds.contains(src.guid);
+            const qint64 docId =
+                project.addDocument(defaultGroup, src.name, text, {}, repeatedGuid ? QString() : src.guid);
+            if (!repeatedGuid)
+                docIds.insert(src.guid, docId);
             for (const PendingSelection &sel : src.selections) {
+                if (sel.start < 0) {
+                    ++invalidSelections;
+                    continue;
+                }
                 const int rawStart = TextUtils::codePointToUtf16(raw, sel.start);
                 const int rawEnd = TextUtils::codePointToUtf16(raw, sel.end);
                 const int start = map.value(rawStart, -1);
@@ -803,7 +819,7 @@ struct Importer {
         }
 
         report = QObject::tr("Importati: %1 documenti, %2 codici, %3 segmenti, %4 memo, %5 variabili.")
-                     .arg(docIds.size())
+                     .arg(sources.size())
                      .arg(codes.size())
                      .arg(project.allSegments().size())
                      .arg(project.memos().size())
@@ -821,6 +837,19 @@ struct Importer {
 };
 
 } // namespace
+
+bool isReadableSourcePath(const QString &file, const QString &qdpxDir)
+{
+    // Decided on the string alone: any file system call on a network path would already reach the host.
+    const QString raw = QDir::fromNativeSeparators(file);
+    if (raw.startsWith(QLatin1String("//"))) {
+        const QString dir = QDir::cleanPath(QDir::fromNativeSeparators(qdpxDir));
+        if (!dir.startsWith(QLatin1String("//"))
+            || !QDir::cleanPath(raw).startsWith(dir + QLatin1Char('/'), Qt::CaseInsensitive))
+            return false;
+    }
+    return QFileInfo(raw).isFile(); // not a directory or a device such as CON
+}
 
 bool importProject(Project &project, const QString &path, QString *report, QString *error)
 {

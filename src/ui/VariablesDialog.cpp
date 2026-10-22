@@ -80,8 +80,9 @@ bool confirmCsvImport(QWidget *parent, const Exporters::CsvVariablesPreview &pre
     layout->addWidget(summary);
     if (!preview.unmatchedDocuments.isEmpty()) {
         auto *warn = new QLabel(QObject::tr("Righe senza documento corrispondente (%1): %2")
-                                    .arg(preview.unmatchedDocuments.size())
-                                    .arg(preview.unmatchedDocuments.join(QStringLiteral(", "))));
+                                    .arg(QString::number(preview.unmatchedDocuments.size()),
+                                         preview.unmatchedDocuments.join(QStringLiteral(", "))));
+        warn->setTextFormat(Qt::PlainText); // names read from the CSV file
         warn->setWordWrap(true);
         layout->addWidget(warn);
     }
@@ -299,7 +300,7 @@ void VariablesDialog::importCsv()
     if (!Exporters::importVariablesCsv(*m_project, path, &report, &error, types))
         Ui::showError(this, error);
     else
-        QMessageBox::information(this, tr("Importa variabili"), report);
+        Ui::showInfo(this, tr("Importa variabili"), report);
     refresh();
 }
 

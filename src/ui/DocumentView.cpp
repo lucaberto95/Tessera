@@ -26,6 +26,7 @@
 #include <QRegularExpression>
 
 #include <functional>
+#include <tuple>
 
 namespace {
 // QTextEdit::toPlainText() turns non-breaking spaces into spaces; keep the stored text exact.
@@ -55,6 +56,20 @@ bool isWordCharAfter(const QString &t, int pos)
     if (t.at(pos).isHighSurrogate() && pos + 1 < t.size() && t.at(pos + 1).isLowSurrogate())
         cp = QChar::surrogateToUcs4(t.at(pos), t.at(pos + 1));
     return QChar::isLetterOrNumber(cp) || cp == U'_';
+}
+
+// Common prefix and suffix give the edited range: {position, removed length, inserted length}.
+std::tuple<int, int, int> editedRange(const QString &before, const QString &now)
+{
+    int prefix = 0;
+    const int maxPrefix = int(qMin(before.size(), now.size()));
+    while (prefix < maxPrefix && before.at(prefix) == now.at(prefix))
+        ++prefix;
+    int suffix = 0;
+    const int maxSuffix = maxPrefix - prefix;
+    while (suffix < maxSuffix && before.at(before.size() - 1 - suffix) == now.at(now.size() - 1 - suffix))
+        ++suffix;
+    return {prefix, int(before.size()) - prefix - suffix, int(now.size()) - prefix - suffix};
 }
 } // namespace
 
@@ -136,6 +151,7 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     titleFont.setPointSizeF(titleFont.pointSizeF() * 1.15);
     titleFont.setBold(true);
     m_title->setFont(titleFont);
+    m_title->setTextFormat(Qt::PlainText); // a document name is never markup
     m_info->setStyleSheet(QStringLiteral("color: palette(mid)"));
     m_editButton->setText(tr("Modifica testo"));
     m_editButton->setCheckable(true);
@@ -462,10 +478,31 @@ void DocumentView::showSegmentMenu(qint64 segmentId, const QPoint &globalPos)
 
 void DocumentView::onSegmentsChanged(qint64 documentId)
 {
-    if (m_editing || !m_docId)
+    if (!m_docId || (documentId != 0 && documentId != m_docId))
         return;
-    if (documentId == 0 || documentId == m_docId)
+    if (!m_editing) {
         reloadSegments();
+        return;
+    }
+    // Editing: segments coded elsewhere (e.g. automatic coding) are mapped from the stored text to
+    // the edited one, and deleted ones dropped, so saving the text keeps the database's codings.
+    const QList<Segment> stored = m_project->segmentsForDocument(m_docId);
+    QSet<qint64> storedIds;
+    QList<Segment> added;
+    for (const Segment &s : stored) {
+        storedIds.insert(s.id);
+        if (!m_editKnownIds.contains(s.id))
+            added << s;
+    }
+    m_segments.removeIf([&](const Segment &s) { return !storedIds.contains(s.id); });
+    if (!added.isEmpty()) {
+        const auto [position, removed, inserted] = editedRange(m_editBaseText, rawText(m_edit));
+        TextUtils::adjustSegmentsForEdit(added, position, removed, inserted);
+        m_segments += added;
+    }
+    m_editKnownIds = storedIds;
+    m_stripe->setSegments(m_segments, m_codes);
+    refreshHighlights();
 }
 
 void DocumentView::onCodesChanged()
@@ -519,6 +556,10 @@ void DocumentView::setEditing(bool editing)
         reloadSegments();
         m_editing = true;
         m_editSnapshot = rawText(m_edit);
+        m_editBaseText = m_editSnapshot;
+        m_editKnownIds.clear();
+        for (const Segment &s : std::as_const(m_segments))
+            m_editKnownIds.insert(s.id);
         m_edit->setReadOnly(false);
         m_edit->setTextInteractionFlags(Qt::TextEditorInteraction);
         m_editConnection = connect(m_edit, &QTextEdit::textChanged, this, &DocumentView::onTextChangedWhileEditing);
@@ -536,19 +577,8 @@ void DocumentView::setEditing(bool editing)
 
 void DocumentView::onTextChangedWhileEditing()
 {
-    // Diff against the previous text: common prefix and suffix give the edited range.
     const QString now = rawText(m_edit);
-    const QString &before = m_editSnapshot;
-    int prefix = 0;
-    const int maxPrefix = int(qMin(before.size(), now.size()));
-    while (prefix < maxPrefix && before.at(prefix) == now.at(prefix))
-        ++prefix;
-    int suffix = 0;
-    const int maxSuffix = maxPrefix - prefix;
-    while (suffix < maxSuffix && before.at(before.size() - 1 - suffix) == now.at(now.size() - 1 - suffix))
-        ++suffix;
-    const int removed = int(before.size()) - prefix - suffix;
-    const int added = int(now.size()) - prefix - suffix;
+    const auto [prefix, removed, added] = editedRange(m_editSnapshot, now);
     if (removed || added) {
         TextUtils::adjustSegmentsForEdit(m_segments, prefix, removed, added);
         m_stripe->setSegments(m_segments, m_codes);

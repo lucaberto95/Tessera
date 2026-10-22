@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QSettings>
+#include <QTextDocument>
 
 namespace Ui {
 
@@ -25,7 +26,28 @@ void rememberDir(const QString &file)
         QSettings().setValue(QStringLiteral("ui/lastDir"), QFileInfo(file).absolutePath());
 }
 
+// Message boxes with Qt::PlainText: their text often contains names from the project.
+QMessageBox::StandardButton plainMessage(QWidget *parent, QMessageBox::Icon icon, const QString &title,
+                                         const QString &text, QMessageBox::StandardButtons buttons,
+                                         QMessageBox::StandardButton defaultButton)
+{
+    QMessageBox box(icon, title, text, buttons, parent);
+    box.setTextFormat(Qt::PlainText);
+    box.setDefaultButton(defaultButton);
+    return QMessageBox::StandardButton(box.exec());
+}
+
 } // namespace
+
+QString plainToolTip(const QString &text)
+{
+    return text.isEmpty() ? QString() : Qt::convertFromPlainText(text, Qt::WhiteSpaceNormal);
+}
+
+void showInfo(QWidget *parent, const QString &title, const QString &text)
+{
+    plainMessage(parent, QMessageBox::Information, title, text, QMessageBox::Ok, QMessageBox::Ok);
+}
 
 QIcon colorIcon(const QColor &color, int size)
 {
@@ -59,13 +81,13 @@ QIcon memoIcon()
 
 bool confirm(QWidget *parent, const QString &title, const QString &text)
 {
-    return QMessageBox::question(parent, title, text, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) ==
-           QMessageBox::Yes;
+    return plainMessage(parent, QMessageBox::Question, title, text, QMessageBox::Yes | QMessageBox::No,
+                        QMessageBox::No) == QMessageBox::Yes;
 }
 
 void showError(QWidget *parent, const QString &text)
 {
-    QMessageBox::warning(parent, QObject::tr("Tessera"), text);
+    plainMessage(parent, QMessageBox::Warning, QObject::tr("Tessera"), text, QMessageBox::Ok, QMessageBox::Ok);
 }
 
 QString askText(QWidget *parent, const QString &title, const QString &label, const QString &value)
