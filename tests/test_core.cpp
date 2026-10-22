@@ -564,6 +564,132 @@ private slots:
         QCOMPARE(Exporters::readCsv(path("t.csv"), &err), t);
     }
 
+    void variableTypeInference()
+    {
+        using VT = VariableType;
+        QCOMPARE(Exporters::inferVariableType({"1", "-20", "", "300"}), VT::Integer);
+        QCOMPARE(Exporters::inferVariableType({"1,5", "2", "3,25"}), VT::Decimal);          // Italian
+        QCOMPARE(Exporters::inferVariableType({"1.5", "2", "3.25"}), VT::Decimal);          // English
+        QCOMPARE(Exporters::inferVariableType({"1.234,5", "2"}), VT::Decimal);              // thousands + comma
+        QCOMPARE(Exporters::inferVariableType({"1,234.5", "2"}), VT::Decimal);
+        QCOMPARE(Exporters::inferVariableType({"1.234.567", "2"}), VT::Decimal);
+        QCOMPARE(Exporters::inferVariableType({"1,2,3"}), VT::Text);
+        QCOMPARE(Exporters::inferVariableType({"sì", "no", "sì"}), VT::Boolean);
+        QCOMPARE(Exporters::inferVariableType({"true", "false"}), VT::Boolean);
+        QCOMPARE(Exporters::inferVariableType({"vero", "vero"}), VT::Boolean);
+        QCOMPARE(Exporters::inferVariableType({"0", "1", "1"}), VT::Boolean);
+        QCOMPARE(Exporters::inferVariableType({"1", "1"}), VT::Integer);                    // one bare value
+        QCOMPARE(Exporters::inferVariableType({"si", "no", "forse"}), VT::Text);
+        QCOMPARE(Exporters::inferVariableType({"2024-03-05", "2023-12-31"}), VT::Date);
+        QCOMPARE(Exporters::inferVariableType({"05/03/2024", "31/12/2023"}), VT::Date);
+        QCOMPARE(Exporters::inferVariableType({"31/02/2024"}), VT::Text);                   // invalid day
+        QCOMPARE(Exporters::inferVariableType({"12", "abc"}), VT::Text);
+        QCOMPARE(Exporters::inferVariableType({"", " "}), VT::Text);
+
+        QString out;
+        QVERIFY(Exporters::normalizeVariableValue(VT::Decimal, "1.234,5", &out));
+        QCOMPARE(out, QString("1234.5"));
+        QVERIFY(Exporters::normalizeVariableValue(VT::Date, "05/03/2024", &out));
+        QCOMPARE(out, QString("2024-03-05"));
+        QVERIFY(Exporters::normalizeVariableValue(VT::Boolean, "Sì", &out));
+        QCOMPARE(out, QString("1"));
+        QVERIFY(Exporters::normalizeVariableValue(VT::Boolean, "falso", &out));
+        QCOMPARE(out, QString("0"));
+        QVERIFY(!Exporters::normalizeVariableValue(VT::Integer, "1,5", &out));
+        QVERIFY(Exporters::normalizeVariableValue(VT::Integer, "", &out));
+        QVERIFY(out.isEmpty());
+    }
+
+    void variablesCsvImportTypes()
+    {
+        Project p;
+        QVERIFY(p.create(path("vars.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "Doc uno", "a");
+        const qint64 d2 = p.addDocument(g, "Doc due", "b");
+        const qint64 existing = p.addVariable("Livello", VariableType::Integer);
+
+        writeFile("vars.csv", QString::fromUtf8("Documento;Età;Peso;Consenso;Nascita;Nota;Livello\n"
+                                                "Doc uno;34;70,5;sì;05/03/1990;ciao;3\n"
+                                                "Doc due;41;82;no;1983-11-02;;abc\n"
+                                                "Ignoto;1;1;sì;01/01/2000;x;1\n")
+                                    .toUtf8());
+        Exporters::CsvVariablesPreview prev;
+        QString err;
+        QVERIFY2(Exporters::previewVariablesCsv(p, path("vars.csv"), &prev, &err), qPrintable(err));
+        QCOMPARE(prev.matchedRows, 2);
+        QCOMPARE(prev.unmatchedDocuments, QStringList{"Ignoto"});
+        QCOMPARE(prev.columns.size(), 6);
+        QCOMPARE(prev.columns[0].type, VariableType::Integer);
+        QCOMPARE(prev.columns[1].type, VariableType::Decimal);
+        QCOMPARE(prev.columns[2].type, VariableType::Boolean);
+        QCOMPARE(prev.columns[3].type, VariableType::Date);
+        QCOMPARE(prev.columns[4].type, VariableType::Text);
+        QVERIFY(prev.columns[5].existing);
+        QCOMPARE(prev.columns[5].invalidCount, 1);
+
+        QString report;
+        // The user may override a proposed type.
+        QVERIFY(Exporters::importVariablesCsv(p, path("vars.csv"), &report, &err,
+                                              {{"Nota", VariableType::Text}, {"Età", VariableType::Text}}));
+        QVERIFY(report.contains("abc"));
+        QHash<QString, Variable> byName;
+        for (const Variable &v : p.variables())
+            byName.insert(v.name, v);
+        QCOMPARE(byName["Età"].type, VariableType::Text);
+        QCOMPARE(byName["Peso"].type, VariableType::Decimal);
+        QCOMPARE(p.variableValue(d1, byName["Peso"].id), QString("70.5"));
+        QCOMPARE(p.variableValue(d1, byName["Consenso"].id), QString("1"));
+        QCOMPARE(p.variableValue(d2, byName["Consenso"].id), QString("0"));
+        QCOMPARE(p.variableValue(d1, byName["Nascita"].id), QString("1990-03-05"));
+        QCOMPARE(p.variableValue(d1, existing), QString("3"));
+        QCOMPARE(p.variableValue(d2, existing), QString()); // "abc" skipped
+
+        // One undo step removes the whole import.
+        QVERIFY(p.undo());
+        QCOMPARE(p.variables().size(), 1);
+    }
+
+    void variablesCsvRoundTripKeepsTypes()
+    {
+        Project a;
+        QVERIFY(a.create(path("rt-a.tsra")));
+        const qint64 ga = a.groups().first().id;
+        const qint64 da1 = a.addDocument(ga, "Uno", "x");
+        const qint64 da2 = a.addDocument(ga, "Due", "y");
+        const qint64 vi = a.addVariable("Età", VariableType::Integer);
+        const qint64 vd = a.addVariable("Peso", VariableType::Decimal);
+        const qint64 vb = a.addVariable("Consenso", VariableType::Boolean);
+        const qint64 vt = a.addVariable("Nascita", VariableType::Date);
+        a.setVariableValue(da1, vi, "34");
+        a.setVariableValue(da2, vi, "41");
+        a.setVariableValue(da1, vd, "70.5");
+        a.setVariableValue(da2, vd, "82");
+        a.setVariableValue(da1, vb, "1");
+        a.setVariableValue(da2, vb, "0");
+        a.setVariableValue(da1, vt, "1990-03-05");
+        a.setVariableValue(da2, vt, "1983-11-02");
+        QString err;
+        QVERIFY(Exporters::writeCsv(path("rt.csv"), Exporters::variablesTable(a), &err));
+
+        Project b;
+        QVERIFY(b.create(path("rt-b.tsra")));
+        const qint64 gb = b.groups().first().id;
+        const qint64 db1 = b.addDocument(gb, "Uno", "x");
+        b.addDocument(gb, "Due", "y");
+        QString report;
+        QVERIFY2(Exporters::importVariablesCsv(b, path("rt.csv"), &report, &err), qPrintable(err));
+        QHash<QString, Variable> byName;
+        for (const Variable &v : b.variables())
+            byName.insert(v.name, v);
+        QCOMPARE(byName["Età"].type, VariableType::Integer);
+        QCOMPARE(byName["Peso"].type, VariableType::Decimal);
+        QCOMPARE(byName["Consenso"].type, VariableType::Boolean);
+        QCOMPARE(byName["Nascita"].type, VariableType::Date);
+        QCOMPARE(b.variableValue(db1, byName["Peso"].id), QString("70.5"));
+        QCOMPARE(b.variableValue(db1, byName["Nascita"].id), QString("1990-03-05"));
+    }
+
     void qdpxRoundTrip()
     {
         Project p;

@@ -22,59 +22,6 @@ constexpr int FixedColumns = 2; // document, group
 constexpr int DocIdRole = Qt::UserRole;
 constexpr int VarIdRole = Qt::UserRole + 1;
 
-// Validates and normalizes a value typed by the user. Returns false if it does not fit the type.
-bool normalizeValue(VariableType type, const QString &input, QString *out)
-{
-    const QString v = input.trimmed();
-    if (v.isEmpty()) {
-        out->clear();
-        return true;
-    }
-    bool ok = true;
-    switch (type) {
-    case VariableType::Text:
-        *out = v;
-        break;
-    case VariableType::Integer:
-        *out = QString::number(QLocale().toLongLong(v, &ok));
-        if (!ok)
-            *out = QString::number(v.toLongLong(&ok));
-        break;
-    case VariableType::Decimal: {
-        double d = QLocale().toDouble(v, &ok);
-        if (!ok)
-            d = v.toDouble(&ok);
-        *out = QString::number(d, 'g', 15);
-        break;
-    }
-    case VariableType::Boolean: {
-        const QString l = v.toLower();
-        if (l == QLatin1String("1") || l == QLatin1String("sì") || l == QLatin1String("si") ||
-            l == QLatin1String("yes") || l == QLatin1String("true") || l == QLatin1String("vero") || l == QLatin1String("x"))
-            *out = QStringLiteral("1");
-        else if (l == QLatin1String("0") || l == QLatin1String("no") || l == QLatin1String("false") ||
-                 l == QLatin1String("falso"))
-            *out = QStringLiteral("0");
-        else
-            ok = false;
-        break;
-    }
-    case VariableType::Date: {
-        QDate d = QDate::fromString(v, Qt::ISODate);
-        for (const char *fmt : {"dd/MM/yyyy", "d/M/yyyy", "dd.MM.yyyy", "dd-MM-yyyy", "d/M/yy"}) {
-            if (d.isValid())
-                break;
-            d = QDate::fromString(v, QString::fromLatin1(fmt));
-        }
-        ok = d.isValid();
-        if (ok)
-            *out = d.toString(Qt::ISODate);
-        break;
-    }
-    }
-    return ok;
-}
-
 QString displayValue(VariableType type, const QString &stored)
 {
     if (type == VariableType::Boolean && !stored.isEmpty())
@@ -86,6 +33,83 @@ QString displayValue(VariableType type, const QString &stored)
     if (type == VariableType::Decimal && !stored.isEmpty())
         return QLocale().toString(stored.toDouble(), 'g', 15);
     return stored;
+}
+
+// Preview of a CSV import: proposed type per column (editable for new variables) and first rows.
+bool confirmCsvImport(QWidget *parent, const Exporters::CsvVariablesPreview &preview,
+                      QHash<QString, VariableType> *types)
+{
+    QDialog dlg(parent);
+    dlg.setWindowTitle(QObject::tr("Importa variabili"));
+    dlg.resize(720, 520);
+    auto *layout = new QVBoxLayout(&dlg);
+
+    layout->addWidget(new QLabel(QObject::tr("Colonne trovate e tipo proposto. Per le variabili nuove il tipo si può cambiare.")));
+    auto *columns = new QTableWidget(static_cast<int>(preview.columns.size()), 4);
+    columns->setHorizontalHeaderLabels({QObject::tr("Colonna"), QObject::tr("Tipo"), QObject::tr("Esempi"), QObject::tr("Note")});
+    columns->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    columns->setSelectionMode(QAbstractItemView::NoSelection);
+    columns->verticalHeader()->hide();
+    columns->horizontalHeader()->setStretchLastSection(true);
+    QList<QComboBox *> combos;
+    for (int i = 0; i < preview.columns.size(); ++i) {
+        const Exporters::CsvVariableColumn &c = preview.columns[i];
+        columns->setItem(i, 0, new QTableWidgetItem(c.name));
+        if (c.existing) {
+            columns->setItem(i, 1, new QTableWidgetItem(variableTypeLabel(c.type)));
+            combos << nullptr;
+        } else {
+            auto *combo = new QComboBox;
+            for (VariableType t : {VariableType::Text, VariableType::Integer, VariableType::Decimal,
+                                   VariableType::Boolean, VariableType::Date})
+                combo->addItem(variableTypeLabel(t), static_cast<int>(t));
+            combo->setCurrentIndex(combo->findData(static_cast<int>(c.type)));
+            columns->setCellWidget(i, 1, combo);
+            combos << combo;
+        }
+        columns->setItem(i, 2, new QTableWidgetItem(c.samples.join(QStringLiteral(", "))));
+        QString note = c.existing ? QObject::tr("variabile esistente") : QObject::tr("nuova variabile");
+        if (c.invalidCount > 0)
+            note += QObject::tr("; %n valore/i non compatibile/i, saranno ignorati", nullptr, c.invalidCount);
+        columns->setItem(i, 3, new QTableWidgetItem(note));
+    }
+    columns->resizeColumnsToContents();
+    layout->addWidget(columns, 2);
+
+    auto *summary = new QLabel(QObject::tr("%1 righe corrispondono a un documento.").arg(preview.matchedRows));
+    layout->addWidget(summary);
+    if (!preview.unmatchedDocuments.isEmpty()) {
+        auto *warn = new QLabel(QObject::tr("Righe senza documento corrispondente (%1): %2")
+                                    .arg(preview.unmatchedDocuments.size())
+                                    .arg(preview.unmatchedDocuments.join(QStringLiteral(", "))));
+        warn->setWordWrap(true);
+        layout->addWidget(warn);
+    }
+
+    auto *rows = new QTableWidget(static_cast<int>(qMax<qsizetype>(0, preview.sampleRows.size() - 1)),
+                                  preview.sampleRows.isEmpty() ? 0 : static_cast<int>(preview.sampleRows.first().size()));
+    if (!preview.sampleRows.isEmpty())
+        rows->setHorizontalHeaderLabels(preview.sampleRows.first());
+    for (int r = 1; r < preview.sampleRows.size(); ++r)
+        for (int c = 0; c < preview.sampleRows[r].size(); ++c)
+            rows->setItem(r - 1, c, new QTableWidgetItem(preview.sampleRows[r][c]));
+    rows->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    layout->addWidget(rows, 1);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(QObject::tr("Importa"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QObject::tr("Annulla"));
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dlg.exec() != QDialog::Accepted)
+        return false;
+    for (int i = 0; i < combos.size(); ++i) {
+        if (combos[i])
+            types->insert(preview.columns[i].name, static_cast<VariableType>(combos[i]->currentData().toInt()));
+    }
+    return true;
 }
 
 } // namespace
@@ -246,7 +270,7 @@ void VariablesDialog::onItemChanged(QTableWidgetItem *item)
         if (v.id == varId)
             type = v.type;
     QString value;
-    if (!normalizeValue(type, item->text(), &value)) {
+    if (!Exporters::normalizeVariableValue(type, item->text(), &value)) {
         Ui::showError(this, tr("Il valore \"%1\" non è valido per una variabile di tipo %2.")
                                 .arg(item->text(), variableTypeLabel(type)));
         value = m_project->variableValue(docId, varId);
@@ -264,7 +288,15 @@ void VariablesDialog::importCsv()
     if (path.isEmpty())
         return;
     QString report, error;
-    if (!Exporters::importVariablesCsv(*m_project, path, &report, &error))
+    Exporters::CsvVariablesPreview preview;
+    if (!Exporters::previewVariablesCsv(*m_project, path, &preview, &error)) {
+        Ui::showError(this, error);
+        return;
+    }
+    QHash<QString, VariableType> types;
+    if (!confirmCsvImport(this, preview, &types))
+        return;
+    if (!Exporters::importVariablesCsv(*m_project, path, &report, &error, types))
         Ui::showError(this, error);
     else
         QMessageBox::information(this, tr("Importa variabili"), report);
