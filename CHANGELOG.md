@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.16.0] - 2026-10-22 — Modello di segmento generalizzato (#25)
+Commit `8854204`
+
+- Schema v6 (migrazione con backup e transazione, nessuna tabella ricostruita): `documents.kind` (testo, PDF, immagine, audio, video) e ancore dei segmenti `anchor_kind` (testo, area, tempo) con `page`, `x1..y2` e `t_start`/`t_end` in ms.
+- Nuova API di `Project`: `addMediaDocument`, `addAreaSegment` (PDF con pagina, immagini senza) e `addTimeSegment` (audio e video), con validazione per tipo di documento, annulla/ripeti e rimozione dei duplicati.
+- I segmenti non testuali salvano `start_pos=0, end_pos=1` (il CHECK originale resta); le liste `segmentsForDocument`/`segments`/`allSegments` restituiscono solo segmenti di testo salvo `includeNonText`, quindi vista, recupero e co-occorrenze non cambiano.
+- L'export QDPX omette per ora i documenti non testuali.
+- Rimandato: contenuto binario dei documenti (blob o collegamento), interfaccia per aree e tempi, selezioni QDPX (#26, #27, #28, #46).
+
 ## [0.15.0] - 2026-10-22 — Frequenze di parole, nuvola di parole e parole in contesto (#18)
 Commit `9d1c2cf`
 

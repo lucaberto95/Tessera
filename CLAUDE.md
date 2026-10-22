@@ -22,23 +22,23 @@ C++20 + Qt 6.10 (Widgets, Sql/SQLite, Pdf, Charts). L'utente scrive in italiano:
 Toolchain: VS 2022 Build Tools (MSVC 14.44, CMake e Ninja inclusi), Qt 6.10.3 in
 `C:\Qt\6.10.3\msvc2022_64` (moduli `qtpdf qtcharts`). cmake/ninja non servono nel PATH.
 
-``bat
+```bat
 build.cmd Release        :: configura + compila in build\Release (app, libreria, test)
 deploy.cmd               :: dist\Tessera autonoma (Qt + runtime VC++ app-local)
 deploy.cmd zip           :: + dist\Tessera-<versione>-win64.zip per le release
-``
+```
 
 Da PowerShell: `cmd /c ".\build.cmd Release"`. Argomenti CMake extra solo via `TESSERA_CMAKE_ARGS`
 (es. `-DTESSERA_BUILD_APP=OFF` = solo core + test): `cmd` spezza i `-DX=Y` passati direttamente.
 
 Test (offscreen, nessuna finestra):
 
-``powershell
+```powershell
 $env:PATH = "C:\Qt\6.10.3\msvc2022_64\bin;$env:PATH"
 $env:QT_QPA_FONTDIR = 'C:\Windows\Fonts'     # senza, il testo offscreen è a quadratini
 build\Release\tessera_tests.exe -platform offscreen -o out.txt,txt
 build\Release\tessera_ui_tests.exe -platform offscreen -o out_ui.txt,txt
-``
+```
 
 Dalla shell di Claude Code i test non stampano nulla: leggere il file di `-o`; l'exit code = numero di
 fallimenti. `$env:TESSERA_SHOTS='<cartella>'` salva uno screenshot PNG per vista. L'app accetta
@@ -46,7 +46,7 @@ fallimenti. `$env:TESSERA_SHOTS='<cartella>'` salva uno screenshot PNG per vista
 
 ## Architettura
 
-``
+```
 src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, DocumentLink, Memo, Variable,
                  Dictionary, DictCategory, DictEntry
@@ -76,7 +76,7 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   avanzamento, `Qt6::Concurrent`; il progetto non è thread-safe: i testi si leggono prima, nel thread della UI),
   SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
-``
+```
 
 ### Concetti chiave
 
