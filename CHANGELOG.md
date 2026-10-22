@@ -2,6 +2,14 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.22.0] - 2026-10-22 — Accordo tra codificatori (#23)
+Commit `0132262`
+
+- «Accordo tra codificatori…» (menu Analisi): si confrontano due autori delle codifiche nello stesso progetto oppure questo progetto e un altro `.tsra` con gli stessi documenti (abbinati per uuid, poi per nome). Documenti e codici attivi restringono il confronto.
+- Tre livelli: presenza del codice nel documento, frequenza nel documento, segmenti (un segmento concorda se l'altro codificatore ha un segmento dello stesso codice con sovrapposizione/unione almeno pari alla soglia, 90% di default).
+- Tabella per codice e totale con accordo %, kappa di Cohen e kappa di Brennan-Prediger (`n.d.` quando indefinito, per esempio senza variazione o al livello segmenti per Cohen); elenco dei disaccordi con il testo, doppio clic per aprire il documento sul punto; esportazione in Excel, CSV e HTML.
+- Non incluso: alfa di Krippendorff per più codificatori; il livello segmenti confronta solo i segmenti di testo (non aree PDF/immagine né intervalli di tempo).
+
 ## [0.21.0] - 2026-10-22 — Unione di progetti (#22)
 Commit `06012e9`
 
