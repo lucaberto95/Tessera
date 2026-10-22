@@ -17,27 +17,11 @@ L'utente scrive in italiano: rispondi in italiano.
   `QStringLiteral`, commenti brevi che spiegano il perché).
 - Ogni modifica deve lasciare verdi i test (`tessera_tests`, `tessera_ui_tests`).
 
-## Flusso di lavoro: un ramo e una pull request per ogni issue
-
-- **Mai commit diretti su `main`.** Ogni modifica passa da un ramo e da una pull request.
-- **Una issue = un ramo = una PR.** Il ramo si chiama `issue-<numero>-<descrizione-breve>` (es.
-  `issue-2-set-documenti`) e parte da `main` aggiornato. Le modifiche che non appartengono a una
-  issue (documentazione, script) vanno in un ramo dedicato (es. `docs/...`) con la sua PR.
-- Non mescolare più issue nello stesso ramo. Se una issue dipende da un'altra non ancora unita,
-  il suo ramo parte da quello della issue da cui dipende e la PR usa quel ramo come base (PR
-  "impilata"); quando la PR di base viene unita e il suo ramo cancellato, GitHub sposta la base
-  su `main`.
-- Prima di aprire o aggiornare una PR: build e test verdi. La descrizione della PR dice cosa
-  cambia, come è stato verificato e cosa resta da provare, e chiude la issue con `Closes #<numero>`.
-- **Il merge lo decide l'utente**: si unisce solo quando l'utente dice che la PR è a posto.
-- Per un ramo rimasto indietro rispetto a `main`: `git merge main` nel ramo (niente force push).
-
 ## Questo file (CLAUDE.md)
 
 - **CLAUDE.md va aggiornato a ogni modifica** che cambia architettura, convenzioni, comandi, regole,
-  insidie o prossimi passi, nello stesso ramo e nella stessa PR della modifica.
-- Si può aggiornare sui rami delle singole issue; con il merge della PR l'aggiornamento **deve
-  rientrare in `main`**. Nei conflitti su questo file si tengono le informazioni di entrambi i rami.
+  insidie o prossimi passi, nello stesso commit della modifica. Il flusso di lavoro è nella
+  sezione "Flusso di lavoro per le issue".
 - Se manca, va ricreato con queste sezioni: regole, flusso di lavoro, comandi, architettura,
   concetti chiave, insidie, rilasci.
 
@@ -152,27 +136,18 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 
 ## Flusso di lavoro per le issue
 
-Il codice di ogni issue si sviluppa su un branch e arriva su `main` solo con una pull request.
-**Eccezione: CLAUDE.md** (e le sole note di processo) si modifica e si committa direttamente su
-`main`, perché è l'unica versione che l'AI legge: un branch lo renderebbe invisibile alle sessioni
-successive. Mantenerlo aggiornato a ogni sessione, nello stesso momento in cui cambia qualcosa.
+Si lavora direttamente su `main`: niente rami e niente pull request.
 
 1. Scegliere l'issue (`gh issue list`; di norma priorità alta e dimensione piccola) e leggerla con
    `gh issue view <n>`: obiettivo, comportamento atteso, criteri di accettazione.
-2. Creare il branch da `main` aggiornato: `git switch -c feature/<nome-breve> main`
-   (`fix/…` per i bug, `docs/…` per la sola documentazione).
-3. Implementare, aggiungere o aggiornare i test (i criteri di accettazione della issue diventano test)
+2. Implementare, aggiungere o aggiornare i test (i criteri di accettazione della issue diventano test)
    e aggiornare README/CLAUDE.md se cambiano scorciatoie o comportamenti.
-4. `build.cmd Release` (da PowerShell: `cmd /c ".\build.cmd Release"`), poi `tessera_tests` e
+3. `build.cmd Release` (da PowerShell: `cmd /c ".\build.cmd Release"`), poi `tessera_tests` e
    `tessera_ui_tests`: devono essere verdi. Un test che fallisce non si aggira, si capisce.
-5. Commit in inglese, con `Closes #<n>` nel corpo. Push del branch (`git push -u origin <branch>`).
-6. Aprire la PR contro `main` con `gh pr create --body-file <file>` (il corpo multilinea passato
-   inline si rompe in PowerShell). Il corpo inizia con `Closes #<n>` e riassume: cosa cambia, test
-   eseguiti, cosa resta da provare a mano. Poi `get_status`/`bind_pr` dei tool ccd_pr.
-7. **Non fare il merge e non chiudere la issue prima della prova manuale** nell'app vera
-   (`--example`); i test automatici non coprono aspetto, focus e scorciatoie reali. Dare all'utente
-   l'elenco delle cose da controllare. Il merge della PR chiude la issue da solo.
-8. Dopo il merge: `git switch main`, `git pull`, eliminare il branch.
+4. Commit su `main` in inglese, con `Closes #<n>` nel corpo, poi `git push`. La issue si chiude da
+   sola al push; l'utente ha chiesto di chiuderle subito, senza attendere la prova manuale. Nel
+   riepilogo finale elencare comunque all'utente le cose da controllare a mano nell'app vera
+   (`--example`): i test automatici non coprono aspetto, focus e scorciatoie reali.
 
 ### Issue, etichette e roadmap
 
@@ -188,24 +163,19 @@ successive. Mantenerlo aggiornato a ogni sessione, nello stesso momento in cui c
 
 ### Stato delle issue
 
-- **#5** (ricerca nel documento aperto, Ctrl+F): implementata, in attesa di prova manuale e merge
-  nella [PR 55](https://github.com/lucaberto95/Tessera/pull/55). Ctrl+F = ricerca nel documento,
-  Ctrl+Shift+F = ricerca lessicale sul progetto.
-- **#4** (import CSV delle variabili con riconoscimento del tipo): implementata, in attesa di prova manuale e merge
-  nella [PR 57](https://github.com/lucaberto95/Tessera/pull/57).
-- **#12** (recupero complesso dei segmenti, Ctrl+Maiusc+R): implementata, in attesa di prova manuale e merge
-  nella [PR 58](https://github.com/lucaberto95/Tessera/pull/58). Logica in src/core/Retrieval.*.
-- Aggiornare questo elenco quando una issue passa in PR o viene chiusa.
+Chiuse e già in `main` (provate solo con i test automatici, non ancora a mano nell'app vera):
+**#1** migrazioni dello schema, **#2** set di documenti, **#4** import CSV delle variabili con
+tipo, **#5** ricerca nel documento (Ctrl+F; Ctrl+Maiusc+F = ricerca lessicale sul progetto),
+**#12** recupero complesso dei segmenti (Ctrl+Maiusc+R, logica in `src/core/Retrieval.*`).
+Aggiornare questo elenco quando una issue viene chiusa.
 
-Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`;
-per riportare `main` allineato a `origin/main` senza perdere commit usare `git branch -f main origin/main`
-dopo aver spostato il lavoro su un branch.
+Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.
 
 ## Rilasci
 
-1. In un ramo `release/x.y.z` con PR: aggiornare `project(Tessera VERSION x.y.z)` in `CMakeLists.txt`.
-2. Dopo il merge, su `main` aggiornato: `build.cmd Release`, eseguire i test, `deploy.cmd zip`.
-3. Tag `vx.y.z` su `main`, push del tag, poi
+1. Aggiornare `project(Tessera VERSION x.y.z)` in `CMakeLists.txt`.
+2. `build.cmd Release`, eseguire i test, `deploy.cmd zip`.
+3. Commit su `main`, tag `vx.y.z`, push del tag, poi
    `gh release create vx.y.z dist\Tessera-x.y.z-win64.zip -R lucaberto95/Tessera --title ... --notes ...`.
 
 Repository: https://github.com/lucaberto95/Tessera (privato), branch `main`.
