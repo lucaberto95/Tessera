@@ -4,6 +4,7 @@
 #include "core/Importers.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
+#include "core/Survey.h"
 #include "core/TextUtils.h"
 #include "ui/CodeTree.h"
 #include "ui/DocumentTree.h"
@@ -17,6 +18,7 @@
 #include "ui/MemoManager.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
+#include "ui/SurveyImportDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/VariablesDialog.h"
 
@@ -144,6 +146,7 @@ void MainWindow::createActions()
 
     m_importDocs = make(tr("&Importa documenti…"), [this] { importDocuments(m_documents->currentGroupId()); },
                         QKeySequence(Qt::CTRL | Qt::Key_I), true, QStyle::SP_FileIcon);
+    m_importSurvey = make(tr("Importa dati di &sondaggio (Excel/CSV)…"), &MainWindow::importSurvey);
     m_newTextDoc = make(tr("Nuovo documento di &testo…"), [this] { newTextDocument(m_documents->currentGroupId()); });
     m_newGroup = make(tr("Nuovo &gruppo di documenti…"), [this] {
         const QString name = Ui::askText(this, tr("Nuovo gruppo"), tr("Nome del gruppo:"));
@@ -216,6 +219,7 @@ void MainWindow::createMenus()
 
     QMenu *docs = menuBar()->addMenu(tr("&Documenti"));
     docs->addAction(m_importDocs);
+    docs->addAction(m_importSurvey);
     docs->addAction(m_newTextDoc);
     docs->addAction(m_newGroup);
     docs->addSeparator();
@@ -625,6 +629,38 @@ void MainWindow::importDocuments(qint64 groupId)
         m_view->openDocument(lastId);
     if (!failures.isEmpty())
         Ui::showError(this, tr("Alcuni file non sono stati importati:\n\n%1").arg(failures.join(QLatin1Char('\n'))));
+}
+
+void MainWindow::importSurvey()
+{
+    const QString path = Ui::openFileName(this, tr("Importa dati di sondaggio"),
+                                          tr("Dati di sondaggio (*.xlsx *.csv *.txt);;Excel (*.xlsx);;"
+                                             "CSV (*.csv *.txt);;Tutti i file (*)"));
+    if (path.isEmpty())
+        return;
+    QString error;
+    const Survey::Table table = Survey::readTable(path, &error);
+    if (!error.isEmpty()) {
+        Ui::showError(this, error);
+        return;
+    }
+    if (table.size() < 2) {
+        Ui::showError(this, tr("Il file non contiene righe di dati sotto l'intestazione."));
+        return;
+    }
+    SurveyImportDialog dlg(m_project, table, path, this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    Survey::Options options = dlg.options();
+    options.sourcePath = path;
+    Survey::Report report;
+    if (!Survey::importSurvey(*m_project, table, options, &report, &error)) {
+        Ui::showError(this, tr("Importazione non riuscita:\n%1").arg(error));
+        return;
+    }
+    if (report.firstDocumentId)
+        m_view->openDocument(report.firstDocumentId);
+    Ui::showInfo(this, tr("Importa dati di sondaggio"), report.text());
 }
 
 void MainWindow::newTextDocument(qint64 groupId)

@@ -5,8 +5,10 @@
 #include "core/Qdpx.h"
 #include "core/Retrieval.h"
 #include "core/Stats.h"
+#include "core/Survey.h"
 #include "core/TextUtils.h"
 #include "core/VariableFilter.h"
+#include "core/Xlsx.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -90,6 +92,44 @@ private:
     static int fileVersion(const QString &file)
     {
         return queryFile(file, "SELECT value FROM meta WHERE key = 'schema_version'").toInt();
+    }
+
+    // Minimal workbook with one sheet: strings inline, numbers as they are, QDate cells as serials
+    // styled with the built-in date format 14.
+    void writeXlsx(const QString &name, const QList<QVariantList> &rows)
+    {
+        QByteArray sheet = "<?xml version=\"1.0\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/"
+                           "spreadsheetml/2006/main\"><sheetData>";
+        for (int r = 0; r < rows.size(); ++r) {
+            sheet += "<row r=\"" + QByteArray::number(r + 1) + "\">";
+            for (int c = 0; c < rows[r].size(); ++c) {
+                const QVariant &v = rows[r][c];
+                const QByteArray ref = QByteArray(1, char('A' + c)) + QByteArray::number(r + 1);
+                if (!v.isValid())
+                    continue;
+                if (v.typeId() == QMetaType::QDate)
+                    sheet += "<c r=\"" + ref + "\" s=\"1\"><v>"
+                        + QByteArray::number(QDate(1899, 12, 30).daysTo(v.toDate())) + "</v></c>";
+                else if (v.typeId() == QMetaType::QString)
+                    sheet += "<c r=\"" + ref + "\" t=\"inlineStr\"><is><t>" + v.toString().toHtmlEscaped().toUtf8()
+                        + "</t></is></c>";
+                else
+                    sheet += "<c r=\"" + ref + "\"><v>" + QByteArray::number(v.toDouble(), 'g', 15) + "</v></c>";
+            }
+            sheet += "</row>";
+        }
+        sheet += "</sheetData></worksheet>";
+        QZipWriter zip(path(name));
+        zip.addFile("xl/workbook.xml",
+                    "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" "
+                    "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+                    "<sheets><sheet name=\"Risposte\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
+        zip.addFile("xl/_rels/workbook.xml.rels",
+                    "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                    "<Relationship Id=\"rId1\" Type=\"worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>");
+        zip.addFile("xl/styles.xml", "<styleSheet><cellXfs count=\"2\"><xf numFmtId=\"0\"/><xf numFmtId=\"14\"/>"
+                                     "</cellXfs></styleSheet>");
+        zip.addFile("xl/worksheets/sheet1.xml", sheet);
     }
 
 private slots:
@@ -723,6 +763,217 @@ private slots:
         QString err;
         QVERIFY(Exporters::writeCsv(path("t.csv"), t, &err));
         QCOMPARE(Exporters::readCsv(path("t.csv"), &err), t);
+    }
+
+    void xlsxReader()
+    {
+        // The first sheet is found through the workbook relationships, not by its usual name.
+        const QByteArray workbook =
+            "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" "
+            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+            "<workbookPr/><sheets><sheet name=\"Dati\" sheetId=\"7\" r:id=\"rId3\"/>"
+            "<sheet name=\"Altro\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>";
+        const QByteArray rels =
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+            "<Relationship Id=\"rId1\" Target=\"worksheets/sheet1.xml\"/>"
+            "<Relationship Id=\"rId3\" Target=\"/xl/worksheets/dati.xml\"/></Relationships>";
+        // Shared strings: plain, rich text runs with a phonetic guide, an empty one.
+        const QByteArray shared = QByteArray(
+            "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+            "<si><t>Nome</t></si><si><t>Data</t></si>"
+            "<si><r><rPr><b/></rPr><t>Anna</t></r><r><t xml:space=\"preserve\"> Maria</t></r>"
+            "<rPh sb=\"0\" eb=\"4\"><t>ANNA</t></rPh></si><si><t>Note</t></si><si><t/></si>"
+            "<si><t>caffè ☕</t></si></sst>");
+        // Styles: the xf of cellStyleXfs do not count; 1 = built-in date, 2 = custom date and time,
+        // 3 = "0.00", 4 = a number format with a quoted word containing date letters.
+        const QByteArray styles =
+            "<styleSheet><numFmts><numFmt numFmtId=\"164\" formatCode=\"dd/mm/yyyy\\ hh:mm\"/>"
+            "<numFmt numFmtId=\"165\" formatCode=\"[Red]0&quot; giorni&quot;\"/>"
+            "<numFmt numFmtId=\"166\" formatCode=\"[h]:mm:ss\"/></numFmts>"
+            "<cellStyleXfs><xf numFmtId=\"14\"/></cellStyleXfs>"
+            "<cellXfs><xf numFmtId=\"0\"/><xf numFmtId=\"14\"/><xf numFmtId=\"164\"/><xf numFmtId=\"2\"/>"
+            "<xf numFmtId=\"165\"/><xf numFmtId=\"166\"/></cellXfs></styleSheet>";
+        const QByteArray sheet =
+            "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>"
+            "<row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c>"
+            "<c r=\"C1\" t=\"inlineStr\"><is><t>Valore</t></is></c><c r=\"E1\" t=\"s\"><v>3</v></c></row>"
+            "<row r=\"2\"><c r=\"A2\" t=\"s\"><v>2</v></c><c r=\"B2\" s=\"1\"><v>45292</v></c>"
+            "<c r=\"C2\" s=\"3\"><v>3.5</v></c><c r=\"D2\" t=\"b\"><v>1</v></c><c r=\"E2\" t=\"e\"><v>#N/A</v></c>"
+            "<c r=\"F2\" t=\"s\"><v>4</v></c><c r=\"G2\" s=\"1\"/></row>"
+            "<row r=\"4\"><c r=\"A4\" t=\"str\"><f>UPPER(\"x\")</f><v>calcolato</v></c>"
+            "<c r=\"B4\" s=\"2\"><v>45292.5</v></c><c r=\"C4\" s=\"4\"><v>7</v></c>"
+            "<c r=\"D4\" t=\"s\"><v>5</v></c><c r=\"E4\" s=\"5\"><v>0.75</v></c><c r=\"F4\"><v>1E-3</v></c></row>"
+            "<row r=\"5\"><c r=\"A5\" t=\"s\"><v>99</v></c><c r=\"C5\" t=\"b\"><v>0</v></c></row>"
+            "<row r=\"9\"><c r=\"A9\" s=\"1\"/></row>"
+            "</sheetData></worksheet>";
+        {
+            QZipWriter zip(path("dati.xlsx"));
+            zip.addFile("xl/workbook.xml", workbook);
+            zip.addFile("xl/_rels/workbook.xml.rels", rels);
+            zip.addFile("xl/sharedStrings.xml", shared);
+            zip.addFile("xl/styles.xml", styles);
+            zip.addFile("xl/worksheets/sheet1.xml", "<worksheet><sheetData><row><c t=\"inlineStr\"><is><t>sbagliato</t>"
+                                                   "</is></c></row></sheetData></worksheet>");
+            zip.addFile("xl/worksheets/dati.xml", sheet);
+        }
+        QString error;
+        const Xlsx::Table t = Xlsx::readFirstSheet(path("dati.xlsx"), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const Xlsx::Table expected{
+            {"Nome", "Data", "Valore", "", "Note"},
+            {"Anna Maria", "2024-01-01", "3.5", "VERO"}, // the error cell and the empty ones are empty
+            {},                                          // row 3 is not in the file
+            {"calcolato", "2024-01-01 12:00:00", "7", QString::fromUtf8("caffè ☕"), "18:00:00", "0.001"},
+            {"", "", "FALSO"},                           // shared string index out of range
+        };
+        QCOMPARE(t, expected);
+
+        // Serial dates, with Excel's 1900-02-29 and the 1904 date system.
+        QCOMPARE(Xlsx::serialToDateTime(1).date(), QDate(1900, 1, 1));
+        QCOMPARE(Xlsx::serialToDateTime(59).date(), QDate(1900, 2, 28));
+        QCOMPARE(Xlsx::serialToDateTime(61).date(), QDate(1900, 3, 1));
+        QCOMPARE(Xlsx::serialToDateTime(45292.25), QDateTime(QDate(2024, 1, 1), QTime(6, 0)));
+        QCOMPARE(Xlsx::serialToDateTime(0, true).date(), QDate(1904, 1, 1));
+        QVERIFY(!Xlsx::serialToDateTime(-1).isValid());
+
+        // Not a workbook.
+        writeFile("finto.xlsx", "non sono uno zip");
+        QVERIFY(Xlsx::readFirstSheet(path("finto.xlsx"), &error).isEmpty());
+        QVERIFY(!error.isEmpty());
+    }
+
+    void surveyImport()
+    {
+        const QStringList questions{"Come organizzi la giornata di lavoro?", "Cosa ti manca dell'ufficio?",
+                                    "Cosa cambieresti?\n(facoltativo)"};
+        QList<QVariantList> rows;
+        rows << QVariantList{"ID", "Età", "Genere", "Punteggio", "Data compilazione", questions[0], questions[1],
+                             questions[2]};
+        for (int i = 1; i <= 20; ++i) {
+            QVariantList row{QStringLiteral("R%1").arg(i, 2, 10, QLatin1Char('0')), 20 + i,
+                             i % 2 ? "F" : "M", 5 + i / 4.0, QDate(2024, 3, i)};
+            for (int q = 1; q <= 3; ++q)
+                row << QStringLiteral("Risposta %1 del rispondente %2, con qualche parola in più").arg(q).arg(i);
+            if (i == 5)
+                row[6] = QString();           // empty answer: skipped
+            if (i == 7)
+                row[7] = QStringLiteral("  "); // blank answer: skipped
+            rows << row;
+        }
+        writeXlsx("sondaggio.xlsx", rows);
+
+        QString error;
+        const Survey::Table table = Survey::readTable(path("sondaggio.xlsx"), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(table.size(), 21);
+
+        Project p;
+        QVERIFY(p.create(path("survey.tsra")));
+        const int groupsBefore = int(p.groups().size());
+        QList<Survey::Column> cols = Survey::proposeColumns(p, table);
+        QCOMPARE(cols.size(), 8);
+        using R = Survey::Role;
+        const QList<R> roles{R::Id, R::Variable, R::Variable, R::Variable, R::Variable, R::OpenAnswer,
+                             R::OpenAnswer, R::OpenAnswer};
+        for (int c = 0; c < cols.size(); ++c)
+            QVERIFY2(cols[c].role == roles[c], qPrintable(cols[c].name));
+        QCOMPARE(cols[1].type, VariableType::Integer);
+        QCOMPARE(cols[2].type, VariableType::Text);
+        QCOMPARE(cols[3].type, VariableType::Decimal);
+        QCOMPARE(cols[4].type, VariableType::Date);
+        QCOMPARE(cols[7].name, QString("Cosa cambieresti? (facoltativo)")); // header on one line
+
+        Survey::Options options;
+        options.columns = cols;
+        options.groupName = "Sondaggio 2024";
+        Survey::Report report;
+        QVERIFY2(Survey::importSurvey(p, table, options, &report, &error), qPrintable(error));
+        QCOMPARE(report.documents, 20);
+        QCOMPARE(report.codedAnswers, 58);
+        QCOMPARE(report.newCodes, 3);
+        QCOMPARE(report.newVariables, 4);
+
+        // 20 documents in the new group, named after the respondent ID.
+        QCOMPARE(p.groups().size(), groupsBefore + 1);
+        QCOMPARE(p.groups().last().name, QString("Sondaggio 2024"));
+        const QList<Document> docs = p.documentsInGroup(report.groupId);
+        QCOMPARE(docs.size(), 20);
+        QCOMPARE(docs.first().name, QString("R01"));
+
+        // Each answer is a paragraph after its question, coded with the question's code.
+        const QString answer1 = "Risposta 1 del rispondente 1, con qualche parola in più";
+        QCOMPARE(p.documentText(docs[0].id),
+                 questions[0] + "\n" + answer1 + "\n\n" + questions[1] + "\nRisposta 2 del rispondente 1, con "
+                 "qualche parola in più\n\nCosa cambieresti? (facoltativo)\nRisposta 3 del rispondente 1, con "
+                 "qualche parola in più");
+        QCOMPARE(p.codes().size(), 3);
+        const qint64 q1 = p.findCode(0, questions[0]);
+        QVERIFY(q1 > 0);
+        const QList<Segment> segs = p.segmentsForDocument(docs[0].id);
+        QCOMPARE(segs.size(), 3);
+        QCOMPARE(segs[0].codeId, q1);
+        QCOMPARE(p.documentText(docs[0].id).mid(segs[0].start, segs[0].length()), answer1);
+        QCOMPARE(p.segmentsForDocument(docs[4].id).size(), 2);
+        QVERIFY(!p.documentText(docs[4].id).contains(questions[1]));
+        QCOMPARE(p.segmentsForDocument(docs[6].id).size(), 2);
+        QCOMPARE(p.segmentCountByCode().value(q1), 20);
+
+        // Typed variables.
+        const QList<Variable> vars = p.variables();
+        QCOMPARE(vars.size(), 4);
+        QCOMPARE(vars[0].name, QString("Età"));
+        QCOMPARE(vars[0].type, VariableType::Integer);
+        QCOMPARE(vars[3].type, VariableType::Date);
+        QCOMPARE(p.variableValue(docs[2].id, vars[0].id), QString("23"));
+        QCOMPARE(p.variableValue(docs[2].id, vars[1].id), QString("F"));
+        QCOMPARE(p.variableValue(docs[1].id, vars[2].id), QString("5.5"));
+        QCOMPARE(p.variableValue(docs[2].id, vars[3].id), QString("2024-03-03"));
+
+        // The whole import is one undo step.
+        QCOMPARE(p.undoLabel(), QString("Importa dati di sondaggio"));
+        QVERIFY(p.undo());
+        QCOMPARE(p.groups().size(), groupsBefore);
+        QVERIFY(p.documents().isEmpty());
+        QVERIFY(p.codes().isEmpty());
+        QVERIFY(p.variables().isEmpty());
+        QVERIFY(!p.canUndo());
+        QVERIFY(p.redo());
+        QCOMPARE(p.documents().size(), 20);
+
+        // CSV, no ID column, existing variable and code reused, a respondent without answers skipped.
+        writeFile("sondaggio.csv", "Età;Opinione\n30;Mi trovo bene a lavorare da casa\n41;\n"
+                                   "abc;Preferisco l'ufficio, almeno qualche giorno\n");
+        const Survey::Table csv = Survey::readTable(path("sondaggio.csv"), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        cols = Survey::proposeColumns(p, csv);
+        QCOMPARE(cols.size(), 2);
+        QVERIFY(cols[0].existingVariable);
+        QCOMPARE(cols[0].role, R::Variable);
+        QCOMPARE(cols[0].type, VariableType::Integer);
+        QCOMPARE(cols[1].role, R::OpenAnswer);
+        cols[1].name = questions[0]; // reuses the code of the first survey
+        options.columns = cols;
+        options.groupName.clear();
+        QVERIFY2(Survey::importSurvey(p, csv, options, &report, &error), qPrintable(error));
+        QCOMPARE(report.documents, 2);
+        QCOMPARE(report.skippedRows, 1);
+        QCOMPARE(report.newCodes, 0);
+        QCOMPARE(report.newVariables, 0);
+        QCOMPARE(report.invalidValues.size(), 1); // "abc" is not an integer
+        const QList<Document> csvDocs = p.documentsInGroup(report.groupId);
+        QCOMPARE(csvDocs.size(), 2);
+        QCOMPARE(csvDocs[0].name, QString("Rispondente 1"));
+        QCOMPARE(csvDocs[1].name, QString("Rispondente 3"));
+        QCOMPARE(p.groups().last().name, QString("Sondaggio"));
+        QCOMPARE(p.segmentCountByCode().value(q1), 22);
+
+        // Nothing marked as an open answer: nothing is imported.
+        for (Survey::Column &c : options.columns)
+            c.role = R::Ignore;
+        const int docCount = int(p.documents().size());
+        QVERIFY(!Survey::importSurvey(p, csv, options, &report, &error));
+        QVERIFY(!error.isEmpty());
+        QCOMPARE(p.documents().size(), docCount);
     }
 
     void retrievalModes()

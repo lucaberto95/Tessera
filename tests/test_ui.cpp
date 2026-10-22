@@ -16,6 +16,7 @@
 #include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
+#include "ui/SurveyImportDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/VariablesDialog.h"
 
@@ -636,6 +637,73 @@ private slots:
         dlg.setCriterion(Cooccurrence::Criterion::SameDocument);
         QCOMPARE(dlg.matrix().count(a, b), 1);
         QCOMPARE(dlg.matrix().frequency(a), 1);
+    }
+
+    void surveyImportDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("survey.tsra")));
+        Survey::Table table{{"Rispondente", "Genere", "Età", "Cosa ti piace del lavoro da remoto?", "Vuota"}};
+        for (int i = 1; i <= 6; ++i)
+            table << QStringList{QString("P%1").arg(i), i % 2 ? "F" : "M", QString::number(30 + i),
+                                 QString("Risposta numero %1, scritta con calma e qualche dettaglio").arg(i), ""};
+        table << QStringList{"", "", "", "", ""}; // an empty row is not a respondent
+
+        SurveyImportDialog dlg(&p, table, "C:/dati/Sondaggio lavoro.xlsx");
+        dlg.show();
+        QCOMPARE(dlg.respondentCount(), 6);
+        Survey::Options o = dlg.options();
+        QCOMPARE(o.groupName, QString("Sondaggio lavoro"));
+        QVERIFY(o.codeAnswers);
+        using R = Survey::Role;
+        QCOMPARE(o.columns.size(), 5);
+        QCOMPARE(o.columns[0].role, R::Id);
+        QCOMPARE(o.columns[1].role, R::Variable);
+        QCOMPARE(o.columns[2].role, R::Variable);
+        QCOMPARE(o.columns[2].type, VariableType::Integer);
+        QCOMPARE(o.columns[3].role, R::OpenAnswer);
+        QCOMPARE(o.columns[4].role, R::Ignore);
+        shot(&dlg, "survey_import");
+
+        QPushButton *import = nullptr;
+        for (QPushButton *b : dlg.findChildren<QPushButton *>())
+            if (b->text() == QStringLiteral("Importa"))
+                import = b;
+        QVERIFY(import && import->isEnabled());
+
+        // One respondent ID: choosing another column releases the first.
+        dlg.setColumnRole(1, R::Id);
+        o = dlg.options();
+        QCOMPARE(o.columns[0].role, R::Ignore);
+        QCOMPARE(o.columns[1].role, R::Id);
+        dlg.setColumnRole(0, R::Id);
+        dlg.setColumnRole(1, R::Variable);
+        dlg.setColumnType(2, VariableType::Text);
+        QCOMPARE(dlg.options().columns[2].type, VariableType::Text);
+        dlg.setColumnType(2, VariableType::Integer);
+
+        // Without open answers there is nothing to import.
+        dlg.setColumnRole(3, R::Ignore);
+        QVERIFY(!import->isEnabled());
+        dlg.setColumnRole(3, R::OpenAnswer);
+        QVERIFY(import->isEnabled());
+
+        Survey::Report report;
+        QString error;
+        QVERIFY2(Survey::importSurvey(p, table, dlg.options(), &report, &error), qPrintable(error));
+        QCOMPARE(report.documents, 6);
+        QCOMPARE(p.documentsInGroup(report.groupId).first().name, QString("P1"));
+        QCOMPARE(p.codes().size(), 1);
+        QCOMPARE(p.variables().size(), 2);
+
+        // Variables already in the project keep their type.
+        SurveyImportDialog again(&p, table, "altro.csv");
+        QVERIFY(again.options().columns[2].existingVariable);
+        auto *columns = again.findChild<QTableWidget *>("surveyColumns");
+        QVERIFY(columns);
+        auto *ageType = qobject_cast<QComboBox *>(columns->cellWidget(2, 2));
+        QVERIFY(ageType && !ageType->isEnabled());
+        QCOMPARE(ageType->currentData().toInt(), int(VariableType::Integer));
     }
 
     void dialogs()

@@ -45,6 +45,7 @@ private:
     void exportQdpx();
     void newExampleProject();
     void importDocuments(qint64 groupId);
+    void importSurvey();
     void newTextDocument(qint64 groupId);
     void codeWithCurrent();
     void codeWithNewCode();
@@ -90,6 +91,7 @@ private:
     QAction *m_undo = nullptr;
     QAction *m_redo = nullptr;
     QAction *m_importDocs = nullptr;
+    QAction *m_importSurvey = nullptr;
     QAction *m_newTextDoc = nullptr;
     QAction *m_newGroup = nullptr;
     QAction *m_newDocumentSet = nullptr;

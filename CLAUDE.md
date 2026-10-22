@@ -71,6 +71,10 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata 
   VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
   Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
+  Xlsx           lettore .xlsx (QZipReader + XML): primo foglio dalle relazioni del workbook, stringhe condivise
+                 e inline, numeri, date dai formati numerici (seriale -> ISO, sistema 1904); servirà a #44 come scrittore
+  Survey         import di sondaggi (.xlsx/.csv): ruoli delle colonne (ID / variabile / risposta aperta / ignora),
+                 un documento per rispondente con le risposte codificate per domanda, variabili tipizzate
   TextUtils      newline, UTF-16 <-> code point, adattamento di intervalli/segmenti/link dopo modifiche, frasi/paragrafi
   DemoProject    progetto di esempio (3 interviste originali sul lavoro da remoto)
 src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWindow)
@@ -87,6 +91,7 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   MemoDialog     non modale (`Ui::editMemo/openMemo`, una finestra per memo): "Collegato a" con
                  `MemoLinkPicker` e drop di codici/documenti (`Ui::CodeMimeType`, `Ui::DocumentMimeType`);
                  testo e collegamenti si scrivono insieme al "Salva" (un passo di undo)
+  SurveyImportDialog  anteprima dell'import di sondaggi: ruolo e tipo per colonna, nome del gruppo, codifica per domanda
   MemoManager, VariablesDialog, SearchDialog, MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
@@ -185,6 +190,9 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - L'export CSV mette un apostrofo davanti alle celle che Excel eseguirebbe come formule (`= + - @`,
   non i numeri); `readCsv` lo toglie.
 - Gli attributi ODF hanno un namespace (`text:c`): `attributes().value(ns, "c")`, non `value("c")`.
+- XLSX: una data è solo un numero con uno stile di data (`cellXfs` in `styles.xml`, non `cellStyleXfs`);
+  nei codici di formato le parti tra virgolette e tra `[...]` non contano e `m` accanto a `h`/`s` sono minuti.
+  Il seriale 60 del sistema 1900 è il 29/02/1900 che non esiste: prima del 61 la base è 31/12/1899.
 - `Project::addSegment` rifiuta posizioni fuori dal testo. Durante la modifica del testo,
   `DocumentView` incorpora i segmenti aggiunti da altre parti (codifica automatica), riportandoli
   sul testo modificato: altrimenti il salvataggio li cancellerebbe. Lo stesso vale per i link
@@ -250,6 +258,10 @@ tabella `links`, migrazione v3; anche in QDPX).
 **#9** memo collegati a più elementi (finestra del memo non modale con "Collegato a", "Aggiungi…",
 "Rimuovi" e drop di codici/documenti; "Nuovo memo libero…" in Tutti i memo crea un memo `free`;
 tabella `memo_links`, migrazione v4; più `<NoteRef>` in QDPX).
+**#33** import di dati di sondaggio (menu Documenti ▸ "Importa dati di sondaggio (Excel/CSV)…", logica in
+`src/core/Survey.*` e `src/core/Xlsx.*`; solo la modalità "un documento per rispondente": testo = domanda + risposta
+per paragrafo, ogni risposta codificata con un codice di primo livello col nome della domanda (riusato se esiste);
+nuovo gruppo; rispondenti senza risposte aperte saltati; un solo passo di undo; dall'.xlsx si legge solo il primo foglio).
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.
