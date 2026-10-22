@@ -1,9 +1,10 @@
-﻿// Smoke tests for the widgets: build every view/dialog on the example project, exercise the main
+// Smoke tests for the widgets: build every view/dialog on the example project, exercise the main
 // interactions and optionally save screenshots (set TESSERA_SHOTS to a directory).
 #include "core/DemoProject.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
 #include "ui/CooccurrenceDialog.h"
+#include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
@@ -30,12 +31,14 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextDocument>
 #include <QTextEdit>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QUrl>
 
@@ -70,6 +73,12 @@ private slots:
         QVERIFY(DemoProject::populate(*m_project));
         QCOMPARE(m_project->documents().size(), 3);
         QCOMPARE(m_project->allSegments().size(), 11);
+        // The example dictionary finds something in every category.
+        QCOMPARE(m_project->dictionaries().size(), 1);
+        const Dictionaries::Analysis a = Dictionaries::analyze(*m_project, m_project->dictionaries().first().id);
+        QCOMPARE(a.categories.size(), 4);
+        for (const DictCategory &c : a.categories)
+            QVERIFY2(a.total(c.id) > 0, qPrintable(c.name));
     }
 
     void trees()
@@ -585,6 +594,84 @@ private slots:
         QCOMPARE(table->item(0, 1)->text(), QString("100.0 %"));
         QCOMPARE(table->item(1, 0)->text(), QString("Totale documenti"));
         QCOMPARE(table->item(1, 1)->text(), QString("1"));
+    }
+
+    void dictionaryDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("dictionary.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "D1", "Lavoro da casa. Il lavoro da remoto stanca.");
+        const qint64 d2 = p.addDocument(g, "D2", "Ufficio e orari fissi.");
+        const qint64 age = p.addVariable("Età", VariableType::Integer);
+        p.setVariableValue(d1, age, "40");
+        const qint64 dict = p.addDictionary("Lavoro");
+        const qint64 places = p.addDictCategory(dict, 0, "Luoghi");
+        const qint64 remote = p.addDictCategory(dict, places, "Remoto");
+        p.addDictEntry(places, "casa");
+        p.addDictEntry(places, "ufficio");
+        p.addDictEntry(remote, "da remoto");
+
+        DictionaryDialog dlg(&p, [d2] { return QList<qint64>{d2}; });
+        dlg.show();
+        QCOMPARE(dlg.currentDictionaryId(), dict);
+        auto *tree = dlg.findChild<QTreeWidget *>("dictionaryCategories");
+        QVERIFY(tree);
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 1);
+        QCOMPARE(tree->topLevelItem(0)->text(1), QString("2"));
+
+        // Typing an entry (several separated by commas) adds it to the selected category.
+        dlg.selectCategory(remote);
+        auto *entries = dlg.findChild<QListWidget *>("dictionaryEntries");
+        QVERIFY(entries);
+        QCOMPARE(entries->count(), 1);
+        auto *edit = dlg.findChild<QLineEdit *>();
+        QVERIFY(edit);
+        edit->setText("smart working, telelavor*");
+        QTest::keyClick(edit, Qt::Key_Return);
+        QCOMPARE(entries->count(), 3);
+        QCOMPARE(p.dictEntries(remote).size(), 3);
+        QCOMPARE(p.undoLabel(), QString("Nuova voce del dizionario"));
+        QVERIFY(p.undo()); // both entries in one step
+        QCOMPARE(entries->count(), 1);
+        shot(&dlg, "dictionary-editor");
+
+        dlg.runAnalysis();
+        auto *table = dlg.findChild<QTableWidget *>("dictionaryAnalysisTable");
+        QVERIFY(table);
+        QCOMPARE(table->rowCount(), 3); // two documents and the total
+        QCOMPARE(table->columnCount(), 4); // document, words, two categories
+        QCOMPARE(table->horizontalHeaderItem(3)->text(), QString("Luoghi > Remoto"));
+        QCOMPARE(table->item(0, 1)->text(), QString("8"));
+        QCOMPARE(table->item(0, 2)->text(), QString("2")); // casa + da remoto
+        QCOMPARE(table->item(0, 3)->text(), QString("1"));
+        QCOMPARE(table->item(1, 2)->text(), QString("1"));
+        QCOMPARE(table->item(2, 0)->text(), QString("Totale"));
+        QCOMPARE(table->item(2, 2)->text(), QString("3"));
+        dlg.setValues(DictionaryDialog::Values::PercentOfWords);
+        QCOMPARE(table->item(0, 2)->text(), QString("25.00 %"));
+        dlg.setWithVariables(true);
+        QCOMPARE(table->columnCount(), 5);
+        QCOMPARE(table->item(0, 4)->text(), QString("40"));
+        QCOMPARE(dlg.analysisTable().first().last(), QString("Età"));
+        dlg.findChild<QTabWidget *>()->setCurrentIndex(1);
+        shot(&dlg, "dictionary-analysis");
+
+        dlg.setActiveDocumentsOnly(true);
+        QCOMPARE(dlg.analysis().documents, QList<qint64>{d2});
+
+        // Automatic coding: one undo step, codes named after the categories.
+        dlg.setActiveDocumentsOnly(false);
+        QCOMPARE(dlg.autocode({remote}, {}, Dictionaries::Extent::Sentence), 1);
+        const qint64 code = p.findCode(p.findCode(p.findCode(0, "Lavoro"), "Luoghi"), "Remoto");
+        QVERIFY(code > 0);
+        const QList<Segment> segs = p.segments({}, {code});
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(p.documentText(d1).mid(segs[0].start, segs[0].length()), QString("Il lavoro da remoto stanca."));
+        QVERIFY(p.undo());
+        QVERIFY(p.codes().isEmpty());
+        QVERIFY(p.allSegments().isEmpty());
     }
 
     void cooccurrenceDialog()

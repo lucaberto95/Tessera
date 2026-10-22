@@ -55,6 +55,7 @@ private:
     void showRetrieval();
     void showCooccurrence();
     void showStats();
+    void showDictionaries();
     void showVariableFilter();
     void showVariables();
     void showMemos();
@@ -114,6 +115,7 @@ private:
     QAction *m_retrieval = nullptr;
     QAction *m_cooccurrence = nullptr;
     QAction *m_statsAction = nullptr;
+    QAction *m_dictionaries = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;
     QAction *m_exportSegmentsXlsx = nullptr;
     QAction *m_exportSegmentsCsv = nullptr;

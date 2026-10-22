@@ -108,6 +108,29 @@ struct Variable {
     QString uuid;
 };
 
+// Dictionary for dictionary-based content analysis: a tree of categories, each with word patterns.
+struct Dictionary {
+    qint64 id = 0;
+    QString name;
+    int position = 0;
+    QString uuid;
+};
+
+struct DictCategory {
+    qint64 id = 0;
+    qint64 dictionaryId = 0;
+    qint64 parentId = 0; // 0 = top level
+    QString name;
+    int position = 0;
+};
+
+// A word or expression of several words; '*' matches any run of letters inside a word ("lavor*").
+struct DictEntry {
+    qint64 id = 0;
+    qint64 categoryId = 0;
+    QString pattern;
+};
+
 QString memoTargetToString(MemoTarget t);
 MemoTarget memoTargetFromString(const QString &s);
 QString variableTypeToString(VariableType t);

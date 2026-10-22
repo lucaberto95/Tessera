@@ -1,4 +1,5 @@
 #include "core/Cooccurrence.h"
+#include "core/Dictionaries.h"
 #include "core/Exporters.h"
 #include "core/Importers.h"
 #include "core/Project.h"
@@ -2260,6 +2261,277 @@ private slots:
         const QList<qint64> vars = Stats::codesToVariables(p, {c}, Stats::Measure::Segments);
         QCOMPARE(vars.size(), 1);
         QCOMPARE(p.variables().last().name, QString("Segmenti: Tema %2 (2)"));
+    }
+
+    // ---------------------------------------------------------------- dictionaries (#19)
+
+    void dictionaryTokenizeAndWildcards()
+    {
+        const QString text = "L'azienda, smart-working!";
+        QStringList words;
+        for (const Dictionaries::Token &t : Dictionaries::tokenize(text))
+            words << text.mid(t.start, t.end - t.start);
+        QCOMPARE(words, QStringList({"L", "azienda", "smart", "working"}));
+        QCOMPARE(Dictionaries::tokenize(QString::fromUtf8("ciao \xF0\x9F\x98\x80 mondo")).size(), 2); // emoji: no word
+        QCOMPARE(Dictionaries::tokenize(QString::fromUtf8("\xF0\x9D\x90\x80" "bc")).size(), 1); // letter outside the BMP
+
+        auto found = [](const QString &text, const QStringList &patterns, bool caseSensitive = false) {
+            QStringList out;
+            for (const Dictionaries::Match &m : Dictionaries::findMatches(text, patterns, caseSensitive))
+                out << text.mid(m.start, m.end - m.start);
+            return out;
+        };
+        QCOMPARE(found("Il lavoro e i lavoratori collaborano. LAVORARE stanca; lavor.", {"lavor*"}),
+                 QStringList({"lavoro", "lavoratori", "LAVORARE", "lavor"}));
+        QCOMPARE(found("Veramente e solamente mente, non mentre.", {"*mente"}),
+                 QStringList({"Veramente", "solamente", "mente"}));
+        QCOMPARE(found("lavoro, lo, lavori", {"l*o"}), QStringList({"lavoro", "lo"}));
+        QCOMPARE(found("Roma e roma", {"Roma"}, true), QStringList({"Roma"}));
+        QCOMPARE(found("Roma e roma", {"Roma"}), QStringList({"Roma", "roma"}));
+        // Accents compare in composed form: "perché" written with a combining accent still matches.
+        QCOMPARE(found(QString::fromUtf8("perche\xCC\x81 no"), {QString::fromUtf8("perch\xC3\xA9")}).size(), 1);
+        QVERIFY(found("testo", {"", "...", "*"}).size() == 1); // empty patterns never match, '*' matches any word
+    }
+
+    void dictionaryMultiWordExpressions()
+    {
+        const QString text = "Lavoro da casa, ma il lavoro\nda  casa stanca. Lavoro da remoto.";
+        const QList<Dictionaries::Match> m = Dictionaries::findMatches(text, {"lavoro", "lavoro da casa"});
+        QCOMPARE(m.size(), 3);
+        // The longest expression wins over the single word, across punctuation and line breaks.
+        QCOMPARE(text.mid(m[0].start, m[0].end - m[0].start), QString("Lavoro da casa"));
+        QCOMPARE(m[0].pattern, 1);
+        QCOMPARE(text.mid(m[1].start, m[1].end - m[1].start), QString("lavoro\nda  casa"));
+        QCOMPARE(m[1].pattern, 1);
+        QCOMPARE(text.mid(m[2].start, m[2].end - m[2].start), QString("Lavoro"));
+        QCOMPARE(m[2].pattern, 0);
+
+        QCOMPARE(Dictionaries::findMatches("Faccio smart-working.", {"smart working"}).size(), 1);
+        QCOMPARE(Dictionaries::findMatches("dell'azienda e dell azienda", {"dell'azienda"}).size(), 2);
+        const QString t2 = "lavoro da casa, lavoratori da remoto, lavoro in ufficio";
+        QCOMPARE(Dictionaries::findMatches(t2, {"lavor* da *"}).size(), 2);
+        QVERIFY(Dictionaries::findMatches("lavoro da", {"lavoro da casa"}).isEmpty()); // text ends first
+    }
+
+private:
+    // Dictionary "Lavoro": Luoghi (casa, ufficio) > Remoto (da remoto, smart working); Tempo (ora*, tempo).
+    struct DictionaryFixture {
+        qint64 d1 = 0, d2 = 0, dict = 0, luoghi = 0, remoto = 0, tempo = 0;
+    };
+    DictionaryFixture makeDictionaryProject(Project &p)
+    {
+        DictionaryFixture f;
+        const qint64 g = p.groups().first().id;
+        f.d1 = p.addDocument(g, "D1", "Lavoro da casa. In ufficio solo il lunedì. Lavoro da remoto da anni.");
+        f.d2 = p.addDocument(g, "D2", "Gli orari sono flessibili: smart working tutto il tempo.");
+        f.dict = p.addDictionary("Lavoro");
+        f.luoghi = p.addDictCategory(f.dict, 0, "Luoghi");
+        f.remoto = p.addDictCategory(f.dict, f.luoghi, "Remoto");
+        f.tempo = p.addDictCategory(f.dict, 0, "Tempo");
+        p.addDictEntry(f.luoghi, "casa");
+        p.addDictEntry(f.luoghi, "ufficio");
+        p.addDictEntry(f.remoto, "da remoto");
+        p.addDictEntry(f.remoto, "smart working");
+        p.addDictEntry(f.tempo, "ora*");
+        p.addDictEntry(f.tempo, "tempo");
+        return f;
+    }
+
+private slots:
+    void dictionaryProjectCrudAndUndo()
+    {
+        Project p;
+        QVERIFY(p.create(path("dict.tsra")));
+        QSignalSpy spy(&p, &Project::dictionariesChanged);
+        const DictionaryFixture f = makeDictionaryProject(p);
+        QVERIFY(spy.count() > 0);
+        QCOMPARE(p.dictionaries().size(), 1);
+        QList<qint64> order;
+        for (const DictCategory &c : p.dictCategories(f.dict))
+            order << c.id;
+        QCOMPARE(order, QList<qint64>({f.luoghi, f.remoto, f.tempo})); // tree order
+        QCOMPARE(p.dictCategoryPath(f.remoto), QString("Luoghi > Remoto"));
+        QCOMPARE(p.findDictCategory(f.dict, f.luoghi, "Remoto"), f.remoto);
+        QCOMPARE(p.dictEntriesOfDictionary(f.dict).size(), 6);
+
+        // Same pattern ignoring case and spacing: the existing entry.
+        const qint64 casa = p.dictEntries(f.luoghi).first().id;
+        QCOMPARE(p.addDictEntry(f.luoghi, "  CASA "), casa);
+        QCOMPARE(p.addDictEntry(f.luoghi, "   "), qint64(0));
+        QVERIFY(p.setDictEntryPattern(casa, "casa*"));
+        QCOMPARE(p.dictEntries(f.luoghi).first().pattern, QString("casa*"));
+        QVERIFY(p.undo());
+        QCOMPARE(p.dictEntries(f.luoghi).first().pattern, QString("casa"));
+
+        // A subcategory cannot hang from a category of another dictionary.
+        const qint64 other = p.addDictionary("Altro");
+        QCOMPARE(p.addDictCategory(other, f.luoghi, "X"), qint64(0));
+
+        // Deleting a dictionary takes its categories and entries; one undo brings everything back.
+        QVERIFY(p.deleteDictionary(f.dict));
+        QVERIFY(p.dictCategories(f.dict).isEmpty());
+        QVERIFY(p.dictEntriesOfDictionary(f.dict).isEmpty());
+        QVERIFY(p.undo());
+        QCOMPARE(p.dictCategories(f.dict).size(), 3);
+        QCOMPARE(p.dictEntriesOfDictionary(f.dict).size(), 6);
+        QVERIFY(p.deleteDictCategory(f.luoghi)); // with its subcategory
+        QCOMPARE(p.dictCategories(f.dict).size(), 1);
+        QCOMPARE(p.dictEntriesOfDictionary(f.dict).size(), 2);
+        QVERIFY(p.undo());
+
+        p.close();
+        Project q;
+        QVERIFY(q.open(path("dict.tsra")));
+        QCOMPARE(q.dictionary(f.dict).name, QString("Lavoro"));
+        QCOMPARE(q.dictCategory(f.remoto).parentId, f.luoghi);
+        QCOMPARE(q.dictEntries(f.tempo).size(), 2);
+    }
+
+    void dictionaryTablesAddedByMigration()
+    {
+        {
+            Project old;
+            old.setMigrations(Project::builtInMigrations().mid(0, 3)); // schema version 4
+            QVERIFY(old.create(path("dict-old.tsra")));
+        }
+        QCOMPARE(fileVersion(path("dict-old.tsra")), 4);
+        Project p;
+        QVERIFY(p.open(path("dict-old.tsra")));
+        const qint64 d = p.addDictionary("Nuovo");
+        QVERIFY(d > 0);
+        QVERIFY(p.addDictEntry(p.addDictCategory(d, 0, "C"), "parola") > 0);
+        QVERIFY(p.undo());
+        QVERIFY(p.dictEntriesOfDictionary(d).isEmpty());
+    }
+
+    void dictionaryCountsPerDocument()
+    {
+        Project p;
+        QVERIFY(p.create(path("dict-counts.tsra")));
+        const DictionaryFixture f = makeDictionaryProject(p);
+        const Dictionaries::Analysis a = Dictionaries::analyze(p, f.dict);
+        QCOMPARE(a.documents, QList<qint64>({f.d1, f.d2}));
+        QCOMPARE(a.words.value(f.d1), 13);
+        QCOMPARE(a.words.value(f.d2), 9);
+        QCOMPARE(a.totalWords(), 22);
+
+        // A category counts its subcategories too.
+        QCOMPARE(a.count(f.remoto, f.d1), 1);
+        QCOMPARE(a.count(f.luoghi, f.d1), 3);
+        QCOMPARE(a.count(f.tempo, f.d1), 0);
+        QCOMPARE(a.count(f.remoto, f.d2), 1);
+        QCOMPARE(a.count(f.luoghi, f.d2), 1);
+        QCOMPARE(a.count(f.tempo, f.d2), 2); // "orari", "tempo"
+        QCOMPARE(a.total(f.luoghi), 4);
+        QVERIFY(qAbs(a.percent(f.tempo, f.d2) - 200.0 / 9) < 1e-9);
+        QCOMPARE(a.depth(f.remoto), 1);
+        QCOMPARE(a.depth(f.tempo), 0);
+
+        const QString text1 = p.documentText(f.d1);
+        const QList<Dictionaries::Hit> hits = a.hits.value(f.remoto);
+        QCOMPARE(hits.size(), 2);
+        QCOMPARE(hits[0].documentId, f.d1);
+        QCOMPARE(text1.mid(hits[0].start, hits[0].end - hits[0].start), QString("da remoto"));
+
+        const Dictionaries::Analysis only2 = Dictionaries::analyze(p, f.dict, {f.d2});
+        QCOMPARE(only2.documents, QList<qint64>({f.d2}));
+        QCOMPARE(only2.total(f.luoghi), 1);
+    }
+
+    void dictionaryAutocodeIsOneUndoStep()
+    {
+        Project p;
+        QVERIFY(p.create(path("dict-autocode.tsra")));
+        const DictionaryFixture f = makeDictionaryProject(p);
+        const Dictionaries::Analysis a = Dictionaries::analyze(p, f.dict);
+        const QString labelBefore = p.undoLabel();
+
+        QHash<qint64, qint64> used;
+        QCOMPARE(Dictionaries::autocode(p, a, {f.remoto, f.tempo}, {}, Dictionaries::Extent::Word, &used), 4);
+        // New codes mirror the categories under a code named after the dictionary.
+        const qint64 root = p.findCode(0, "Lavoro");
+        QVERIFY(root > 0);
+        const qint64 luoghiCode = p.findCode(root, "Luoghi");
+        QCOMPARE(used.value(f.remoto), p.findCode(luoghiCode, "Remoto"));
+        QCOMPARE(used.value(f.tempo), p.findCode(root, "Tempo"));
+        QCOMPARE(p.codes().size(), 4);
+        const QList<Segment> remote = p.segments({}, {used.value(f.remoto)});
+        QCOMPARE(remote.size(), 2);
+        QCOMPARE(p.documentText(f.d2).mid(remote[1].start, remote[1].length()), QString("smart working"));
+
+        // One undo removes codes and segments together; redo restores them.
+        QCOMPARE(p.undoLabel(), QString("Codifica automatica con il dizionario"));
+        QVERIFY(p.undo());
+        QVERIFY(p.codes().isEmpty());
+        QVERIFY(p.allSegments().isEmpty());
+        QCOMPARE(p.undoLabel(), labelBefore);
+        QVERIFY(p.redo());
+        QCOMPARE(p.codes().size(), 4);
+        QCOMPARE(p.allSegments().size(), 4);
+
+        // Running it again adds nothing; an existing code and the sentence extent can be chosen.
+        QCOMPARE(Dictionaries::autocode(p, a, {f.remoto, f.tempo}, {}, Dictionaries::Extent::Word), 0);
+        const qint64 existing = p.addCode(0, "Tempi", Qt::blue);
+        QCOMPARE(Dictionaries::autocode(p, a, {f.tempo}, {{f.tempo, existing}}, Dictionaries::Extent::Sentence), 1);
+        const QList<Segment> sentence = p.segments({}, {existing});
+        QCOMPARE(sentence.size(), 1); // both occurrences are in the same sentence
+        QCOMPARE(p.documentText(f.d2).mid(sentence[0].start, sentence[0].length()),
+                 QString("Gli orari sono flessibili: smart working tutto il tempo."));
+    }
+
+    void dictionaryCountsToVariables()
+    {
+        Project p;
+        QVERIFY(p.create(path("dict-vars.tsra")));
+        const DictionaryFixture f = makeDictionaryProject(p);
+        const Dictionaries::Analysis a = Dictionaries::analyze(p, f.dict);
+        p.addVariable("Lavoro: Tempo", VariableType::Text); // forces the " (2)" suffix
+        const QList<qint64> vars = Dictionaries::countsToVariables(p, a, {f.remoto, f.tempo});
+        QCOMPARE(vars.size(), 2);
+        QCOMPARE(p.variables()[1].name, QString("Lavoro: Luoghi > Remoto"));
+        QCOMPARE(p.variables()[1].type, VariableType::Integer);
+        QCOMPARE(p.variables()[2].name, QString("Lavoro: Tempo (2)"));
+        QCOMPARE(p.variableValue(f.d1, vars[0]), QString("1"));
+        QCOMPARE(p.variableValue(f.d1, vars[1]), QString("0"));
+        QCOMPARE(p.variableValue(f.d2, vars[1]), QString("2"));
+        QVERIFY(p.undo());
+        QCOMPARE(p.variables().size(), 1);
+    }
+
+    void dictionaryImportExport()
+    {
+        Project p;
+        QVERIFY(p.create(path("dict-io.tsra")));
+        const DictionaryFixture f = makeDictionaryProject(p);
+        QVERIFY(p.addDictCategory(f.dict, 0, "Vuota") > 0);
+        const QList<QStringList> table = Dictionaries::toTable(p, f.dict);
+        QCOMPARE(table.first(), QStringList({"Categoria", "Voce"}));
+        QVERIFY(table.contains(QStringList({"Luoghi > Remoto", "da remoto"})));
+        QVERIFY(table.contains(QStringList({"Vuota", ""})));
+        QCOMPARE(table.size(), 8); // header + 6 entries + the empty category
+
+        QString err;
+        for (const QString name : {QString("dict.csv"), QString("dict.xlsx")}) {
+            QVERIFY2(Dictionaries::exportFile(p, f.dict, path(name), &err), qPrintable(err));
+            const qint64 copy = p.addDictionary("Copia " + name);
+            QCOMPARE(Dictionaries::importFile(p, copy, 0, path(name), &err), 6);
+            QCOMPARE(Dictionaries::toTable(p, copy), table);
+            // Importing again adds nothing, in one undo step.
+            QCOMPARE(Dictionaries::importFile(p, copy, 0, path(name), &err), 0);
+        }
+
+        // Word lists: one entry per line, comments and duplicates skipped; a new category is named after the file.
+        writeFile("Emozioni.txt", "# elenco\ngioia\n\nrabbia\nGIOIA\npaur*\n");
+        QCOMPARE(Dictionaries::importFile(p, f.dict, 0, path("Emozioni.txt"), &err), 3);
+        const qint64 emotions = p.findDictCategory(f.dict, 0, "Emozioni");
+        QVERIFY(emotions > 0);
+        QCOMPARE(p.dictEntries(emotions).size(), 3);
+        QVERIFY(p.undo()); // category and entries together
+        QCOMPARE(p.findDictCategory(f.dict, 0, "Emozioni"), qint64(0));
+        QCOMPARE(Dictionaries::importFile(p, f.dict, f.tempo, path("Emozioni.txt"), &err), 3);
+        QCOMPARE(p.dictEntries(f.tempo).size(), 5);
+        QCOMPARE(Dictionaries::importFile(p, f.dict, 0, path("missing.txt"), &err), -1);
+        QVERIFY(!err.isEmpty());
     }
 };
 

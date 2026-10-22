@@ -25,6 +25,7 @@ qt_add_library(tessera_core STATIC
     src/core/VariableFilter.h src/core/VariableFilter.cpp
     src/core/Xlsx.h src/core/Xlsx.cpp
     src/core/Survey.h src/core/Survey.cpp
+    src/core/Dictionaries.h src/core/Dictionaries.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
 )
 target_include_directories(tessera_core PUBLIC src)
@@ -54,6 +55,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/StatsDialog.h src/ui/StatsDialog.cpp
     src/ui/VariableFilterDialog.h src/ui/VariableFilterDialog.cpp
     src/ui/SurveyImportDialog.h src/ui/SurveyImportDialog.cpp
+    src/ui/DictionaryDialog.h src/ui/DictionaryDialog.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg)

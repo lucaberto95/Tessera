@@ -62,13 +62,17 @@ Con `-platform offscreen` i test girano senza aprire finestre sullo schermo dell
 
 ```
 src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata da app e test)
-  Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, DocumentLink, Memo, Variable
+  Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, DocumentLink, Memo, Variable,
+                 Dictionary, DictCategory, DictEntry
   Project        unica fonte di verità: file SQLite .tsra, CRUD, segnali, batch, undo/redo
   Importers      TXT/MD, DOCX, ODT (QZipReader privato + XML), RTF (parser proprio), PDF (QtPdf), HTML
   Retrieval      recupero complesso dei segmenti (intersezione, sovrapposizione, vicinanza...) su segmenti in memoria
   Cooccurrence   matrice codici × codici (sovrapposizione / vicinanza / stesso documento), Jaccard e layout force-directed
   Stats          statistiche descrittive delle variabili, gruppi di documenti, tabelle incrociate codici × gruppi, codici -> variabili
   VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
+  Dictionaries   analisi basata su dizionario: `tokenize` (parole), `findMatches` (jolly `*`, espressioni di più
+                 parole, il più lungo vince), `analyze` (documenti × categorie), `autocode`, `countsToVariables`,
+                 import/export (tabella Categoria/Voce in .xlsx/.csv, elenco di parole .txt)
   Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV;
                  tabelle di documenti/memo, etichette dei bersagli dei memo, fogli .xlsx (`*Sheet`, `projectSheets`)
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
@@ -94,6 +98,8 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
                  `MemoLinkPicker` e drop di codici/documenti (`Ui::CodeMimeType`, `Ui::DocumentMimeType`);
                  testo e collegamenti si scrivono insieme al "Salva" (un passo di undo)
   SurveyImportDialog  anteprima dell'import di sondaggi: ruolo e tipo per colonna, nome del gruppo, codifica per domanda
+  DictionaryDialog  non modale: scheda "Categorie e voci" (albero + voci, import/export) e scheda "Analisi"
+                 (tabella documenti × categorie, conteggi o %, variabili; codifica automatica; conteggi -> variabili)
   MemoManager, VariablesDialog, SearchDialog, MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
@@ -104,7 +110,7 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   "Salva una copia" usa `VACUUM INTO`.
 - **Segnali.** Dopo ogni scrittura `Project` emette `groupsChanged`, `documentsChanged`,
   `documentSetsChanged`, `codesChanged`, `segmentsChanged(docId|0)`, `memosChanged`, `variablesChanged`,
-  `linksChanged`. Le viste si
+  `linksChanged`, `dictionariesChanged`. Le viste si
   ricostruiscono da questi segnali; non modificano mai il proprio stato al posto del Project
   (es. il drop nel `CodeTree` imposta `IgnoreAction` e chiama `moveCode`).
 - **Batch.** `beginBatch()/commitBatch()` = una transazione, segnali rimandati al commit e **un solo
@@ -145,6 +151,14 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   elemento collegato ha un `<NoteRef>` alla stessa `<Note>`; all'import il primo riferimento crea il
   memo e gli altri diventano collegamenti; una nota riferita solo dal progetto è il memo del progetto,
   una nota senza riferimenti è un memo libero. I memo di gruppi e set restano solo `Description`.
+- **Dizionari** (`dictionaries`, `dict_categories`, `dict_entries`, migrazione v5): categorie ad albero dentro
+  un dizionario (`parent_id` con cascata), voci = parole o espressioni con `*` come jolly dentro la parola.
+  Il confronto è per parole (`Dictionaries::tokenize`: lettere, cifre e segni combinanti; apostrofi e
+  trattini separano), in NFC e senza maiuscole salvo opzione: le espressioni ignorano punteggiatura e a capo.
+  Per ogni categoria le occorrenze non si sovrappongono (a ogni parola vince la voce più lunga) e una
+  categoria conta anche le voci delle sottocategorie. `autocode` crea i codici mancanti sotto un codice col
+  nome del dizionario, con la struttura delle categorie (`findCode` li riusa), in un solo batch. I dizionari
+  non vanno in QDPX. La tokenizzazione è qui in attesa delle frequenze di parole (#18), che dovrebbero riusarla.
 - **Posizioni nel testo** = indici UTF-16 (`QString`) nel testo semplice con `\n`. QDPX usa code
   point Unicode: convertire con `TextUtils` (test con emoji). In import QDPX i CRLF vengono
   normalizzati rimappando le posizioni.
@@ -214,6 +228,11 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - Un widget riceve un `QDropEvent` solo dopo aver accettato il `QDragEnterEvent`: nei test mandare
   prima l'enter. I campi di testo accettano già i drop come testo: per trasformarli in altro serve
   un event filter (vedi `MemoDialog::eventFilter`, sul `viewport()` del `QPlainTextEdit`).
+- In un `QDialog` i `QPushButton` sono `autoDefault`: Invio in un `QLineEdit` (oltre a `returnPressed`)
+  preme il primo pulsante, e se apre un dialogo modale il test resta appeso fino al timeout. Nei dialoghi
+  con un campo che reagisce a Invio togliere `autoDefault` ai pulsanti (vedi `DictionaryDialog`).
+- moc rifiuta struct e funzioni di supporto dentro `private slots:` dei test ("Not a signal or slot
+  declaration"): metterle in una sezione `private:`.
 - Da PowerShell 5.1 `Get-Content` legge come ANSI i file UTF-8 senza BOM e `Set-Content -Encoding utf8`
   aggiunge il BOM: per riscrivere un sorgente usare Edit, o `[IO.File]::ReadAllText/WriteAllText`.
 
@@ -276,6 +295,10 @@ nuovo gruppo; rispondenti senza risposte aperte saltati; un solo passo di undo; 
 nel pannello dei segmenti, filtro .xlsx nei dialoghi di salvataggio di codebook, variabili, memo, matrice,
 co-occorrenze e statistiche, il CSV resta; menu Progetto ▸ "Esporta tutto il progetto in Excel…" = 5 fogli;
 heatmap e colori dei codici come riempimenti statici, non formattazione condizionale; `Ui::saveXlsx` avvisa delle celle troncate).
+**#19** dizionari e codifica automatica con dizionario (menu Analisi ▸ "Dizionari e analisi del contenuto…", logica in
+`src/core/Dictionaries.*`; tabelle `dictionaries`/`dict_categories`/`dict_entries`, migrazione v5; il progetto di
+esempio ha un dizionario; non incluso: aggiungere parole dalla tabella delle frequenze, che dipende da #18 ancora aperta,
+e le regole di disambiguazione).
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.

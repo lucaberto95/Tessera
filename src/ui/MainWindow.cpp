@@ -10,6 +10,7 @@
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
 #include "ui/CooccurrenceDialog.h"
+#include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
 #include "ui/MatrixDialog.h"
 #include "ui/RetrievalDialog.h"
@@ -186,6 +187,7 @@ void MainWindow::createActions()
     m_retrieval = make(tr("Recupero &complesso…"), &MainWindow::showRetrieval, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
     m_cooccurrence = make(tr("Co-&occorrenze dei codici…"), &MainWindow::showCooccurrence);
     m_statsAction = make(tr("&Statistiche e tabelle incrociate…"), &MainWindow::showStats);
+    m_dictionaries = make(tr("&Dizionari e analisi del contenuto…"), &MainWindow::showDictionaries);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
     m_exportSegmentsXlsx = make(tr("Esporta segmenti recuperati (&Excel .xlsx)…"), [this] { m_segments->exportXlsx(); });
     m_exportSegmentsCsv = make(tr("Esporta segmenti recuperati (CS&V per Excel)…"), [this] { m_segments->exportCsv(); });
@@ -259,6 +261,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_retrieval);
     analysis->addAction(m_cooccurrence);
     analysis->addAction(m_statsAction);
+    analysis->addAction(m_dictionaries);
     analysis->addAction(m_activateByVariables);
     analysis->addSeparator();
     analysis->addAction(m_exportSegmentsHtml);
@@ -800,6 +803,15 @@ void MainWindow::showStats()
 {
     auto *dlg = new StatsDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showDictionaries()
+{
+    auto *dlg = new DictionaryDialog(m_project, [this] { return m_documents->activeDocumentIds(); }, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &DictionaryDialog::documentActivated, this, [this](qint64 doc) { m_view->openDocument(doc); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

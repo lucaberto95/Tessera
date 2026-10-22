@@ -374,6 +374,7 @@ void Project::emitAllChanged()
     emit memosChanged();
     emit variablesChanged();
     emit linksChanged();
+    emit dictionariesChanged();
 }
 
 // ---------------------------------------------------------------- undo / redo
@@ -391,7 +392,8 @@ bool Project::installUndoTriggers()
         return false;
     static const char *const tables[] = {"document_groups", "documents", "codes", "segments",
                                          "memos", "variables", "variable_values",
-                                         "document_sets", "document_set_members", "links", "memo_links"};
+                                         "document_sets", "document_set_members", "links", "memo_links",
+                                         "dictionaries", "dict_categories", "dict_entries"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -591,6 +593,22 @@ QList<Project::Migration> Project::builtInMigrations()
                          " target_type TEXT NOT NULL, target_id INTEGER NOT NULL,"
                          " UNIQUE (memo_id, target_type, target_id))"),
           QStringLiteral("CREATE INDEX idx_memo_links_target ON memo_links(target_type, target_id)")}},
+        {5,
+         {// Dictionaries for content analysis (issue #19).
+          QStringLiteral("CREATE TABLE dictionaries ("
+                         " id INTEGER PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,"
+                         " uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE TABLE dict_categories ("
+                         " id INTEGER PRIMARY KEY,"
+                         " dictionary_id INTEGER NOT NULL REFERENCES dictionaries(id) ON DELETE CASCADE,"
+                         " parent_id INTEGER REFERENCES dict_categories(id) ON DELETE CASCADE,"
+                         " name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0)"),
+          QStringLiteral("CREATE INDEX idx_dict_categories_dictionary ON dict_categories(dictionary_id)"),
+          QStringLiteral("CREATE TABLE dict_entries ("
+                         " id INTEGER PRIMARY KEY,"
+                         " category_id INTEGER NOT NULL REFERENCES dict_categories(id) ON DELETE CASCADE,"
+                         " pattern TEXT NOT NULL)"),
+          QStringLiteral("CREATE INDEX idx_dict_entries_category ON dict_entries(category_id)")}},
     };
 }
 
@@ -1741,4 +1759,234 @@ QHash<qint64, QHash<qint64, QString>> Project::allVariableValues() const
     while (q.next())
         out[q.value(0).toLongLong()].insert(q.value(1).toLongLong(), q.value(2).toString());
     return out;
+}
+
+// ---------------------------------------------------------------- dictionaries
+
+QList<Dictionary> Project::dictionaries() const
+{
+    QList<Dictionary> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id, name, position, uuid FROM dictionaries ORDER BY position, id"));
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toInt(), q.value(3).toString()});
+    return out;
+}
+
+Dictionary Project::dictionary(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, name, position, uuid FROM dictionaries WHERE id = ?"));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return {q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toInt(), q.value(3).toString()};
+    return {};
+}
+
+qint64 Project::addDictionary(const QString &name, const QString &uuid)
+{
+    setUndoLabel(tr("Nuovo dizionario"));
+    const qint64 id = insert(QStringLiteral("INSERT INTO dictionaries(name, position, uuid) VALUES (?, ?, ?)"),
+                             {name, nextPosition(QStringLiteral("dictionaries")), uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notify(&Project::dictionariesChanged);
+    return id;
+}
+
+bool Project::renameDictionary(qint64 id, const QString &name)
+{
+    setUndoLabel(tr("Rinomina dizionario"));
+    if (!exec(QStringLiteral("UPDATE dictionaries SET name = ? WHERE id = ?"), {name, id}))
+        return false;
+    notify(&Project::dictionariesChanged);
+    return true;
+}
+
+bool Project::deleteDictionary(qint64 id)
+{
+    setUndoLabel(tr("Elimina dizionario"));
+    if (!exec(QStringLiteral("DELETE FROM dictionaries WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::dictionariesChanged);
+    return true;
+}
+
+namespace {
+
+DictCategory readDictCategory(const QSqlQuery &q)
+{
+    DictCategory c;
+    c.id = q.value(0).toLongLong();
+    c.dictionaryId = q.value(1).toLongLong();
+    c.parentId = q.value(2).isNull() ? 0 : q.value(2).toLongLong();
+    c.name = q.value(3).toString();
+    c.position = q.value(4).toInt();
+    return c;
+}
+
+} // namespace
+
+QList<DictCategory> Project::dictCategories(qint64 dictionaryId) const
+{
+    QList<DictCategory> all;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, dictionary_id, parent_id, name, position FROM dict_categories"
+                             " WHERE dictionary_id = ? ORDER BY position, id"));
+    q.addBindValue(dictionaryId);
+    q.exec();
+    while (q.next())
+        all << readDictCategory(q);
+
+    QHash<qint64, QList<DictCategory>> children;
+    for (const DictCategory &c : all)
+        children[c.parentId] << c;
+    QList<DictCategory> out;
+    out.reserve(all.size());
+    QList<DictCategory> pending; // iterative DFS: children pushed in reverse pop in order
+    for (auto it = children.value(0).crbegin(); it != children.value(0).crend(); ++it)
+        pending << *it;
+    while (!pending.isEmpty()) {
+        const DictCategory c = pending.takeLast();
+        out << c;
+        const QList<DictCategory> kids = children.value(c.id);
+        for (auto it = kids.crbegin(); it != kids.crend(); ++it)
+            pending << *it;
+    }
+    return out;
+}
+
+DictCategory Project::dictCategory(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, dictionary_id, parent_id, name, position FROM dict_categories WHERE id = ?"));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return readDictCategory(q);
+    return {};
+}
+
+qint64 Project::addDictCategory(qint64 dictionaryId, qint64 parentId, const QString &name)
+{
+    setUndoLabel(tr("Nuova categoria"));
+    // A subcategory must belong to the same dictionary as its parent.
+    if (parentId > 0 && dictCategory(parentId).dictionaryId != dictionaryId) {
+        fail(tr("La categoria superiore appartiene a un altro dizionario"));
+        return 0;
+    }
+    const int pos = parentId > 0
+        ? nextPosition(QStringLiteral("dict_categories"), QStringLiteral("parent_id = ?"), {parentId})
+        : nextPosition(QStringLiteral("dict_categories"), QStringLiteral("dictionary_id = ? AND parent_id IS NULL"),
+                       {dictionaryId});
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO dict_categories(dictionary_id, parent_id, name, position) VALUES (?, ?, ?, ?)"),
+        {dictionaryId, idOrNull(parentId), name, pos});
+    if (id)
+        notify(&Project::dictionariesChanged);
+    return id;
+}
+
+bool Project::renameDictCategory(qint64 id, const QString &name)
+{
+    setUndoLabel(tr("Rinomina categoria"));
+    if (!exec(QStringLiteral("UPDATE dict_categories SET name = ? WHERE id = ?"), {name, id}))
+        return false;
+    notify(&Project::dictionariesChanged);
+    return true;
+}
+
+bool Project::deleteDictCategory(qint64 id)
+{
+    setUndoLabel(tr("Elimina categoria"));
+    if (!exec(QStringLiteral("DELETE FROM dict_categories WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::dictionariesChanged);
+    return true;
+}
+
+qint64 Project::findDictCategory(qint64 dictionaryId, qint64 parentId, const QString &name) const
+{
+    return parentId > 0
+        ? scalar(QStringLiteral("SELECT id FROM dict_categories WHERE dictionary_id = ? AND parent_id = ? AND name = ?"),
+                 {dictionaryId, parentId, name}).toLongLong()
+        : scalar(QStringLiteral("SELECT id FROM dict_categories WHERE dictionary_id = ? AND parent_id IS NULL AND name = ?"),
+                 {dictionaryId, name}).toLongLong();
+}
+
+QString Project::dictCategoryPath(qint64 id, const QString &separator) const
+{
+    QStringList parts;
+    QSet<qint64> seen;
+    while (id > 0 && !seen.contains(id)) {
+        seen.insert(id);
+        const DictCategory c = dictCategory(id);
+        if (!c.id)
+            break;
+        parts.prepend(c.name);
+        id = c.parentId;
+    }
+    return parts.join(separator);
+}
+
+QList<DictEntry> Project::dictEntries(qint64 categoryId) const
+{
+    QList<DictEntry> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, category_id, pattern FROM dict_entries WHERE category_id = ? ORDER BY id"));
+    q.addBindValue(categoryId);
+    q.exec();
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toLongLong(), q.value(2).toString()});
+    return out;
+}
+
+QList<DictEntry> Project::dictEntriesOfDictionary(qint64 dictionaryId) const
+{
+    QList<DictEntry> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT e.id, e.category_id, e.pattern FROM dict_entries e"
+                             " JOIN dict_categories c ON c.id = e.category_id WHERE c.dictionary_id = ? ORDER BY e.id"));
+    q.addBindValue(dictionaryId);
+    q.exec();
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toLongLong(), q.value(2).toString()});
+    return out;
+}
+
+qint64 Project::addDictEntry(qint64 categoryId, const QString &pattern)
+{
+    setUndoLabel(tr("Nuova voce del dizionario"));
+    const QString p = pattern.simplified();
+    if (p.isEmpty()) {
+        fail(tr("Voce vuota"));
+        return 0;
+    }
+    for (const DictEntry &e : dictEntries(categoryId))
+        if (e.pattern.compare(p, Qt::CaseInsensitive) == 0)
+            return e.id;
+    const qint64 id = insert(QStringLiteral("INSERT INTO dict_entries(category_id, pattern) VALUES (?, ?)"),
+                             {categoryId, p});
+    if (id)
+        notify(&Project::dictionariesChanged);
+    return id;
+}
+
+bool Project::setDictEntryPattern(qint64 id, const QString &pattern)
+{
+    setUndoLabel(tr("Modifica voce del dizionario"));
+    const QString p = pattern.simplified();
+    if (p.isEmpty())
+        return fail(tr("Voce vuota"));
+    if (!exec(QStringLiteral("UPDATE dict_entries SET pattern = ? WHERE id = ?"), {p, id}))
+        return false;
+    notify(&Project::dictionariesChanged);
+    return true;
+}
+
+bool Project::deleteDictEntry(qint64 id)
+{
+    setUndoLabel(tr("Elimina voce del dizionario"));
+    if (!exec(QStringLiteral("DELETE FROM dict_entries WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::dictionariesChanged);
+    return true;
 }

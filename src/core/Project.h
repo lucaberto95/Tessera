@@ -164,6 +164,26 @@ public:
     bool setVariableValue(qint64 documentId, qint64 variableId, const QString &value);
     QHash<qint64, QHash<qint64, QString>> allVariableValues() const; // document -> variable -> value
 
+    // Dictionaries for content analysis: categories form a tree inside a dictionary.
+    QList<Dictionary> dictionaries() const;
+    Dictionary dictionary(qint64 id) const;
+    qint64 addDictionary(const QString &name, const QString &uuid = {});
+    bool renameDictionary(qint64 id, const QString &name);
+    bool deleteDictionary(qint64 id); // with its categories and entries
+    QList<DictCategory> dictCategories(qint64 dictionaryId) const; // depth-first, as shown in the tree
+    DictCategory dictCategory(qint64 id) const;
+    qint64 addDictCategory(qint64 dictionaryId, qint64 parentId, const QString &name);
+    bool renameDictCategory(qint64 id, const QString &name);
+    bool deleteDictCategory(qint64 id); // with its subcategories and entries
+    qint64 findDictCategory(qint64 dictionaryId, qint64 parentId, const QString &name) const;
+    QString dictCategoryPath(qint64 id, const QString &separator = QStringLiteral(" > ")) const;
+    QList<DictEntry> dictEntries(qint64 categoryId) const;                 // in order of insertion
+    QList<DictEntry> dictEntriesOfDictionary(qint64 dictionaryId) const;   // every category
+    // Returns the id of the new entry, or of the category's entry with the same pattern (ignoring case).
+    qint64 addDictEntry(qint64 categoryId, const QString &pattern);
+    bool setDictEntryPattern(qint64 id, const QString &pattern);
+    bool deleteDictEntry(qint64 id);
+
 signals:
     void opened();
     void closed();
@@ -175,6 +195,7 @@ signals:
     void memosChanged();
     void variablesChanged();
     void linksChanged();
+    void dictionariesChanged();
     void undoStateChanged();
 
 private:

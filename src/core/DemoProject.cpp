@@ -128,6 +128,26 @@ bool populate(Project &project)
                                         "arrivato"));
     }
 
+    // A small dictionary for the content analysis.
+    {
+        const qint64 dict = project.addDictionary(QObject::tr("Lavoro da remoto"));
+        const struct {
+            const char *category;
+            const char *entries;
+        } categories[] = {
+            {QT_TR_NOOP("Tecnologia"), "teams, connessione, internet, notific*, video*, digital*"},
+            {QT_TR_NOOP("Relazioni"), "colleghi, chiacchiere, isolat*, riunion*"},
+            {QT_TR_NOOP("Tempo"), "tempo, ore, orari*, svegliarmi, treno"},
+            {QT_TR_NOOP("Casa e famiglia"), "casa, figli*, famiglia, vita privata"},
+        };
+        for (const auto &c : categories) {
+            const qint64 category =
+                project.addDictCategory(dict, 0, QObject::tr(c.category));
+            for (const QString &entry : QString::fromUtf8(c.entries).split(QLatin1Char(',')))
+                project.addDictEntry(category, entry.trimmed());
+        }
+    }
+
     Memo memo;
     memo.targetType = MemoTarget::Project;
     memo.title = QObject::tr("Domanda di ricerca");
