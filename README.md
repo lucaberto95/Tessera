@@ -29,7 +29,7 @@ da remoto, già codificate, con variabili e memo.
 | **Codifica** | Seleziona il testo e trascinaci sopra un codice, oppure usa `Ctrl+E` (codice selezionato), `Ctrl+Shift+E` (nuovo codice) o il menu contestuale. Il testo codificato è evidenziato con il colore del codice e una barra laterale mostra le parentesi dei codici. Ogni segmento può avere commento e peso. |
 | **Recupero segmenti** | Attiva documenti e codici con le caselle di spunta: il pannello in basso raccoglie i segmenti corrispondenti, con filtro ed esportazione in HTML o Excel (CSV). |
 | **Memo** | Memo su progetto, gruppi, documenti, codici e segmenti, con una finestra che li raccoglie tutti ed esportazione. |
-| **Variabili** | Variabili dei documenti tipizzate (testo, intero, decimale, sì/no, data), modificabili in una tabella, con import/export CSV. |
+| **Variabili** | Variabili dei documenti tipizzate (testo, intero, decimale, sì/no, data), modificabili in una tabella, con import/export CSV (all'import il tipo di ogni colonna viene riconosciuto e si può correggere in un'anteprima). |
 | **Analisi** | Ricerca lessicale (più termini con OR, parole intere, espressioni regolari) con codifica automatica della parola, della frase o del paragrafo. Matrice codici × documenti con heatmap, frequenze dei codici e grafico. |
 | **Interoperabilità** | Importazione ed esportazione QDPX (REFI-QDA) di documenti testuali, codici, codifiche, memo, variabili e gruppi. |
 
@@ -43,7 +43,8 @@ da remoto, già codificate, con variabili e memo.
 | `Ctrl+E` | Codifica la selezione con il codice selezionato |
 | `Ctrl+Shift+E` | Codifica la selezione con un nuovo codice |
 | `Ctrl+Z` / `Ctrl+Y` | Annulla / ripeti |
-| `Ctrl+F` | Ricerca lessicale |
+| `Ctrl+F` | Cerca nel documento aperto (barra di ricerca; `F3` / `Maiusc+F3` per scorrere, `Esc` per chiudere) |
+| `Ctrl+Shift+F` | Ricerca lessicale su tutto il progetto |
 | `Ctrl+M` | Matrice codici × documenti |
 | `Ctrl+Shift+M` | Tutti i memo |
 | `Ctrl+rotella` | Zoom del testo |
@@ -87,4 +88,3 @@ I dettagli di architettura, le convenzioni e le insidie già incontrate sono in 
 - Lavora solo su fonti testuali: niente codifica di aree di immagini o PDF, né di audio e video.
 - La cronologia di annullamento vale per la sessione e si azzera chiudendo il progetto.
 - Non ci sono il lavoro di gruppo né il confronto tra codificatori.
-- Le variabili importate da CSV vengono create come testo.

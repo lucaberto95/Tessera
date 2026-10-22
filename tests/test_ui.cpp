@@ -1,4 +1,4 @@
-// Smoke tests for the widgets: build every view/dialog on the example project, exercise the main
+﻿// Smoke tests for the widgets: build every view/dialog on the example project, exercise the main
 // interactions and optionally save screenshots (set TESSERA_SHOTS to a directory).
 #include "core/DemoProject.h"
 #include "core/Project.h"
@@ -13,6 +13,7 @@
 #include "ui/SegmentsPanel.h"
 #include "ui/VariablesDialog.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QLineEdit>
@@ -125,6 +126,85 @@ private slots:
         QVERIFY(m_project->redo());
         QVERIFY(m_project->redo());
         QVERIFY(edit->toPlainText().startsWith("PREMESSA."));
+    }
+
+    void findInDocument()
+    {
+        DocumentView view(m_project);
+        view.resize(800, 600);
+        view.show();
+        const qint64 doc = m_project->documents().first().id;
+        view.openDocument(doc);
+        auto *edit = view.findChild<QTextEdit *>();
+        QVERIFY(edit);
+        auto *field = view.findChild<QLineEdit *>();
+        QVERIFY(field);
+        QVERIFY(!view.isFindBarVisible());
+        const int baseExtras = int(edit->extraSelections().size());
+
+        // Ctrl+F opens the bar; typing counts and highlights the occurrences.
+        view.activateWindow(); // shortcuts only fire in the active window
+        QVERIFY(QTest::qWaitForWindowActive(&view));
+        edit->setFocus();
+        QTest::keyClick(edit, Qt::Key_F, Qt::ControlModifier);
+        QVERIFY(view.isFindBarVisible());
+        QTest::keyClicks(field, "Giulia");
+        const int n = view.findMatchCount();
+        QVERIFY(n > 1);
+        QCOMPARE(int(edit->extraSelections().size()), baseExtras + n);
+        QCOMPARE(edit->textCursor().selectedText().toLower(), QString("giulia"));
+
+        // F3 / Shift+F3 move and wrap around.
+        const int first = edit->textCursor().selectionStart();
+        QTest::keyClick(field, Qt::Key_F3);
+        QVERIFY(edit->textCursor().selectionStart() != first);
+        QTest::keyClick(field, Qt::Key_F3, Qt::ShiftModifier);
+        QCOMPARE(edit->textCursor().selectionStart(), first);
+        view.findPrevious();
+        QVERIFY(edit->textCursor().selectionStart() > first); // wrapped to the last one
+
+        // Whole word excludes "lavorativa"; case option is honoured.
+        field->setText("lavor");
+        const int partial = view.findMatchCount();
+        auto *whole = view.findChildren<QCheckBox *>().last();
+        whole->setChecked(true);
+        QVERIFY(view.findMatchCount() < partial);
+        whole->setChecked(false);
+        field->setText("GIULIA");
+        QCOMPARE(view.findMatchCount(), n);
+        view.findChildren<QCheckBox *>().first()->setChecked(true);
+        QCOMPARE(view.findMatchCount(), 0);
+        view.findChildren<QCheckBox *>().first()->setChecked(false);
+
+        // Esc closes the bar and removes the highlights.
+        QTest::keyClick(field, Qt::Key_Escape);
+        QVERIFY(!view.isFindBarVisible());
+        QCOMPARE(view.findMatchCount(), 0);
+        QCOMPARE(int(edit->extraSelections().size()), baseExtras);
+    }
+
+    void findWithEmoji()
+    {
+        const qint64 doc = m_project->addDocument(m_project->documents().first().groupId, QStringLiteral("Emoji"), QStringLiteral("a 😀 b 😀 casa 😀casa"));
+        QVERIFY(doc > 0);
+        DocumentView view(m_project);
+        view.resize(800, 600);
+        view.show();
+        view.openDocument(doc);
+        auto *edit = view.findChild<QTextEdit *>();
+        auto *field = view.findChild<QLineEdit *>();
+        view.showFindBar();
+        field->setText(QStringLiteral("😀"));
+        QCOMPARE(view.findMatchCount(), 3);
+        // Positions are UTF-16 offsets: the 2nd emoji follows "a 😀 b ".
+        view.findNext();
+        QCOMPARE(edit->textCursor().selectionStart(), 7);
+        QCOMPARE(edit->textCursor().selectionEnd(), 9);
+        // "casa" next to an emoji still counts as a whole word.
+        field->setText(QStringLiteral("casa"));
+        view.findChildren<QCheckBox *>().last()->setChecked(true);
+        QCOMPARE(view.findMatchCount(), 2);
+        QVERIFY(m_project->deleteDocument(doc)); // keep the shared demo project as the other tests expect
     }
 
     void segmentsPanel()

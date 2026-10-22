@@ -10,7 +10,9 @@
 class CodingStripe;
 class DocTextEdit;
 class Project;
+class QCheckBox;
 class QLabel;
+class QLineEdit;
 class QStackedWidget;
 class QToolButton;
 
@@ -39,6 +41,14 @@ public:
     // Saves pending text edits (no-op when not editing). Returns false on failure.
     bool commitEdits();
 
+    // Find bar for the open document (Ctrl+F); it never touches the stored text or the codings.
+    void showFindBar();
+    void hideFindBar();
+    bool isFindBarVisible() const;
+    void findNext();
+    void findPrevious();
+    int findMatchCount() const { return int(m_findMatches.size()); }
+
     void showSegmentMenu(qint64 segmentId, const QPoint &globalPos);
 
     void onSegmentsChanged(qint64 documentId);
@@ -59,6 +69,11 @@ private:
     void onTextChangedWhileEditing();
     QList<Segment> segmentsAt(int position) const;
     QString segmentLabel(const Segment &s) const;
+    void buildFindBar();
+    // Recomputes the matches of the find field; the current one is the first at/after the cursor.
+    void updateFindMatches();
+    void goToFindMatch(int index);
+    void updateFindCounter();
 
     Project *m_project;
     std::function<qint64()> m_currentCode;
@@ -76,4 +91,12 @@ private:
     bool m_editing = false;
     QString m_editSnapshot;
     QMetaObject::Connection m_editConnection;
+
+    QWidget *m_findBar = nullptr;
+    QLineEdit *m_findField = nullptr;
+    QLabel *m_findCounter = nullptr;
+    QCheckBox *m_findCase = nullptr;
+    QCheckBox *m_findWhole = nullptr;
+    QList<std::pair<int, int>> m_findMatches; // [start, end) UTF-16 offsets in the raw text
+    int m_findIndex = -1;
 };

@@ -4,15 +4,19 @@
 #include "ui/CodingStripe.h"
 #include "ui/UiUtils.h"
 
+#include <QCheckBox>
 #include <QContextMenuEvent>
 #include <QDragEnterEvent>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHelpEvent>
 #include <QInputDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMimeData>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QStackedWidget>
 #include <QTextBlock>
 #include <QTextEdit>
@@ -30,6 +34,27 @@ QString rawText(const QTextEdit *edit)
     QString t = edit->document()->toRawText();
     t.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
     return t;
+}
+
+// Word characters on either side of a UTF-16 offset, surrogate pairs included (emoji, CJK extensions).
+bool isWordCharBefore(const QString &t, int pos)
+{
+    if (pos <= 0)
+        return false;
+    char32_t cp = t.at(pos - 1).unicode();
+    if (t.at(pos - 1).isLowSurrogate() && pos >= 2 && t.at(pos - 2).isHighSurrogate())
+        cp = QChar::surrogateToUcs4(t.at(pos - 2), t.at(pos - 1));
+    return QChar::isLetterOrNumber(cp) || cp == U'_';
+}
+
+bool isWordCharAfter(const QString &t, int pos)
+{
+    if (pos >= t.size())
+        return false;
+    char32_t cp = t.at(pos).unicode();
+    if (t.at(pos).isHighSurrogate() && pos + 1 < t.size() && t.at(pos + 1).isLowSurrogate())
+        cp = QChar::surrogateToUcs4(t.at(pos), t.at(pos + 1));
+    return QChar::isLetterOrNumber(cp) || cp == U'_';
 }
 } // namespace
 
@@ -166,6 +191,8 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     line->setFrameShape(QFrame::HLine);
     line->setFrameShadow(QFrame::Sunken);
     docLayout->addWidget(line);
+    buildFindBar();
+    docLayout->addWidget(m_findBar);
     docLayout->addLayout(body, 1);
 
     // The view keeps itself in sync with the project (stale segments would be lost when saving edits).
@@ -211,11 +238,13 @@ void DocumentView::setDisplayedText(const QString &text)
     fmt.setBottomMargin(4);
     all.mergeBlockFormat(fmt);
     m_edit->document()->clearUndoRedoStacks();
+    updateFindMatches();
 }
 
 void DocumentView::closeDocument()
 {
     commitEdits();
+    hideFindBar();
     m_docId = 0;
     m_segments.clear();
     m_edit->clear();
@@ -312,6 +341,15 @@ void DocumentView::refreshHighlights()
         sel.format.setBackground(color);
         if (s.id == m_highlighted)
             sel.format.setUnderlineStyle(QTextCharFormat::SingleUnderline);
+        extras << sel;
+    }
+    // Find matches go last so they stay visible over the coding colours; warm tones never match a code.
+    for (int i = 0; i < m_findMatches.size(); ++i) {
+        QTextEdit::ExtraSelection sel;
+        sel.cursor = QTextCursor(m_edit->document());
+        sel.cursor.setPosition(qBound(0, m_findMatches[i].first, len));
+        sel.cursor.setPosition(qBound(0, m_findMatches[i].second, len), QTextCursor::KeepAnchor);
+        sel.format.setBackground(i == m_findIndex ? QColor(255, 152, 0, 190) : QColor(255, 235, 59, 130));
         extras << sel;
     }
     m_edit->setExtraSelections(extras);
@@ -517,6 +555,174 @@ void DocumentView::onTextChangedWhileEditing()
         refreshHighlights();
     }
     m_editSnapshot = now;
+    updateFindMatches();
+}
+
+void DocumentView::buildFindBar()
+{
+    m_findBar = new QWidget;
+    m_findField = new QLineEdit;
+    m_findField->setPlaceholderText(tr("Cerca nel documento"));
+    m_findField->setClearButtonEnabled(true);
+    m_findField->setMinimumWidth(220);
+    m_findCounter = new QLabel;
+    m_findCounter->setMinimumWidth(80);
+    m_findCase = new QCheckBox(tr("Maiuscole/minuscole"));
+    m_findWhole = new QCheckBox(tr("Parola intera"));
+
+    auto *prev = new QToolButton;
+    prev->setText(QStringLiteral("↑"));
+    prev->setToolTip(tr("Occorrenza precedente (Maiusc+F3)"));
+    auto *next = new QToolButton;
+    next->setText(QStringLiteral("↓"));
+    next->setToolTip(tr("Occorrenza successiva (F3)"));
+    auto *close = new QToolButton;
+    close->setText(QStringLiteral("✕"));
+    close->setToolTip(tr("Chiudi la ricerca (Esc)"));
+    close->setAutoRaise(true);
+
+    auto *row = new QHBoxLayout(m_findBar);
+    row->setContentsMargins(8, 4, 8, 4);
+    row->addWidget(m_findField);
+    row->addWidget(prev);
+    row->addWidget(next);
+    row->addWidget(m_findCounter);
+    row->addWidget(m_findCase);
+    row->addWidget(m_findWhole);
+    row->addStretch(1);
+    row->addWidget(close);
+    m_findBar->hide();
+
+    auto refind = [this] {
+        updateFindMatches();
+        if (m_findIndex >= 0)
+            goToFindMatch(m_findIndex);
+    };
+    connect(m_findField, &QLineEdit::textChanged, this, refind);
+    connect(m_findCase, &QCheckBox::toggled, this, refind);
+    connect(m_findWhole, &QCheckBox::toggled, this, refind);
+    connect(m_findField, &QLineEdit::returnPressed, this, [this] {
+        if (QGuiApplication::keyboardModifiers() & Qt::ShiftModifier)
+            findPrevious();
+        else
+            findNext();
+    });
+    connect(next, &QToolButton::clicked, this, &DocumentView::findNext);
+    connect(prev, &QToolButton::clicked, this, &DocumentView::findPrevious);
+    connect(close, &QToolButton::clicked, this, &DocumentView::hideFindBar);
+
+    auto shortcut = [this](const QKeySequence &keys, auto slot) {
+        auto *sc = new QShortcut(keys, this, this, slot, Qt::WidgetWithChildrenShortcut);
+        return sc;
+    };
+    shortcut(QKeySequence::Find, &DocumentView::showFindBar);
+    shortcut(QKeySequence::FindNext, &DocumentView::findNext);
+    shortcut(QKeySequence::FindPrevious, &DocumentView::findPrevious);
+    shortcut(QKeySequence(Qt::Key_Escape), [this] {
+        if (isFindBarVisible())
+            hideFindBar();
+    });
+}
+
+void DocumentView::showFindBar()
+{
+    if (!m_docId)
+        return;
+    // Like an editor: a one-line selection becomes the search term.
+    const QString selected = selectedText();
+    if (!selected.isEmpty() && !selected.contains(QLatin1Char('\n')))
+        m_findField->setText(selected);
+    m_findBar->show();
+    m_findField->setFocus();
+    m_findField->selectAll();
+    updateFindMatches();
+    if (m_findIndex >= 0)
+        goToFindMatch(m_findIndex);
+}
+
+void DocumentView::hideFindBar()
+{
+    if (m_findBar->isHidden() && m_findMatches.isEmpty())
+        return;
+    const bool hadFocus = m_findBar->isAncestorOf(focusWidget());
+    m_findBar->hide();
+    m_findMatches.clear();
+    m_findIndex = -1;
+    refreshHighlights();
+    if (hadFocus)
+        m_edit->setFocus();
+}
+
+bool DocumentView::isFindBarVisible() const { return m_findBar->isVisible(); }
+
+void DocumentView::updateFindMatches()
+{
+    m_findMatches.clear();
+    m_findIndex = -1;
+    const QString needle = m_findField->text();
+    if (m_docId && !m_findBar->isHidden() && !needle.isEmpty()) {
+        const QString text = rawText(m_edit);
+        const Qt::CaseSensitivity cs = m_findCase->isChecked() ? Qt::CaseSensitive : Qt::CaseInsensitive;
+        const bool whole = m_findWhole->isChecked();
+        for (qsizetype i = text.indexOf(needle, 0, cs); i >= 0; i = text.indexOf(needle, i + 1, cs)) {
+            const int start = int(i), end = int(i + needle.size());
+            if (whole && (isWordCharBefore(text, start) || isWordCharAfter(text, end)))
+                continue;
+            m_findMatches.append({start, end});
+        }
+        const int from = m_edit->textCursor().selectionStart();
+        for (int i = 0; i < m_findMatches.size() && m_findIndex < 0; ++i)
+            if (m_findMatches[i].first >= from)
+                m_findIndex = i;
+        if (m_findIndex < 0 && !m_findMatches.isEmpty())
+            m_findIndex = 0; // wrap around
+    }
+    updateFindCounter();
+    refreshHighlights();
+}
+
+void DocumentView::updateFindCounter()
+{
+    if (m_findField->text().isEmpty()) {
+        m_findCounter->clear();
+    } else if (m_findMatches.isEmpty()) {
+        m_findCounter->setText(tr("Nessun risultato"));
+    } else {
+        m_findCounter->setText(tr("%1 di %2").arg(m_findIndex + 1).arg(m_findMatches.size()));
+    }
+    m_findCounter->setStyleSheet(m_findMatches.isEmpty() && !m_findField->text().isEmpty()
+                                     ? QStringLiteral("color: #c62828")
+                                     : QString());
+}
+
+void DocumentView::goToFindMatch(int index)
+{
+    if (index < 0 || index >= m_findMatches.size())
+        return;
+    m_findIndex = index;
+    const int len = m_edit->document()->characterCount() - 1;
+    QTextCursor c(m_edit->document());
+    c.setPosition(qBound(0, m_findMatches[index].first, len));
+    c.setPosition(qBound(0, m_findMatches[index].second, len), QTextCursor::KeepAnchor);
+    m_edit->setTextCursor(c); // keyboard focus stays where it is (usually the find field)
+    m_edit->ensureCursorVisible();
+    updateFindCounter();
+    refreshHighlights();
+}
+
+void DocumentView::findNext()
+{
+    if (m_findMatches.isEmpty())
+        return;
+    goToFindMatch((m_findIndex + 1) % int(m_findMatches.size()));
+}
+
+void DocumentView::findPrevious()
+{
+    if (m_findMatches.isEmpty())
+        return;
+    const int n = int(m_findMatches.size());
+    goToFindMatch((m_findIndex - 1 + n) % n);
 }
 
 bool DocumentView::commitEdits()

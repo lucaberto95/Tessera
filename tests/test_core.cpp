@@ -5,8 +5,12 @@
 #include "core/Retrieval.h"
 #include "core/TextUtils.h"
 
+#include <QCryptographicHash>
 #include <QFile>
+#include <QFileInfo>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QtCore/private/qzipwriter_p.h>
@@ -49,6 +53,36 @@ private:
         for (const auto &x : r)
             ids << x.segmentId;
         return ids;
+    }
+
+    // First value of a query run directly on a project file, bypassing Project.
+    static QVariant queryFile(const QString &file, const QString &sql)
+    {
+        QVariant result;
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("raw"));
+            db.setDatabaseName(file);
+            if (db.open()) {
+                QSqlQuery q(db);
+                if (q.exec(sql) && q.next())
+                    result = q.value(0);
+            }
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("raw"));
+        return result;
+    }
+
+    static QByteArray fileHash(const QString &file)
+    {
+        QFile f(file);
+        if (!f.open(QIODevice::ReadOnly))
+            return {};
+        return QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256);
+    }
+
+    static int fileVersion(const QString &file)
+    {
+        return queryFile(file, "SELECT value FROM meta WHERE key = 'schema_version'").toInt();
     }
 
 private slots:
@@ -113,6 +147,141 @@ private slots:
         QCOMPARE(p.code(b).position, 1);
         QVERIFY(p.moveCode(c, 0));
         QCOMPARE(p.code(c).parentId, qint64(0));
+    }
+
+    void migrationUpgradesOldProject()
+    {
+        {
+            Project old;
+            old.setMigrations({}); // base schema only, as Tessera 0.1.0 wrote it
+            QVERIFY(old.create(path("m1.tsra")));
+            const qint64 d = old.addDocument(old.groups().first().id, "Intervista", "Testo da codificare");
+            QVERIFY(old.addSegment(d, old.addCode(0, "Tema", Qt::red), 0, 5) > 0);
+        }
+        QCOMPARE(fileVersion(path("m1.tsra")), 1);
+
+        const QList<Project::Migration> migrations = {
+            {2, {"CREATE TABLE extra (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '')"}},
+            {3, {"ALTER TABLE codes ADD COLUMN alias TEXT NOT NULL DEFAULT ''"}},
+        };
+        Project p;
+        p.setMigrations(migrations);
+        QCOMPARE(p.schemaVersion(), 3);
+        QVERIFY(p.open(path("m1.tsra")));
+        QCOMPARE(p.meta("schema_version"), QString("3"));
+        QCOMPARE(p.allSegments().size(), 1);
+        QVERIFY(!p.canUndo());
+
+        // The backup keeps the file as it was before the upgrade.
+        const QString backup = p.migrationBackupPath();
+        QCOMPARE(QFileInfo(backup).fileName(), QString("m1 (backup v1).tsra"));
+        QCOMPARE(fileVersion(backup), 1);
+        QCOMPARE(queryFile(backup, "SELECT count(*) FROM segments").toInt(), 1);
+
+        // Undo triggers are built after the upgrade, so they cover the new column too.
+        const qint64 code = p.codes().first().id;
+        QVERIFY(p.renameCode(code, "Nuovo nome"));
+        QVERIFY(p.undo());
+        QCOMPARE(p.code(code).name, QString("Tema"));
+
+        // Already up to date: no backup.
+        p.close();
+        QVERIFY(p.open(path("m1.tsra")));
+        QVERIFY(p.migrationBackupPath().isEmpty());
+        p.close();
+
+        // A later upgrade never overwrites an earlier backup.
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("m1.tsra")));
+        }
+        QVERIFY(p.open(path("m1.tsra")));
+        QCOMPARE(QFileInfo(p.migrationBackupPath()).fileName(), QString("m1 (backup v1 2).tsra"));
+    }
+
+    void migrationFailureLeavesFileUntouched()
+    {
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("m2.tsra")));
+        }
+        const QByteArray before = fileHash(path("m2.tsra"));
+
+        Project p;
+        p.setMigrations({{2, {"CREATE TABLE extra (id INTEGER PRIMARY KEY)"}}, {3, {"NOT VALID SQL"}}});
+        QVERIFY(!p.open(path("m2.tsra")));
+        QVERIFY(!p.isOpen());
+        QVERIFY(p.lastError().contains("versione 3"));
+        QCOMPARE(fileHash(path("m2.tsra")), before);
+        QVERIFY(!QFile::exists(path("m2 (backup v1).tsra")));
+        QCOMPARE(fileVersion(path("m2.tsra")), 1);
+    }
+
+    void migrationRejectsDanglingReferences()
+    {
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("m3.tsra")));
+        }
+        Project p;
+        p.setMigrations({{2, {"INSERT INTO segments(document_id, code_id, start_pos, end_pos, uuid)"
+                              " VALUES (99, 99, 0, 1, 'x')"}}});
+        QVERIFY(!p.open(path("m3.tsra")));
+        QVERIFY(p.lastError().contains("segments"));
+        QCOMPARE(queryFile(path("m3.tsra"), "SELECT count(*) FROM segments").toInt(), 0);
+        QCOMPARE(fileVersion(path("m3.tsra")), 1);
+    }
+
+    void migrationCanRebuildTables()
+    {
+        // SQLite cannot change a column in place: copy into a new table, drop the old one, rename.
+        // Foreign keys are off while migrating, so the drop must not cascade to the segments.
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("m4.tsra")));
+            const qint64 d = old.addDocument(old.groups().first().id, "Doc", "Testo");
+            QVERIFY(old.addSegment(d, old.addCode(0, "C", Qt::red), 0, 5) > 0);
+        }
+        Project p;
+        p.setMigrations({{2,
+                          {"CREATE TABLE documents_new (id INTEGER PRIMARY KEY,"
+                           " group_id INTEGER NOT NULL REFERENCES document_groups(id) ON DELETE CASCADE,"
+                           " name TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', source_path TEXT,"
+                           " imported_at TEXT, position INTEGER NOT NULL DEFAULT 0, uuid TEXT NOT NULL,"
+                           " kind TEXT NOT NULL DEFAULT 'text')",
+                           "INSERT INTO documents_new (id, group_id, name, content, source_path, imported_at,"
+                           " position, uuid) SELECT id, group_id, name, content, source_path, imported_at,"
+                           " position, uuid FROM documents",
+                           "DROP TABLE documents",
+                           "ALTER TABLE documents_new RENAME TO documents"}}});
+        QVERIFY(p.open(path("m4.tsra")));
+        QCOMPARE(p.documents().size(), 1);
+        QCOMPARE(p.allSegments().size(), 1);
+
+        // Foreign keys are enforced again once the project is open.
+        QVERIFY(p.deleteDocument(p.documents().first().id));
+        QVERIFY(p.allSegments().isEmpty());
+    }
+
+    void futureVersionIsRejected()
+    {
+        Project newer;
+        QList<Project::Migration> migrations = Project::builtInMigrations();
+        migrations.append({99, {"CREATE TABLE extra (id INTEGER PRIMARY KEY)"}});
+        newer.setMigrations(migrations);
+        QVERIFY(newer.create(path("m5.tsra")));
+        QCOMPARE(newer.meta("schema_version"), QString("99"));
+        newer.close();
+        const QByteArray before = fileHash(path("m5.tsra"));
+
+        Project p;
+        QVERIFY(!p.open(path("m5.tsra")));
+        QVERIFY(p.lastError().contains("più recente"));
+        QCOMPARE(fileHash(path("m5.tsra")), before);
     }
 
     void batchDefersSignals()
@@ -464,6 +633,132 @@ private slots:
         QCOMPARE(r[0].end, 14); // from the start of A to the end of B
         QCOMPARE(r[0].codeIds, (QList<qint64>{1, 2}));
         QCOMPARE(Retrieval::run(fol, {seg(1, 10, 1, 10, 14), seg(2, 10, 2, 0, 4)}, textOf).size(), 0); // B before A
+    }
+
+    void variableTypeInference()
+    {
+        using VT = VariableType;
+        QCOMPARE(Exporters::inferVariableType({"1", "-20", "", "300"}), VT::Integer);
+        QCOMPARE(Exporters::inferVariableType({"1,5", "2", "3,25"}), VT::Decimal);          // Italian
+        QCOMPARE(Exporters::inferVariableType({"1.5", "2", "3.25"}), VT::Decimal);          // English
+        QCOMPARE(Exporters::inferVariableType({"1.234,5", "2"}), VT::Decimal);              // thousands + comma
+        QCOMPARE(Exporters::inferVariableType({"1,234.5", "2"}), VT::Decimal);
+        QCOMPARE(Exporters::inferVariableType({"1.234.567", "2"}), VT::Decimal);
+        QCOMPARE(Exporters::inferVariableType({"1,2,3"}), VT::Text);
+        QCOMPARE(Exporters::inferVariableType({"sì", "no", "sì"}), VT::Boolean);
+        QCOMPARE(Exporters::inferVariableType({"true", "false"}), VT::Boolean);
+        QCOMPARE(Exporters::inferVariableType({"vero", "vero"}), VT::Boolean);
+        QCOMPARE(Exporters::inferVariableType({"0", "1", "1"}), VT::Boolean);
+        QCOMPARE(Exporters::inferVariableType({"1", "1"}), VT::Integer);                    // one bare value
+        QCOMPARE(Exporters::inferVariableType({"si", "no", "forse"}), VT::Text);
+        QCOMPARE(Exporters::inferVariableType({"2024-03-05", "2023-12-31"}), VT::Date);
+        QCOMPARE(Exporters::inferVariableType({"05/03/2024", "31/12/2023"}), VT::Date);
+        QCOMPARE(Exporters::inferVariableType({"31/02/2024"}), VT::Text);                   // invalid day
+        QCOMPARE(Exporters::inferVariableType({"12", "abc"}), VT::Text);
+        QCOMPARE(Exporters::inferVariableType({"", " "}), VT::Text);
+
+        QString out;
+        QVERIFY(Exporters::normalizeVariableValue(VT::Decimal, "1.234,5", &out));
+        QCOMPARE(out, QString("1234.5"));
+        QVERIFY(Exporters::normalizeVariableValue(VT::Date, "05/03/2024", &out));
+        QCOMPARE(out, QString("2024-03-05"));
+        QVERIFY(Exporters::normalizeVariableValue(VT::Boolean, "Sì", &out));
+        QCOMPARE(out, QString("1"));
+        QVERIFY(Exporters::normalizeVariableValue(VT::Boolean, "falso", &out));
+        QCOMPARE(out, QString("0"));
+        QVERIFY(!Exporters::normalizeVariableValue(VT::Integer, "1,5", &out));
+        QVERIFY(Exporters::normalizeVariableValue(VT::Integer, "", &out));
+        QVERIFY(out.isEmpty());
+    }
+
+    void variablesCsvImportTypes()
+    {
+        Project p;
+        QVERIFY(p.create(path("vars.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "Doc uno", "a");
+        const qint64 d2 = p.addDocument(g, "Doc due", "b");
+        const qint64 existing = p.addVariable("Livello", VariableType::Integer);
+
+        writeFile("vars.csv", QString::fromUtf8("Documento;Età;Peso;Consenso;Nascita;Nota;Livello\n"
+                                                "Doc uno;34;70,5;sì;05/03/1990;ciao;3\n"
+                                                "Doc due;41;82;no;1983-11-02;;abc\n"
+                                                "Ignoto;1;1;sì;01/01/2000;x;1\n")
+                                    .toUtf8());
+        Exporters::CsvVariablesPreview prev;
+        QString err;
+        QVERIFY2(Exporters::previewVariablesCsv(p, path("vars.csv"), &prev, &err), qPrintable(err));
+        QCOMPARE(prev.matchedRows, 2);
+        QCOMPARE(prev.unmatchedDocuments, QStringList{"Ignoto"});
+        QCOMPARE(prev.columns.size(), 6);
+        QCOMPARE(prev.columns[0].type, VariableType::Integer);
+        QCOMPARE(prev.columns[1].type, VariableType::Decimal);
+        QCOMPARE(prev.columns[2].type, VariableType::Boolean);
+        QCOMPARE(prev.columns[3].type, VariableType::Date);
+        QCOMPARE(prev.columns[4].type, VariableType::Text);
+        QVERIFY(prev.columns[5].existing);
+        QCOMPARE(prev.columns[5].invalidCount, 1);
+
+        QString report;
+        // The user may override a proposed type.
+        QVERIFY(Exporters::importVariablesCsv(p, path("vars.csv"), &report, &err,
+                                              {{"Nota", VariableType::Text}, {"Età", VariableType::Text}}));
+        QVERIFY(report.contains("abc"));
+        QHash<QString, Variable> byName;
+        for (const Variable &v : p.variables())
+            byName.insert(v.name, v);
+        QCOMPARE(byName["Età"].type, VariableType::Text);
+        QCOMPARE(byName["Peso"].type, VariableType::Decimal);
+        QCOMPARE(p.variableValue(d1, byName["Peso"].id), QString("70.5"));
+        QCOMPARE(p.variableValue(d1, byName["Consenso"].id), QString("1"));
+        QCOMPARE(p.variableValue(d2, byName["Consenso"].id), QString("0"));
+        QCOMPARE(p.variableValue(d1, byName["Nascita"].id), QString("1990-03-05"));
+        QCOMPARE(p.variableValue(d1, existing), QString("3"));
+        QCOMPARE(p.variableValue(d2, existing), QString()); // "abc" skipped
+
+        // One undo step removes the whole import.
+        QVERIFY(p.undo());
+        QCOMPARE(p.variables().size(), 1);
+    }
+
+    void variablesCsvRoundTripKeepsTypes()
+    {
+        Project a;
+        QVERIFY(a.create(path("rt-a.tsra")));
+        const qint64 ga = a.groups().first().id;
+        const qint64 da1 = a.addDocument(ga, "Uno", "x");
+        const qint64 da2 = a.addDocument(ga, "Due", "y");
+        const qint64 vi = a.addVariable("Età", VariableType::Integer);
+        const qint64 vd = a.addVariable("Peso", VariableType::Decimal);
+        const qint64 vb = a.addVariable("Consenso", VariableType::Boolean);
+        const qint64 vt = a.addVariable("Nascita", VariableType::Date);
+        a.setVariableValue(da1, vi, "34");
+        a.setVariableValue(da2, vi, "41");
+        a.setVariableValue(da1, vd, "70.5");
+        a.setVariableValue(da2, vd, "82");
+        a.setVariableValue(da1, vb, "1");
+        a.setVariableValue(da2, vb, "0");
+        a.setVariableValue(da1, vt, "1990-03-05");
+        a.setVariableValue(da2, vt, "1983-11-02");
+        QString err;
+        QVERIFY(Exporters::writeCsv(path("rt.csv"), Exporters::variablesTable(a), &err));
+
+        Project b;
+        QVERIFY(b.create(path("rt-b.tsra")));
+        const qint64 gb = b.groups().first().id;
+        const qint64 db1 = b.addDocument(gb, "Uno", "x");
+        b.addDocument(gb, "Due", "y");
+        QString report;
+        QVERIFY2(Exporters::importVariablesCsv(b, path("rt.csv"), &report, &err), qPrintable(err));
+        QHash<QString, Variable> byName;
+        for (const Variable &v : b.variables())
+            byName.insert(v.name, v);
+        QCOMPARE(byName["Età"].type, VariableType::Integer);
+        QCOMPARE(byName["Peso"].type, VariableType::Decimal);
+        QCOMPARE(byName["Consenso"].type, VariableType::Boolean);
+        QCOMPARE(byName["Nascita"].type, VariableType::Date);
+        QCOMPARE(b.variableValue(db1, byName["Peso"].id), QString("70.5"));
+        QCOMPARE(b.variableValue(db1, byName["Nascita"].id), QString("1990-03-05"));
     }
 
     void qdpxRoundTrip()
