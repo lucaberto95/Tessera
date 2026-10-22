@@ -50,6 +50,7 @@ private:
     void codeWithNewCode();
     void showSearch();
     void showMatrix();
+    void showRetrieval();
     void showVariables();
     void showMemos();
     void editProjectMemo();
@@ -96,6 +97,7 @@ private:
     QAction *m_exportCodebook = nullptr;
     QAction *m_search = nullptr;
     QAction *m_matrix = nullptr;
+    QAction *m_retrieval = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;
     QAction *m_exportSegmentsCsv = nullptr;
     QAction *m_projectMemo = nullptr;

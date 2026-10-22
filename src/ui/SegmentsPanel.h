@@ -1,12 +1,14 @@
 #pragma once
 
 #include "core/Model.h"
+#include "core/Retrieval.h"
 
 #include <QWidget>
 
 class Project;
 class QLabel;
 class QLineEdit;
+class QToolButton;
 class QTableWidget;
 
 // "Retrieved segments": all segments of the active codes in the active documents.
@@ -18,6 +20,13 @@ public:
     void setActivation(const QList<qint64> &documentIds, const QList<qint64> &codeIds);
     void refresh();
     QList<Segment> segments() const { return m_segments; }
+    // Complex retrieval: shows the result of the query (re-run on every refresh) instead of the simple union.
+    void setRetrieval(const Retrieval::Query &query);
+    void clearRetrieval();
+    bool hasRetrieval() const { return m_hasQuery; }
+    int resultCount() const { return int(m_segments.size()); }
+    // Codes every retrieved passage with a new top-level code; returns its id (0 if nothing was done).
+    qint64 codeResults(const QString &codeName);
     void exportHtml();
     void exportCsv();
 
@@ -29,12 +38,18 @@ protected:
 
 private:
     void applyFilter();
-    qint64 segmentIdAtRow(int row) const;
+    void rebuildSegmentsFromQuery();
+    void codeResultsInteractive();
 
     Project *m_project;
     QList<qint64> m_documentIds;
     QList<qint64> m_codeIds;
     QList<Segment> m_segments;
+    Retrieval::Query m_query;
+    bool m_hasQuery = false;
+    QList<Retrieval::Result> m_results;
+    QToolButton *m_back;
+    QToolButton *m_codeResults;
     QLabel *m_summary;
     QLineEdit *m_filter;
     QTableWidget *m_table;

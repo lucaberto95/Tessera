@@ -19,7 +19,6 @@
 
 namespace {
 enum Column { DocumentColumn, CodeColumn, TextColumn, WeightColumn, CommentColumn, ColumnCount };
-constexpr int SegmentIdRole = Qt::UserRole;
 } // namespace
 
 SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
@@ -28,7 +27,16 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     , m_summary(new QLabel)
     , m_filter(new QLineEdit)
     , m_table(new QTableWidget)
+    , m_back(new QToolButton)
+    , m_codeResults(new QToolButton)
 {
+    m_back->setText(tr("Torna al recupero semplice"));
+    m_back->setVisible(false);
+    connect(m_back, &QToolButton::clicked, this, &SegmentsPanel::clearRetrieval);
+    m_codeResults->setText(tr("Codifica i risultati con…"));
+    m_codeResults->setVisible(false);
+    connect(m_codeResults, &QToolButton::clicked, this, &SegmentsPanel::codeResultsInteractive);
+
     m_filter->setPlaceholderText(tr("Filtra nel testo dei segmenti…"));
     m_filter->setClearButtonEnabled(true);
     m_filter->setMaximumWidth(280);
@@ -44,6 +52,8 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     auto *bar = new QHBoxLayout;
     bar->setContentsMargins(6, 4, 6, 4);
     bar->addWidget(m_summary, 1);
+    bar->addWidget(m_back);
+    bar->addWidget(m_codeResults);
     bar->addWidget(m_filter);
     bar->addWidget(html);
     bar->addWidget(csv);
@@ -66,10 +76,10 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     m_table->setColumnWidth(CodeColumn, 180);
     m_table->setColumnWidth(CommentColumn, 180);
     connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int row) {
-        const qint64 id = segmentIdAtRow(row);
-        for (const Segment &s : m_segments)
-            if (s.id == id)
-                emit segmentActivated(s.documentId, s.start, s.end, s.id);
+        if (row >= 0 && row < m_segments.size()) {
+            const Segment &s = m_segments[row];
+            emit segmentActivated(s.documentId, s.start, s.end, s.id);
+        }
     });
 
     auto *layout = new QVBoxLayout(this);
@@ -89,7 +99,12 @@ void SegmentsPanel::setActivation(const QList<qint64> &documentIds, const QList<
 
 void SegmentsPanel::refresh()
 {
-    m_segments = m_project->isOpen() ? m_project->segments(m_documentIds, m_codeIds) : QList<Segment>{};
+    if (m_hasQuery)
+        rebuildSegmentsFromQuery();
+    else
+        m_segments = m_project->isOpen() ? m_project->segments(m_documentIds, m_codeIds) : QList<Segment>{};
+    m_back->setVisible(m_hasQuery);
+    m_codeResults->setVisible(m_hasQuery);
 
     QHash<qint64, QString> docNames;
     QHash<qint64, QString> texts;
@@ -109,9 +124,15 @@ void SegmentsPanel::refresh()
         if (!texts.contains(s.documentId))
             texts.insert(s.documentId, m_project->documentText(s.documentId));
         auto *doc = new QTableWidgetItem(docNames.value(s.documentId));
-        doc->setData(SegmentIdRole, s.id);
         doc->setToolTip(tr("Posizione %1–%2").arg(s.start).arg(s.end));
-        auto *code = new QTableWidgetItem(Ui::colorIcon(codes.value(s.codeId).color), m_project->codePath(s.codeId));
+        QString codeLabel = m_project->codePath(s.codeId);
+        if (m_hasQuery && row < m_results.size() && m_results[row].codeIds.size() > 1) {
+            QStringList paths;
+            for (qint64 c : m_results[row].codeIds)
+                paths << m_project->codePath(c);
+            codeLabel = paths.join(QStringLiteral(" + "));
+        }
+        auto *code = new QTableWidgetItem(Ui::colorIcon(codes.value(s.codeId).color), codeLabel);
         auto *text = new QTableWidgetItem(TextUtils::excerpt(texts.value(s.documentId), s.start, s.end, 600));
         text->setToolTip(texts.value(s.documentId).mid(s.start, qMin(s.length(), 3000)));
         auto *weight = new QTableWidgetItem(s.weight ? QString::number(s.weight) : QString());
@@ -125,7 +146,12 @@ void SegmentsPanel::refresh()
     }
     m_table->setUpdatesEnabled(true);
 
-    if (m_codeIds.isEmpty())
+    if (m_hasQuery)
+        m_summary->setText(tr("<b>%n risultati</b>", nullptr, int(m_segments.size())) + QStringLiteral(" · ") +
+                           tr("Recupero complesso: %1").arg(Retrieval::modeLabel(m_query.mode)) + QStringLiteral(" · ") +
+                           (m_documentIds.isEmpty() ? tr("tutti i documenti")
+                                                    : tr("%n documenti attivi", nullptr, int(m_documentIds.size()))));
+    else if (m_codeIds.isEmpty())
         m_summary->setText(tr("Segmenti recuperati: attiva uno o più codici (caselle di spunta) per vederne i segmenti."));
     else
         m_summary->setText(tr("<b>%n segmenti</b>", nullptr, int(m_segments.size())) + QStringLiteral(" · ") +
@@ -150,10 +176,67 @@ void SegmentsPanel::applyFilter()
     }
 }
 
-qint64 SegmentsPanel::segmentIdAtRow(int row) const
+void SegmentsPanel::setRetrieval(const Retrieval::Query &query)
 {
-    QTableWidgetItem *it = m_table->item(row, DocumentColumn);
-    return it ? it->data(SegmentIdRole).toLongLong() : 0;
+    m_query = query;
+    m_hasQuery = true;
+    refresh();
+}
+
+void SegmentsPanel::clearRetrieval()
+{
+    m_hasQuery = false;
+    m_results.clear();
+    refresh();
+}
+
+void SegmentsPanel::rebuildSegmentsFromQuery()
+{
+    m_segments.clear();
+    m_results.clear();
+    if (!m_project->isOpen())
+        return;
+    QList<qint64> codes = m_query.codesA;
+    for (qint64 c : std::as_const(m_query.codesB))
+        if (!codes.contains(c))
+            codes << c;
+    const QList<Segment> source = m_project->segments(m_documentIds, codes);
+    QHash<qint64, Segment> byId;
+    for (const Segment &s : source)
+        byId.insert(s.id, s);
+    m_results = Retrieval::run(m_query, source, [this](qint64 id) { return m_project->documentText(id); });
+    for (const Retrieval::Result &r : std::as_const(m_results)) {
+        // Whole stored segments keep their weight/comment; new intervals have none.
+        Segment s = byId.value(r.segmentId);
+        s.documentId = r.documentId;
+        s.start = r.start;
+        s.end = r.end;
+        s.codeId = r.codeIds.value(0);
+        m_segments << s;
+    }
+}
+
+qint64 SegmentsPanel::codeResults(const QString &codeName)
+{
+    if (!m_hasQuery || m_results.isEmpty() || codeName.trimmed().isEmpty())
+        return 0;
+    m_project->setUndoLabel(tr("Codifica i risultati"));
+    m_project->beginBatch();
+    const qint64 code = m_project->addCode(0, codeName.trimmed(), TextUtils::paletteColor(int(m_project->codes().size())));
+    if (code) {
+        for (const Retrieval::Result &r : std::as_const(m_results))
+            m_project->addSegment(r.documentId, code, r.start, r.end);
+    }
+    m_project->commitBatch();
+    return code;
+}
+
+void SegmentsPanel::codeResultsInteractive()
+{
+    const QString name = Ui::askText(this, tr("Codifica i risultati"), tr("Nome del nuovo codice:"),
+                                     Retrieval::modeLabel(m_query.mode));
+    if (!name.trimmed().isEmpty() && !codeResults(name))
+        Ui::showError(this, tr("Non è stato possibile creare il codice."));
 }
 
 void SegmentsPanel::contextMenuEvent(QContextMenuEvent *event)
@@ -162,13 +245,9 @@ void SegmentsPanel::contextMenuEvent(QContextMenuEvent *event)
     const int row = m_table->rowAt(pos.y());
     if (row < 0 || !m_table->viewport()->rect().contains(pos))
         return;
-    const qint64 id = segmentIdAtRow(row);
-    Segment seg;
-    for (const Segment &s : m_segments)
-        if (s.id == id)
-            seg = s;
-    if (!seg.id)
+    if (row >= m_segments.size())
         return;
+    const Segment seg = m_segments[row];
 
     QMenu menu(this);
     menu.addAction(tr("Mostra nel documento"), this,
@@ -176,6 +255,10 @@ void SegmentsPanel::contextMenuEvent(QContextMenuEvent *event)
     menu.addAction(tr("Copia testo"), this, [this, seg] {
         QApplication::clipboard()->setText(m_project->documentText(seg.documentId).mid(seg.start, seg.length()));
     });
+    if (!seg.id) { // a new interval from a complex retrieval: nothing stored to edit
+        menu.exec(event->globalPos());
+        return;
+    }
     menu.addSeparator();
     menu.addAction(tr("Commento…"), this, [this, seg] {
         bool ok = false;

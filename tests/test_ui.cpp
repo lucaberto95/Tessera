@@ -8,13 +8,17 @@
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
 #include "ui/MemoManager.h"
+#include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
 #include "ui/VariablesDialog.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QPushButton>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTest>
@@ -210,6 +214,67 @@ private slots:
         panel.setActivation({}, {codeNamed("Isolamento")});
         QCOMPARE(panel.segments().size(), 2);
         shot(&panel, "segments_panel");
+    }
+
+    void complexRetrieval()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("retrieval.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "D", QString(40, 'x'));
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        const qint64 b = p.addCode(0, "B", Qt::blue);
+        p.addSegment(doc, a, 0, 10);
+        p.addSegment(doc, a, 20, 30);
+        p.addSegment(doc, b, 5, 15);
+
+        RetrievalDialog dlg(&p, {}, {a});
+        SegmentsPanel panel(&p);
+        panel.setActivation({}, {a});
+        QCOMPARE(panel.segments().size(), 2);
+        connect(&dlg, &RetrievalDialog::retrievalRequested, &panel, &SegmentsPanel::setRetrieval);
+        dlg.show();
+
+        // Mode combo: pick "Sovrapposizione" and B as the second list.
+        QComboBox *mode = dlg.findChildren<QComboBox *>().first();
+        mode->setCurrentIndex(mode->findData(int(Retrieval::Mode::Overlap)));
+        const QList<QListWidget *> lists = dlg.findChildren<QListWidget *>();
+        QCOMPARE(lists.size(), 2);
+        for (int i = 0; i < lists[1]->count(); ++i)
+            if (lists[1]->item(i)->data(Qt::UserRole).toLongLong() == b)
+                lists[1]->item(i)->setCheckState(Qt::Checked);
+        QCOMPARE(dlg.previewCount(), 1);
+
+        QPushButton *apply = nullptr;
+        for (QPushButton *btn : dlg.findChildren<QPushButton *>())
+            if (btn->text() == QStringLiteral("Mostra nel pannello"))
+                apply = btn;
+        QVERIFY(apply && apply->isEnabled());
+        apply->click();
+        QVERIFY(panel.hasRetrieval());
+        QCOMPARE(panel.segments().size(), 1);
+        QCOMPARE(panel.segments().first().start, 0);
+
+        // Intersection yields a new interval that can be coded.
+        mode->setCurrentIndex(mode->findData(int(Retrieval::Mode::Intersection)));
+        for (int i = 0; i < lists[0]->count(); ++i)
+            if (lists[0]->item(i)->data(Qt::UserRole).toLongLong() == b)
+                lists[0]->item(i)->setCheckState(Qt::Checked);
+        apply->click();
+        QCOMPARE(panel.segments().size(), 1);
+        QCOMPARE(panel.segments().first().start, 5);
+        QCOMPARE(panel.segments().first().end, 10);
+        shot(&panel, "complex_retrieval");
+
+        const qint64 code = panel.codeResults("Sovrapposti");
+        QVERIFY(code > 0);
+        const QList<Segment> coded = p.segments({}, {code});
+        QCOMPARE(coded.size(), 1);
+        QCOMPARE(coded.first().start, 5);
+        QCOMPARE(coded.first().end, 10);
+
+        panel.clearRetrieval();
+        QVERIFY(!panel.hasRetrieval());
+        QCOMPARE(panel.segments().size(), 2);
     }
 
     void dialogs()
