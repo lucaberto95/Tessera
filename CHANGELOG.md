@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.18.0] - 2026-10-22 — PDF a pagine e codifica di aree (#26)
+Commit `9254cf8`
+
+- All'import di un PDF si sceglie «Come PDF (consigliato)» o «Solo testo». Come PDF il file originale sta nel progetto (`document_data`) e il documento si vede com'era: nuovo `PdfView` con scorrimento continuo, zoom (`Ctrl`+rotella, «Larghezza», «100%»), casella «Pagina» e rendering con QtPdf.
+- Trascinando si seleziona del testo (si parte anche dal bianco: vale il glifo più vicino), con `Alt` + trascinamento un rettangolo. La selezione si codifica come il testo (`Ctrl+E`, menu contestuale, codice trascinato) e diventa un'area in punti PDF, quindi resta dov'era a ogni zoom e dopo la riapertura del progetto. Le aree si colorano col codice, il margine di ogni pagina ha le barre dei codici e un clic su un'area mostra codici e commento.
+- Schema v8 (migrazione con backup): `segments.area_text`, il testo con cui è stata codificata un'area PDF. Il testo estratto all'import resta in `documents.content` (pagine separate da `\f`): ricerca lessicale, frequenze di parole e dizionari leggono i PDF, e un risultato della ricerca apre la pagina giusta; la codifica automatica salta i PDF.
+- Segmenti recuperati, HTML, CSV, Excel ed etichette dei memo mostrano il testo dell'area, o il ritaglio della pagina (miniatura, PNG incorporato nell'HTML, «Copia immagine») se non c'è testo.
+- Non incluso: `Ctrl+F` dentro un PDF (c'è la ricerca lessicale del progetto, che porta alla pagina); export/import QDPX dei PDF e delle loro aree (#46).
+
 ## [0.17.0] - 2026-10-22 — Documenti immagine e codifica di aree (#27)
 Commit `37f5cc8`
 
