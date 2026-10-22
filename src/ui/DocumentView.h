@@ -10,7 +10,9 @@
 
 class CodingStripe;
 class DocTextEdit;
+class ImageView;
 class Project;
+class QMenu;
 class QCheckBox;
 class QLabel;
 class QLineEdit;
@@ -27,6 +29,10 @@ public:
     void setCurrentCodeProvider(std::function<qint64()> provider) { m_currentCode = std::move(provider); }
 
     qint64 documentId() const { return m_docId; }
+    // Image documents show an ImageView instead of the text; the selection is then a rectangle
+    // (hasSelection, codeSelection and selectRange work on it), and links and text editing do not apply.
+    bool isImage() const { return m_isImage; }
+    ImageView *imageView() const { return m_imageView; }
     void openDocument(qint64 id);
     void closeDocument();
 
@@ -95,6 +101,16 @@ private:
     void onTextChangedWhileEditing();
     QList<Segment> segmentsAt(int position) const;
     QString segmentLabel(const Segment &s) const;
+    // "Codifica con" submenu (enabled when there is a selection) and the per-segment actions after "select".
+    void addCodeWithMenu(QMenu *menu, bool enabled);
+    void addSegmentActions(QMenu *menu, const Segment &s);
+    void setImageMode(bool image);
+    void reloadImageAreas();
+    void updateImageInfo();
+    void onImageAreaClicked(const QList<qint64> &ids);
+    void showImageMenu(const QList<qint64> &ids, const QPoint &globalPos);
+    void onImageCodeDropped(qint64 codeId, const QPointF &imagePos);
+    qint64 codeImageArea(qint64 codeId, const QRectF &rect);
     void buildFindBar();
     // Recomputes the matches of the find field; the current one is the first at/after the cursor.
     void updateFindMatches();
@@ -109,6 +125,12 @@ private:
     QToolButton *m_editButton;
     DocTextEdit *m_edit;
     CodingStripe *m_stripe;
+    QWidget *m_textBody = nullptr; // coding stripe + text, hidden for images
+    ImageView *m_imageView;
+    QToolButton *m_fitButton;
+    QToolButton *m_actualButton;
+    QLabel *m_zoomLabel;
+    bool m_isImage = false;
 
     qint64 m_docId = 0;
     QList<Segment> m_segments;

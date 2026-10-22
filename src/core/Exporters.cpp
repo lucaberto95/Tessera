@@ -1,4 +1,5 @@
 #include "core/Exporters.h"
+#include "core/Images.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
 
@@ -76,7 +77,7 @@ const char *const kHtmlStyle =
     "td,th{border:1px solid #ccc;padding:4px 8px;vertical-align:top;text-align:left}"
     "th{background:#f2f2f2}.seg{border-left:4px solid #888;padding:6px 10px;margin:10px 0;background:#fafafa}"
     ".meta{font-size:12px;color:#555;margin-bottom:4px}.code{font-weight:600}"
-    ".text{white-space:pre-wrap}.comment{font-size:12px;color:#444;font-style:italic;margin-top:4px}";
+    ".text{white-space:pre-wrap}.area img{max-width:100%;border:1px solid #ccc}.comment{font-size:12px;color:#444;font-style:italic;margin-top:4px}";
 
 } // namespace
 
@@ -203,6 +204,12 @@ Table segmentsTable(const Project &project, const QList<Segment> &segments, bool
         if (!codePaths.contains(s.codeId))
             codePaths.insert(s.codeId, project.codePath(s.codeId));
         const Document d = docs.value(s.documentId);
+        if (s.kind == SegmentKind::Area) { // no text positions: the area is described instead
+            rows << QStringList{groupNames.value(d.groupId), d.name, codePaths.value(s.codeId), QString(), QString(),
+                                QString::number(s.weight), s.comment, s.author, dateString(s.createdAt, isoDates),
+                                Images::areaLabel(s)};
+            continue;
+        }
         rows << QStringList{groupNames.value(d.groupId), d.name, codePaths.value(s.codeId), QString::number(s.start),
                             QString::number(s.end), QString::number(s.weight), s.comment, s.author,
                             dateString(s.createdAt, isoDates), texts.value(s.documentId).mid(s.start, s.length())};
@@ -219,6 +226,7 @@ bool exportSegmentsHtml(const Project &project, const QList<Segment> &segments, 
     for (const Code &c : project.codes())
         codes.insert(c.id, c);
     QHash<qint64, QString> texts;
+    QHash<qint64, QImage> images; // decoded once per image document
 
     QString html = QStringLiteral("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>%1</title><style>%2</style>"
                                   "</head><body><h1>%1</h1><p>%3</p>")
@@ -226,9 +234,28 @@ bool exportSegmentsHtml(const Project &project, const QList<Segment> &segments, 
                             QString::fromLatin1(kHtmlStyle),
                             htmlEscape(QObject::tr("%n segmenti", nullptr, int(segments.size()))));
     for (const Segment &s : segments) {
+        const Code c = codes.value(s.codeId);
+        if (s.kind == SegmentKind::Area) {
+            if (!images.contains(s.documentId))
+                images.insert(s.documentId, project.documentImage(s.documentId));
+            // The cropped area travels inside the page as a PNG data URI.
+            const QImage crop = Images::scaledToFit(Images::crop(images.value(s.documentId), s), 900, 700);
+            html += QStringLiteral("<div class=\"seg\" style=\"border-left-color:%1\"><div class=\"meta\">"
+                                   "<span class=\"code\">%2</span> · %3 · %4%5</div><div class=\"area\">%6</div>")
+                        .arg(c.color.name(), htmlEscape(project.codePath(s.codeId)), htmlEscape(docs.value(s.documentId).name),
+                             htmlEscape(Images::areaLabel(s)),
+                             s.weight ? QStringLiteral(" · ") + QObject::tr("peso %1").arg(s.weight) : QString(),
+                             crop.isNull() ? QString()
+                                           : QStringLiteral("<img alt=\"\" src=\"data:image/png;base64,") +
+                                                 QString::fromLatin1(Images::toPng(crop).toBase64()) +
+                                                 QStringLiteral("\">"));
+            if (!s.comment.isEmpty())
+                html += QStringLiteral("<div class=\"comment\">") + htmlEscape(s.comment) + QStringLiteral("</div>");
+            html += QStringLiteral("</div>");
+            continue;
+        }
         if (!texts.contains(s.documentId))
             texts.insert(s.documentId, project.documentText(s.documentId));
-        const Code c = codes.value(s.codeId);
         // One multi-argument arg(): chained calls would also replace a "%5" typed in a name.
         html += QStringLiteral("<div class=\"seg\" style=\"border-left-color:%1\"><div class=\"meta\">"
                                "<span class=\"code\">%2</span> · %3 · %4–%5%6</div><div class=\"text\">%7</div>")
@@ -338,7 +365,8 @@ QString memoTargetLabel(const Project &project, MemoTarget type, qint64 id)
         const Segment s = project.segment(id);
         return QObject::tr("Segmento: %1 / %2 – \"%3\"")
             .arg(project.document(s.documentId).name, project.code(s.codeId).name,
-                 TextUtils::excerpt(project.documentText(s.documentId), s.start, s.end, 50));
+                 s.kind == SegmentKind::Text ? TextUtils::excerpt(project.documentText(s.documentId), s.start, s.end, 50)
+                                             : Images::areaLabel(s));
     }
     case MemoTarget::DocumentSet:
         for (const DocumentSet &s : project.documentSets())
@@ -446,7 +474,7 @@ Xlsx::Sheet tableSheet(const QString &name, const Table &rows)
 
 QList<Xlsx::Sheet> projectSheets(const Project &project)
 {
-    return {documentsSheet(project), codebookSheet(project), segmentsSheet(project, project.allSegments()),
+    return {documentsSheet(project), codebookSheet(project), segmentsSheet(project, project.allSegments(true)),
             variablesSheet(project), memosSheet(project)};
 }
 

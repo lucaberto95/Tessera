@@ -1,8 +1,10 @@
 #include "core/Project.h"
 
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -440,7 +442,7 @@ bool Project::installUndoTriggers()
     static const char *const tables[] = {"document_groups", "documents", "codes", "segments",
                                          "memos", "variables", "variable_values",
                                          "document_sets", "document_set_members", "links", "memo_links",
-                                         "dictionaries", "dict_categories", "dict_entries"};
+                                         "dictionaries", "dict_categories", "dict_entries", "document_data"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -669,6 +671,12 @@ QList<Project::Migration> Project::builtInMigrations()
           QStringLiteral("ALTER TABLE segments ADD COLUMN y2 REAL"),
           QStringLiteral("ALTER TABLE segments ADD COLUMN t_start INTEGER"),
           QStringLiteral("ALTER TABLE segments ADD COLUMN t_end INTEGER")}},
+        {7,
+         {// Binary content of non-text documents (issue #27): the original file bytes, kept apart from
+          // documents so that renaming or moving a document never copies the blob into the undo log.
+          QStringLiteral("CREATE TABLE document_data ("
+                         " document_id INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,"
+                         " data BLOB NOT NULL)")}},
     };
 }
 
@@ -993,6 +1001,48 @@ qint64 Project::addMediaDocument(qint64 groupId, const QString &name, DocumentKi
     if (id)
         notify(&Project::documentsChanged);
     return id;
+}
+
+bool Project::setDocumentData(qint64 id, const QByteArray &data)
+{
+    setUndoLabel(tr("Contenuto del documento"));
+    if (!document(id).id)
+        return fail(tr("Documento inesistente"));
+    return exec(QStringLiteral("INSERT OR REPLACE INTO document_data(document_id, data) VALUES (?, ?)"), {id, data});
+}
+
+QByteArray Project::documentData(qint64 id) const
+{
+    return scalar(QStringLiteral("SELECT data FROM document_data WHERE document_id = ?"), {id}).toByteArray();
+}
+
+qint64 Project::addImageDocument(qint64 groupId, const QString &name, const QByteArray &data,
+                                 const QString &sourcePath, const QString &uuid)
+{
+    setUndoLabel(tr("Nuovo documento"));
+    beginBatch();
+    const qint64 id = addMediaDocument(groupId, name, DocumentKind::Image, sourcePath, uuid);
+    if (!id || !setDocumentData(id, data)) {
+        rollbackBatch();
+        return 0;
+    }
+    commitBatch();
+    return id;
+}
+
+QImage Project::documentImage(qint64 id) const
+{
+    const QByteArray data = documentData(id);
+    if (data.isEmpty())
+        return {};
+    QBuffer buffer;
+    buffer.setData(data);
+    buffer.open(QIODevice::ReadOnly);
+    // The EXIF orientation is applied here and nowhere else: display, area coordinates and crops all
+    // refer to this upright image, so they cannot drift apart.
+    QImageReader reader(&buffer);
+    reader.setAutoTransform(true);
+    return reader.read();
 }
 
 bool Project::renameDocument(qint64 id, const QString &name)

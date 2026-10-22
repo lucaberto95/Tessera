@@ -82,6 +82,26 @@ QIcon memoIcon()
     return icon;
 }
 
+QIcon imageIcon()
+{
+    static QIcon icon = [] {
+        QPixmap pm(16, 16);
+        pm.fill(Qt::transparent);
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(QColor(0xe3f2fd));
+        p.setPen(QColor(0x5f7f9f));
+        p.drawRect(QRectF(1.5, 2.5, 13, 11));
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0x66a36b));
+        p.drawPolygon(QPolygonF({QPointF(2, 13), QPointF(6, 7), QPointF(9, 11), QPointF(11, 9), QPointF(14, 13)}));
+        p.setBrush(QColor(0xf5b942));
+        p.drawEllipse(QPointF(11.5, 5.5), 1.6, 1.6);
+        return QIcon(pm);
+    }();
+    return icon;
+}
+
 bool confirm(QWidget *parent, const QString &title, const QString &text)
 {
     return plainMessage(parent, QMessageBox::Question, title, text, QMessageBox::Yes | QMessageBox::No,

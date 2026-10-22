@@ -1,5 +1,6 @@
 #include "ui/SegmentsPanel.h"
 #include "core/Exporters.h"
+#include "core/Images.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
 #include "ui/UiUtils.h"
@@ -19,6 +20,8 @@
 
 namespace {
 enum Column { DocumentColumn, CodeColumn, TextColumn, WeightColumn, CommentColumn, ColumnCount };
+constexpr int ThumbWidth = 160;
+constexpr int ThumbHeight = 100;
 } // namespace
 
 SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
@@ -68,6 +71,9 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_table->setWordWrap(true);
+    m_table->setIconSize(QSize(ThumbWidth, ThumbHeight));
+    connect(m_project, &Project::opened, this, [this] { m_thumbnails.clear(); });
+    connect(m_project, &Project::closed, this, [this] { m_thumbnails.clear(); });
     m_table->setAlternatingRowColors(true);
     m_table->verticalHeader()->setVisible(false);
     m_table->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
@@ -94,6 +100,13 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     refresh();
 }
 
+QList<Segment> SegmentsPanel::segments() const
+{
+    QList<Segment> text = m_segments;
+    text.removeIf([](const Segment &s) { return s.kind != SegmentKind::Text; });
+    return text;
+}
+
 void SegmentsPanel::setActivation(const QList<qint64> &documentIds, const QList<qint64> &codeIds)
 {
     m_documentIds = documentIds;
@@ -106,7 +119,7 @@ void SegmentsPanel::refresh()
     if (m_hasQuery)
         rebuildSegmentsFromQuery();
     else
-        m_segments = m_project->isOpen() ? m_project->segments(m_documentIds, m_codeIds) : QList<Segment>{};
+        m_segments = m_project->isOpen() ? m_project->segments(m_documentIds, m_codeIds, true) : QList<Segment>{};
     m_back->setVisible(m_hasQuery);
     m_codeResults->setVisible(m_hasQuery);
 
@@ -123,8 +136,31 @@ void SegmentsPanel::refresh()
     m_table->setUpdatesEnabled(false);
     m_table->clearContents();
     m_table->setRowCount(int(m_segments.size()));
+    QHash<qint64, QImage> images; // decoded only when a thumbnail is missing
     for (int row = 0; row < m_segments.size(); ++row) {
         const Segment &s = m_segments[row];
+        if (s.kind == SegmentKind::Area) {
+            // Image area: a thumbnail of the cropped region instead of text.
+            const QString key = QStringLiteral("%1:%2:%3:%4:%5").arg(s.documentId).arg(s.x1).arg(s.y1).arg(s.x2).arg(s.y2);
+            if (!m_thumbnails.contains(key)) {
+                if (!images.contains(s.documentId))
+                    images.insert(s.documentId, m_project->documentImage(s.documentId));
+                const QImage thumb = Images::scaledToFit(Images::crop(images.value(s.documentId), s), ThumbWidth, ThumbHeight);
+                m_thumbnails.insert(key, thumb.isNull() ? QIcon() : QIcon(QPixmap::fromImage(thumb)));
+            }
+            auto *doc = new QTableWidgetItem(docNames.value(s.documentId));
+            doc->setToolTip(Ui::plainToolTip(Images::areaLabel(s)));
+            auto *code = new QTableWidgetItem(Ui::colorIcon(codes.value(s.codeId).color), m_project->codePath(s.codeId));
+            auto *area = new QTableWidgetItem(m_thumbnails.value(key), Images::areaLabel(s));
+            auto *weight = new QTableWidgetItem(s.weight ? QString::number(s.weight) : QString());
+            weight->setTextAlignment(Qt::AlignCenter);
+            m_table->setItem(row, DocumentColumn, doc);
+            m_table->setItem(row, CodeColumn, code);
+            m_table->setItem(row, TextColumn, area);
+            m_table->setItem(row, WeightColumn, weight);
+            m_table->setItem(row, CommentColumn, new QTableWidgetItem(s.comment));
+            continue;
+        }
         if (!texts.contains(s.documentId))
             texts.insert(s.documentId, m_project->documentText(s.documentId));
         auto *doc = new QTableWidgetItem(docNames.value(s.documentId));
@@ -275,9 +311,14 @@ void SegmentsPanel::contextMenuEvent(QContextMenuEvent *event)
     QMenu menu(this);
     menu.addAction(tr("Mostra nel documento"), this,
                    [this, seg] { emit segmentActivated(seg.documentId, seg.start, seg.end, seg.id); });
-    menu.addAction(tr("Copia testo"), this, [this, seg] {
-        QApplication::clipboard()->setText(m_project->documentText(seg.documentId).mid(seg.start, seg.length()));
-    });
+    if (seg.kind == SegmentKind::Area)
+        menu.addAction(tr("Copia immagine"), this, [this, seg] {
+            QApplication::clipboard()->setImage(Images::crop(m_project->documentImage(seg.documentId), seg));
+        });
+    else
+        menu.addAction(tr("Copia testo"), this, [this, seg] {
+            QApplication::clipboard()->setText(m_project->documentText(seg.documentId).mid(seg.start, seg.length()));
+        });
     if (!seg.id) { // a new interval from a complex retrieval: nothing stored to edit
         menu.exec(event->globalPos());
         return;

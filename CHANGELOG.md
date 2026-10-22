@@ -2,6 +2,16 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.17.0] - 2026-10-22 — Documenti immagine e codifica di aree (#27)
+
+- Si importano immagini PNG, JPG, GIF, BMP, TIFF e WebP (`Ctrl+I`): i byte originali stanno nel progetto, in una tabella `document_data` (schema v7, migrazione con backup), separata da `documents` per non copiare il blob nel log di annulla a ogni rinomina. API: `Project::addImageDocument`, `setDocumentData`/`documentData`, `documentImage`.
+- L'orientamento EXIF si applica in un solo punto (`documentImage`, `QImageReader::setAutoTransform`): visualizzazione, coordinate delle aree e ritagli usano la stessa immagine raddrizzata.
+- Nuovo visualizzatore (`ImageView`, `QGraphicsView`): rotella = zoom, tasto centrale = sposta, «Adatta» e «100%». Si trascina un rettangolo per selezionare un'area, che si codifica come un testo (`Ctrl+E`, `Ctrl+Maiusc+E`, menu contestuale «Codifica con», trascinando un codice dall'albero). Le aree si colorano col codice; un clic su un'area la seleziona e mostra codici, peso e commento (intestazione e barra di stato); un codice trascinato su un'area già codificata ne aggiunge un altro allo stesso rettangolo.
+- Segmenti recuperati: l'area è una miniatura del ritaglio (con «Copia immagine»); i recuperi complessi restano di solo testo. Esportazioni: HTML con il ritaglio incorporato come PNG, CSV e Excel con la descrizione dell'area; il memo di un'area ha un'etichetta leggibile.
+- Le immagini hanno memo e variabili come i testi e un'icona nell'albero dei documenti. Collegamenti e modifica del testo non si applicano alle immagini.
+- TIFF e WebP si leggono solo se Qt ha i plugin `qtiff`/`qwebp` (modulo `qtimageformats`): l'installazione di Qt di questo PC non li ha, quindi lo zip non li contiene e importando quei file compare un messaggio chiaro. PNG, JPG, GIF e BMP funzionano. `deploy.cmd` li include da solo se i plugin sono installati.
+- Non incluso: l'export/import QDPX delle immagini e delle loro aree (resta nella #46); PDF, audio e video (#26, #28).
+
 ## [0.16.0] - 2026-10-22 — Modello di segmento generalizzato (#25)
 Commit `8854204`
 

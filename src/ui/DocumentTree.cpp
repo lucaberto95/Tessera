@@ -88,7 +88,7 @@ void DocumentTree::rebuild()
     auto addDocument = [&](QTreeWidgetItem *parent, const Document &d, Kind kind) {
         auto *di = new QTreeWidgetItem(parent);
         di->setText(0, d.name);
-        di->setIcon(0, kind == DocumentItem ? docIcon : memberIcon);
+        di->setIcon(0, d.kind == DocumentKind::Image ? Ui::imageIcon() : kind == DocumentItem ? docIcon : memberIcon);
         di->setData(0, KindRole, kind);
         di->setData(0, IdRole, d.id);
         di->setFlags(di->flags() | Qt::ItemIsUserCheckable);

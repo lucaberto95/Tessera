@@ -62,6 +62,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
                  escluse (it/en scritte da zero; lista del progetto in meta `word_stoplist`, prefisso `#` = "impostata"),
                  `cloudLayout` (spirale con collisioni). Funzioni pure su testi già letti: girano in un thread
   Exporters      CSV per Excel (UTF-8 BOM, ';'), HTML, import variabili CSV, tabelle/fogli .xlsx (`*Sheet`, `projectSheets`)
+  Images         (`Images::`) suffissi/lettura file immagine, `crop` di un'area, miniature, PNG, `areaLabel`
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
   Xlsx           lettore (fogli, stringhe condivise/inline, date dai formati) e scrittore `writeWorkbook(Sheet...)`
   Survey         import di sondaggi (.xlsx/.csv): ruoli colonna, un documento per rispondente, variabili tipizzate
@@ -69,7 +70,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   DemoProject    progetto di esempio (3 interviste sul lavoro da remoto)
 src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWindow)
   MainWindow (menu, azioni, collega i segnali del Project ai pannelli), DocumentTree / CodeTree (caselle di
-  attivazione), DocumentView + CodingStripe, LinksDialog, SegmentsPanel (`setRetrieval`, `setPassages`),
+  attivazione), DocumentView + CodingStripe (+ ImageView per i documenti immagine), LinksDialog, SegmentsPanel (`setRetrieval`, `setPassages`),
   CooccurrenceDialog, StatsDialog, MemoDialog (non modale, `Ui::editMemo/openMemo`, `MemoLinkPicker`, drop di
   codici/documenti), SurveyImportDialog, DictionaryDialog (non modale), MemoManager, VariablesDialog,
   WordFrequencyDialog (3 schede: frequenze, nuvola, parole in contesto; calcolo con `QtConcurrent` + barra di
@@ -96,16 +97,27 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   statements }` in `Project::builtInMigrations()` (una istruzione SQL per voce, versioni crescenti, mai
   modificare una migrazione rilasciata). `open()` rifiuta file più nuovi, salva `"<nome> (backup vN).tsra"` e applica
   le migrazioni in **una transazione** (con `foreign_key_check`), a foreign key **disattivate** e prima dei trigger
-  di undo. Nei test `setMigrations()` simula versioni vecchie e future. Versione attuale: 6.
+  di undo. Nei test `setMigrations()` simula versioni vecchie e future. Versione attuale: 7.
 - **Segmenti generalizzati** (v6, #25): `documents.kind` (text|pdf|image|audio|video) e `segments.anchor_kind`
   (text|area|time) + `page, x1, y1, x2, y2` (area; pagina 1-based per i PDF, 0 per le immagini) e
   `t_start, t_end` (ms). I segmenti non testuali salvano `start_pos=0, end_pos=1` per rispettare il CHECK
   originale (nessuna tabella ricostruita). `segmentsForDocument/segments/allSegments` restituiscono **solo i
   segmenti di testo** salvo `includeNonText=true`: il codice basato sul testo (vista, recupero, co-occorrenze,
-  export) conta su start/end reali. API: `addMediaDocument`, `addAreaSegment`, `addTimeSegment`. Ancora non
-  fatti (per #26-#28/#46): contenuto binario dei documenti (blob nel file o collegato), UI per le aree/i tempi,
-  QDPX di documenti/segmenti non testuali (oggi l'export li omette). Le query sui segmenti richiedono le colonne
-  della v6: i test con migrazioni personalizzate devono includerle.
+  export) conta su start/end reali. API: `addMediaDocument`, `addAreaSegment`, `addTimeSegment`. Le query sui
+  segmenti richiedono le colonne della v6: i test con migrazioni personalizzate devono includerle (nei test la v6 è
+  `builtInMigrations().at(4)`, non più `.last()`). Ancora non fatti (per #26/#28/#46): UI per PDF, audio/video e
+  tempi, QDPX di documenti/segmenti non testuali (l'export li omette, immagini comprese).
+- **Documenti immagine** (v7, #27): i byte originali del file stanno in `document_data(document_id, data BLOB)`
+  (tabella separata: un blob in `documents` finirebbe nel log di undo a ogni rinomina). `documentImage()` è l'unico
+  punto che decodifica e applica l'orientamento EXIF (`setAutoTransform`): visualizzazione, coordinate delle aree e
+  `Images::crop` usano quell'immagine raddrizzata. Aree = pixel dell'immagine, `page = 0`. `DocumentView` ha una
+  modalità immagine (`isImage()`): `hasSelection/codeSelection/selectRange` lavorano sul rettangolo di `ImageView`;
+  collegamenti, ricerca nel documento e modifica del testo non si applicano. `SegmentsPanel` nel recupero semplice
+  include le aree (miniatura nella colonna Segmento, `segments()` restituisce solo i testi); i recuperi complessi
+  e le co-occorrenze restano di solo testo. Chi mostra o esporta segmenti con `allSegments(true)` deve gestire
+  `SegmentKind::Area` (niente `documentText().mid(start, ...)`). TIFF/WebP richiedono i plugin `qtiff`/`qwebp`
+  (modulo Qt `qtimageformats`, assente nel Qt di questo PC: `aqt install-qt ... -m qtimageformats`); `windeployqt`
+  li copia da solo se ci sono.
 - **Set di documenti** (`document_sets`, v2): riferimenti a documenti di qualsiasi gruppo. Nel `DocumentTree`
   lo stesso documento compare più volte: l'attivazione è per documento (`syncDocumentCheckBoxes`);
   `activeDocumentIds()` legge solo i gruppi.
@@ -162,6 +174,8 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   I campi di testo accettano già i drop come testo: serve un event filter (vedi `MemoDialog::eventFilter`).
 - In un `QDialog` i `QPushButton` sono `autoDefault`: Invio in un `QLineEdit` preme il primo pulsante, e se apre
   un dialogo modale il test si appende. Togliere `autoDefault` (vedi `DictionaryDialog`).
+- `QRect(topLeft, bottomRight)` è inclusivo: per un'area usare `QRect(x, y, w, h)` (vedi `Images::crop`).
+- Nei test dei widget, `grab()` subito dopo un `setText` può salvare un layout vecchio: `QTest::qWait(50)` prima dello screenshot.
 - moc rifiuta struct e funzioni di supporto dentro `private slots:` dei test: metterle in `private:`.
 - PowerShell 5.1: `Get-Content` legge come ANSI i UTF-8 senza BOM e `Set-Content -Encoding utf8` aggiunge il BOM:
   per riscrivere un sorgente usare Edit o `[IO.File]::ReadAllText/WriteAllText`.
@@ -185,7 +199,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#21, #25 (solo modello e API: niente UI né blob), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#21, #25 (modello e API), #27 (immagini e aree; non nel QDPX), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 Aggiornare questo elenco quando una issue viene chiusa.
 

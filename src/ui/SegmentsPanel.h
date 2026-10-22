@@ -3,6 +3,8 @@
 #include "core/Model.h"
 #include "core/Retrieval.h"
 
+#include <QHash>
+#include <QIcon>
 #include <QWidget>
 
 class Project;
@@ -19,7 +21,8 @@ public:
 
     void setActivation(const QList<qint64> &documentIds, const QList<qint64> &codeIds);
     void refresh();
-    QList<Segment> segments() const { return m_segments; }
+    // The text segments shown (image areas are listed in the table but have no text to analyse).
+    QList<Segment> segments() const;
     // Complex retrieval: shows the result of the query (re-run on every refresh) instead of the simple union.
     void setRetrieval(const Retrieval::Query &query);
     // Shows ready-made passages (e.g. a co-occurrence cell) as a retrieval; `label` names their origin.
@@ -48,6 +51,7 @@ private:
     QList<qint64> m_documentIds;
     QList<qint64> m_codeIds;
     QList<Segment> m_segments;
+    QHash<QString, QIcon> m_thumbnails; // cropped areas, by document and rectangle
     Retrieval::Query m_query;
     bool m_hasQuery = false;
     bool m_fixed = false; // m_results come from setPassages(), not from running m_query

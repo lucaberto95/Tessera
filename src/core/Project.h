@@ -2,7 +2,9 @@
 
 #include "core/Model.h"
 
+#include <QByteArray>
 #include <QHash>
+#include <QImage>
 #include <QObject>
 #include <QSqlDatabase>
 #include <QStringList>
@@ -83,6 +85,15 @@ public:
     // binary content itself is attached by the importers of those kinds.
     qint64 addMediaDocument(qint64 groupId, const QString &name, DocumentKind kind,
                             const QString &sourcePath = {}, const QString &uuid = {});
+    // Original bytes of a non-text document (v7), kept in a separate table.
+    bool setDocumentData(qint64 id, const QByteArray &data);
+    QByteArray documentData(qint64 id) const;
+    // Image document with its file content, in one undo step. The bytes are stored as they are.
+    qint64 addImageDocument(qint64 groupId, const QString &name, const QByteArray &data,
+                            const QString &sourcePath = {}, const QString &uuid = {});
+    // Decoded image with the EXIF orientation applied; area coordinates are pixels of this image.
+    // Null for other kinds or undecodable data.
+    QImage documentImage(qint64 id) const;
     bool renameDocument(qint64 id, const QString &name);
     bool moveDocument(qint64 id, qint64 groupId);
     bool deleteDocument(qint64 id);

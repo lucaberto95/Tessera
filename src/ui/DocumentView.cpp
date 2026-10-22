@@ -1,7 +1,9 @@
 #include "ui/DocumentView.h"
+#include "core/Images.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
 #include "ui/CodingStripe.h"
+#include "ui/ImageView.h"
 #include "ui/UiUtils.h"
 
 #include <QCheckBox>
@@ -185,6 +187,10 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     , m_editButton(new QToolButton)
     , m_edit(new DocTextEdit)
     , m_stripe(new CodingStripe(m_edit))
+    , m_imageView(new ImageView)
+    , m_fitButton(new QToolButton)
+    , m_actualButton(new QToolButton)
+    , m_zoomLabel(new QLabel)
 {
     auto *placeholder = new QLabel(tr("Fai doppio clic su un documento nel pannello Documenti per aprirlo.\n\n"
                                       "Seleziona del testo e trascina un codice sulla selezione,\n"
@@ -243,7 +249,43 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     header->addWidget(m_title);
     header->addSpacing(12);
     header->addWidget(m_info, 1);
+    header->addWidget(m_zoomLabel);
+    header->addWidget(m_fitButton);
+    header->addWidget(m_actualButton);
     header->addWidget(m_editButton);
+
+    // Controls of image documents (hidden for text).
+    m_info->setTextFormat(Qt::PlainText);
+    m_info->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred); // a long area label must not squeeze the title
+    m_fitButton->setText(tr("Adatta"));
+    m_fitButton->setToolTip(tr("Adatta l'immagine alla finestra"));
+    m_actualButton->setText(tr("100%"));
+    m_actualButton->setToolTip(tr("Mostra l'immagine a dimensione reale"));
+    m_zoomLabel->setStyleSheet(QStringLiteral("color: palette(mid)"));
+    connect(m_fitButton, &QToolButton::clicked, m_imageView, &ImageView::fitToWindow);
+    connect(m_actualButton, &QToolButton::clicked, m_imageView, &ImageView::actualSize);
+    connect(m_imageView, &ImageView::zoomChanged, this,
+            [this] { m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(m_imageView->zoom() * 100))); });
+    connect(m_imageView, &ImageView::selectionChanged, this, [this] {
+        // Selecting nothing (or a new rectangle) leaves the previously clicked area.
+        if (m_imageView->highlightedArea()) {
+            const QRectF sel = m_imageView->selection();
+            bool same = false;
+            for (const Segment &s : std::as_const(m_segments))
+                same = same || (s.id == m_imageView->highlightedArea() && QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1) == sel);
+            if (!same)
+                m_imageView->highlightArea(0);
+        }
+        updateImageInfo();
+        emit selectionChanged();
+    });
+    connect(m_imageView, &ImageView::areaClicked, this, &DocumentView::onImageAreaClicked);
+    connect(m_imageView, &ImageView::areaContextMenu, this, &DocumentView::showImageMenu);
+    connect(m_imageView, &ImageView::codeDropped, this, &DocumentView::onImageCodeDropped);
+    m_imageView->hide();
+    m_fitButton->hide();
+    m_actualButton->hide();
+    m_zoomLabel->hide();
 
     auto *body = new QHBoxLayout;
     body->setContentsMargins(0, 0, 0, 0);
@@ -262,7 +304,10 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     docLayout->addWidget(line);
     buildFindBar();
     docLayout->addWidget(m_findBar);
-    docLayout->addLayout(body, 1);
+    m_textBody = new QWidget;
+    m_textBody->setLayout(body);
+    docLayout->addWidget(m_textBody, 1);
+    docLayout->addWidget(m_imageView, 1);
 
     // The view keeps itself in sync with the project (stale segments would be lost when saving edits).
     connect(m_project, &Project::segmentsChanged, this, &DocumentView::onSegmentsChanged);
@@ -290,10 +335,17 @@ void DocumentView::openDocument(qint64 id)
     }
     m_docId = id;
     m_highlighted = 0;
-    setDisplayedText(m_project->documentText(id));
-    m_edit->moveCursor(QTextCursor::Start);
+    setImageMode(doc.kind == DocumentKind::Image);
+    if (m_isImage) {
+        m_edit->clear();
+        m_links.clear();
+        m_imageView->setImage(m_project->documentImage(id));
+    } else {
+        setDisplayedText(m_project->documentText(id));
+        m_edit->moveCursor(QTextCursor::Start);
+        m_links = m_project->linksForDocument(id);
+    }
     m_stack->setCurrentIndex(1);
-    m_links = m_project->linksForDocument(id);
     onDocumentsChanged();
     onCodesChanged();
     emit selectionChanged();
@@ -322,20 +374,31 @@ void DocumentView::closeDocument()
     m_links.clear();
     m_edit->clear();
     m_stripe->setSegments({}, {});
+    setImageMode(false);
+    m_imageView->clear();
     m_stack->setCurrentIndex(0);
     emit selectionChanged();
 }
 
-bool DocumentView::hasSelection() const { return m_docId && m_edit->textCursor().hasSelection(); }
+bool DocumentView::hasSelection() const
+{
+    if (m_isImage)
+        return m_docId && m_imageView->hasSelection();
+    return m_docId && m_edit->textCursor().hasSelection();
+}
 
 std::pair<int, int> DocumentView::selection() const
 {
+    if (m_isImage)
+        return {0, 0};
     const QTextCursor c = m_edit->textCursor();
     return {c.selectionStart(), c.selectionEnd()};
 }
 
 QString DocumentView::selectedText() const
 {
+    if (m_isImage)
+        return {};
     const auto [s, e] = selection();
     return rawText(m_edit).mid(s, e - s);
 }
@@ -344,6 +407,13 @@ qint64 DocumentView::codeSelection(qint64 codeId)
 {
     if (!m_docId || !codeId)
         return 0;
+    if (m_isImage) {
+        if (!m_imageView->hasSelection()) {
+            emit statusMessage(tr("Trascina un rettangolo sull'immagine per selezionare l'area da codificare."));
+            return 0;
+        }
+        return codeImageArea(codeId, m_imageView->selection());
+    }
     if (m_editing) {
         Ui::showError(this, tr("Termina la modifica del testo prima di codificare."));
         return 0;
@@ -379,6 +449,10 @@ void DocumentView::startLink()
 {
     if (!m_docId)
         return;
+    if (m_isImage) {
+        emit statusMessage(tr("I collegamenti non sono disponibili per le immagini."));
+        return;
+    }
     if (m_editing) {
         Ui::showError(this, tr("Termina la modifica del testo prima di creare un collegamento."));
         return;
@@ -399,6 +473,10 @@ qint64 DocumentView::completeLink()
 {
     if (!m_docId || !hasPendingLink())
         return 0;
+    if (m_isImage) {
+        emit statusMessage(tr("I collegamenti non sono disponibili per le immagini."));
+        return 0;
+    }
     if (m_editing) {
         Ui::showError(this, tr("Termina la modifica del testo prima di creare un collegamento."));
         return 0;
@@ -524,6 +602,18 @@ void DocumentView::onLinksChanged()
 
 void DocumentView::selectRange(int start, int end, qint64 segmentId)
 {
+    if (m_isImage) { // an area is identified by its segment; positions mean nothing here
+        for (const Segment &s : std::as_const(m_segments)) {
+            if (s.id == segmentId && s.kind == SegmentKind::Area) {
+                m_imageView->setSelection(QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1));
+                m_imageView->highlightArea(s.id, true);
+                updateImageInfo();
+                m_imageView->setFocus();
+                return;
+            }
+        }
+        return;
+    }
     const int len = m_edit->document()->characterCount() - 1;
     QTextCursor c(m_edit->document());
     c.setPosition(qBound(0, start, len));
@@ -544,7 +634,11 @@ void DocumentView::selectRange(int start, int end, qint64 segmentId)
 
 void DocumentView::reloadSegments()
 {
-    m_segments = m_docId ? m_project->segmentsForDocument(m_docId) : QList<Segment>{};
+    m_segments = m_docId ? m_project->segmentsForDocument(m_docId, m_isImage) : QList<Segment>{};
+    if (m_isImage) {
+        reloadImageAreas();
+        return;
+    }
     m_stripe->setSegments(m_segments, m_codes);
     refreshHighlights();
 }
@@ -642,23 +736,7 @@ void DocumentView::showTextMenu(const QPoint &globalPos, int position)
         codeNew->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
         codeNew->setEnabled(selected);
 
-        QMenu *codeWith = menu.addMenu(tr("Codifica con"));
-        codeWith->setEnabled(selected);
-        const QList<Code> codes = m_project->codes();
-        if (codes.isEmpty())
-            codeWith->addAction(tr("(nessun codice)"))->setEnabled(false);
-        // Flat list ordered as the tree, indented by depth.
-        QHash<qint64, QList<Code>> children;
-        for (const Code &c : codes)
-            children[c.parentId] << c;
-        std::function<void(qint64, int)> add = [&](qint64 parent, int depth) {
-            for (const Code &c : children.value(parent)) {
-                codeWith->addAction(Ui::colorIcon(c.color), QString(depth * 4, QLatin1Char(' ')) + c.name, this,
-                                    [this, id = c.id] { codeSelection(id); });
-                add(c.id, depth + 1);
-            }
-        };
-        add(0, 0);
+        addCodeWithMenu(&menu, selected);
 
         menu.addSeparator();
         QAction *start = menu.addAction(tr("Inizia collegamento"), this, &DocumentView::startLink);
@@ -695,24 +773,7 @@ void DocumentView::showTextMenu(const QPoint &globalPos, int position)
         for (const Segment &s : here) {
             QMenu *sub = menu.addMenu(Ui::colorIcon(m_codes.value(s.codeId).color), segmentLabel(s));
             sub->addAction(tr("Seleziona segmento"), this, [this, s] { selectRange(s.start, s.end, s.id); });
-            sub->addAction(tr("Commento…"), this, [this, s] {
-                bool ok = false;
-                const QString c = QInputDialog::getMultiLineText(this, tr("Commento al segmento"), tr("Commento:"),
-                                                                 s.comment, &ok);
-                if (ok)
-                    m_project->setSegmentComment(s.id, c.trimmed());
-            });
-            sub->addAction(tr("Peso…"), this, [this, s] {
-                bool ok = false;
-                const int w = QInputDialog::getInt(this, tr("Peso del segmento"), tr("Peso (0-100):"), s.weight, 0,
-                                                   100, 1, &ok);
-                if (ok)
-                    m_project->setSegmentWeight(s.id, w);
-            });
-            sub->addAction(Ui::memoIcon(), tr("Memo…"), this,
-                           [this, s] { Ui::editMemo(this, m_project, int(MemoTarget::Segment), s.id); });
-            sub->addSeparator();
-            sub->addAction(tr("Rimuovi codifica"), this, [this, s] { m_project->deleteSegment(s.id); });
+            addSegmentActions(sub, s);
         }
     }
 
@@ -720,6 +781,190 @@ void DocumentView::showTextMenu(const QPoint &globalPos, int position)
     QAction *copy = menu.addAction(tr("Copia"), m_edit, &QTextEdit::copy);
     copy->setEnabled(selected);
     menu.addAction(tr("Seleziona tutto"), m_edit, &QTextEdit::selectAll);
+    menu.exec(globalPos);
+}
+
+void DocumentView::addCodeWithMenu(QMenu *menu, bool enabled)
+{
+    QMenu *codeWith = menu->addMenu(tr("Codifica con"));
+    codeWith->setEnabled(enabled);
+    const QList<Code> codes = m_project->codes();
+    if (codes.isEmpty())
+        codeWith->addAction(tr("(nessun codice)"))->setEnabled(false);
+    // Flat list ordered as the tree, indented by depth.
+    QHash<qint64, QList<Code>> children;
+    for (const Code &c : codes)
+        children[c.parentId] << c;
+    std::function<void(qint64, int)> add = [&](qint64 parent, int depth) {
+        for (const Code &c : children.value(parent)) {
+            codeWith->addAction(Ui::colorIcon(c.color), QString(depth * 4, QLatin1Char(' ')) + c.name, this,
+                                [this, id = c.id] { codeSelection(id); });
+            add(c.id, depth + 1);
+        }
+    };
+    add(0, 0);
+}
+
+void DocumentView::addSegmentActions(QMenu *sub, const Segment &s)
+{
+    sub->addAction(tr("Commento…"), this, [this, s] {
+        bool ok = false;
+        const QString c =
+            QInputDialog::getMultiLineText(this, tr("Commento al segmento"), tr("Commento:"), s.comment, &ok);
+        if (ok)
+            m_project->setSegmentComment(s.id, c.trimmed());
+    });
+    sub->addAction(tr("Peso…"), this, [this, s] {
+        bool ok = false;
+        const int w = QInputDialog::getInt(this, tr("Peso del segmento"), tr("Peso (0-100):"), s.weight, 0, 100, 1, &ok);
+        if (ok)
+            m_project->setSegmentWeight(s.id, w);
+    });
+    sub->addAction(Ui::memoIcon(), tr("Memo…"), this,
+                   [this, s] { Ui::editMemo(this, m_project, int(MemoTarget::Segment), s.id); });
+    sub->addSeparator();
+    sub->addAction(tr("Rimuovi codifica"), this, [this, s] { m_project->deleteSegment(s.id); });
+}
+
+// ---------------------------------------------------------------- image documents
+
+void DocumentView::setImageMode(bool image)
+{
+    if (image == m_isImage)
+        return;
+    m_isImage = image;
+    if (image)
+        hideFindBar();
+    m_textBody->setVisible(!image);
+    m_imageView->setVisible(image);
+    m_editButton->setVisible(!image);
+    m_fitButton->setVisible(image);
+    m_actualButton->setVisible(image);
+    m_zoomLabel->setVisible(image);
+    if (image)
+        m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(m_imageView->zoom() * 100)));
+}
+
+void DocumentView::reloadImageAreas()
+{
+    QList<ImageView::Area> areas;
+    for (const Segment &s : std::as_const(m_segments)) {
+        if (s.kind != SegmentKind::Area)
+            continue;
+        areas.append({s.id, QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1), m_codes.value(s.codeId).color, segmentLabel(s)});
+    }
+    m_imageView->setAreas(areas);
+    updateImageInfo();
+}
+
+// Header line: the size of the image, or the codes of the clicked area (codes and comment, as the issue asks).
+void DocumentView::updateImageInfo()
+{
+    if (!m_isImage)
+        return;
+    const QSize size = m_imageView->imageSize();
+    QString info = size.isEmpty() ? tr("Immagine non leggibile")
+                                  : tr("Immagine %1 × %2 px").arg(size.width()).arg(size.height());
+    if (const qint64 id = m_imageView->highlightedArea()) {
+        QStringList labels;
+        const QRectF sel = m_imageView->selection();
+        for (const Segment &s : std::as_const(m_segments))
+            if (s.kind == SegmentKind::Area && QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1) == sel)
+                labels << segmentLabel(s);
+        if (labels.isEmpty())
+            labels << segmentLabel(m_project->segment(id));
+        info += QStringLiteral(" · ") + tr("Area codificata: ") + labels.join(QStringLiteral(" | "));
+    } else if (m_imageView->hasSelection()) {
+        const QRectF r = m_imageView->selection();
+        info += QStringLiteral(" · ") + tr("Selezione %1 × %2 px").arg(qRound(r.width())).arg(qRound(r.height()));
+    }
+    m_info->setText(info);
+}
+
+void DocumentView::onImageAreaClicked(const QList<qint64> &ids)
+{
+    if (ids.isEmpty())
+        return;
+    // The clicked area becomes the selection, so Ctrl+E adds a further code to the same rectangle.
+    for (const Segment &s : std::as_const(m_segments)) {
+        if (s.id == ids.first()) {
+            m_imageView->highlightArea(s.id);
+            m_imageView->setSelection(QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1));
+            updateImageInfo();
+            QStringList labels;
+            for (qint64 id : ids)
+                for (const Segment &o : std::as_const(m_segments))
+                    if (o.id == id)
+                        labels << segmentLabel(o);
+            emit statusMessage(labels.join(QStringLiteral(" | ")));
+            return;
+        }
+    }
+}
+
+qint64 DocumentView::codeImageArea(qint64 codeId, const QRectF &rect)
+{
+    const qint64 id = m_project->addAreaSegment(m_docId, codeId, 0, rect.left(), rect.top(), rect.right(), rect.bottom());
+    if (id)
+        emit statusMessage(tr("Area codificata con \"%1\"").arg(m_project->codePath(codeId)));
+    else
+        Ui::showError(this, m_project->lastError());
+    return id;
+}
+
+void DocumentView::onImageCodeDropped(qint64 codeId, const QPointF &imagePos)
+{
+    if (!m_docId || !codeId)
+        return;
+    // A code dropped on the selection codes it; otherwise on the coded area under the pointer.
+    if (m_imageView->hasSelection() && m_imageView->selection().contains(imagePos)) {
+        codeSelection(codeId);
+        return;
+    }
+    const QList<qint64> ids = m_imageView->areasAt(imagePos);
+    for (const Segment &s : std::as_const(m_segments))
+        if (!ids.isEmpty() && s.id == ids.first()) {
+            codeImageArea(codeId, QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1));
+            return;
+        }
+    emit statusMessage(tr("Seleziona un'area, o trascina il codice su un'area già codificata."));
+}
+
+void DocumentView::showImageMenu(const QList<qint64> &ids, const QPoint &globalPos)
+{
+    if (!m_docId)
+        return;
+    QMenu menu(this);
+    const bool selected = hasSelection();
+    const qint64 current = m_currentCode ? m_currentCode() : 0;
+    QAction *codeCurrent = menu.addAction(
+        current ? tr("Codifica con \"%1\"").arg(m_project->code(current).name) : tr("Codifica con il codice selezionato"),
+        this, [this, current] { codeSelection(current); });
+    codeCurrent->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
+    codeCurrent->setEnabled(selected && current);
+    QAction *codeNew = menu.addAction(tr("Codifica con un nuovo codice…"), this,
+                                      [this] { emit newCodeForSelectionRequested(); });
+    codeNew->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+    codeNew->setEnabled(selected);
+    addCodeWithMenu(&menu, selected);
+
+    bool any = false;
+    for (qint64 id : ids) {
+        for (const Segment &s : std::as_const(m_segments)) {
+            if (s.id != id)
+                continue;
+            if (!any)
+                menu.addSeparator();
+            any = true;
+            QMenu *sub = menu.addMenu(Ui::colorIcon(m_codes.value(s.codeId).color), segmentLabel(s));
+            sub->addAction(tr("Seleziona area"), this, [this, s] { selectRange(0, 0, s.id); });
+            addSegmentActions(sub, s);
+        }
+    }
+    menu.addSeparator();
+    menu.addAction(tr("Deseleziona"), m_imageView, &ImageView::clearSelection)->setEnabled(selected);
+    menu.addAction(tr("Adatta alla finestra"), m_imageView, &ImageView::fitToWindow);
+    menu.addAction(tr("Dimensione reale (100%)"), m_imageView, &ImageView::actualSize);
     menu.exec(globalPos);
 }
 
@@ -790,6 +1035,10 @@ void DocumentView::onDocumentsChanged()
         return;
     }
     m_title->setText(doc.name);
+    if (m_isImage) {
+        updateImageInfo();
+        return;
+    }
     const QString text = m_editing ? rawText(m_edit) : m_project->documentText(m_docId);
     if (!m_editing && text != rawText(m_edit)) {
         // Changed outside the view (undo/redo of a text edit): show the stored text, keep the scroll.
@@ -807,7 +1056,7 @@ void DocumentView::setEditing(bool editing)
     if (editing == m_editing)
         return;
     if (editing) {
-        if (!m_docId) {
+        if (!m_docId || m_isImage) {
             m_editButton->setChecked(false);
             return;
         }
@@ -925,7 +1174,7 @@ void DocumentView::buildFindBar()
 
 void DocumentView::showFindBar()
 {
-    if (!m_docId)
+    if (!m_docId || m_isImage)
         return;
     // Like an editor: a one-line selection becomes the search term.
     const QString selected = selectedText();

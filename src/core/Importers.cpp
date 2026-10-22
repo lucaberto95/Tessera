@@ -1,4 +1,5 @@
 #include "core/Importers.h"
+#include "core/Images.h"
 #include "core/TextUtils.h"
 
 #include <QFile>
@@ -68,9 +69,14 @@ QString fileDialogFilter()
     QStringList patterns;
     for (const QString &s : supportedSuffixes())
         patterns << QStringLiteral("*.") + s;
+    QStringList imagePatterns;
+    for (const QString &s : Images::suffixes()) {
+        patterns << QStringLiteral("*.") + s;
+        imagePatterns << QStringLiteral("*.") + s;
+    }
     return QObject::tr("Documenti supportati (%1);;Testo (*.txt *.md);;Word (*.docx);;OpenDocument (*.odt);;"
-                       "RTF (*.rtf);;PDF (*.pdf);;HTML (*.html *.htm);;Tutti i file (*)")
-        .arg(patterns.join(QLatin1Char(' ')));
+                       "RTF (*.rtf);;PDF (*.pdf);;HTML (*.html *.htm);;Immagini (%2);;Tutti i file (*)")
+        .arg(patterns.join(QLatin1Char(' ')), imagePatterns.join(QLatin1Char(' ')));
 }
 
 QString decodeText(const QByteArray &data)

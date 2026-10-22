@@ -1,6 +1,7 @@
 #include "core/Cooccurrence.h"
 #include "core/Dictionaries.h"
 #include "core/Exporters.h"
+#include "core/Images.h"
 #include "core/Importers.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
@@ -12,10 +13,13 @@
 #include "core/WordFrequencies.h"
 #include "core/Xlsx.h"
 
+#include <QBuffer>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImageWriter>
+#include <QRegularExpression>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -90,6 +94,35 @@ private:
         if (!f.open(QIODevice::ReadOnly))
             return {};
         return QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256);
+    }
+
+    // Image left half red, right half blue.
+    static QImage twoColorImage(int w, int h)
+    {
+        QImage img(w, h, QImage::Format_RGB32);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                img.setPixelColor(x, y, x < w / 2 ? QColor(Qt::red) : QColor(Qt::blue));
+        return img;
+    }
+
+    static QByteArray encodeImage(const QImage &img, const char *format)
+    {
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        img.save(&buffer, format);
+        return bytes;
+    }
+
+    // A JPEG carrying an EXIF Orientation tag (1..8), inserted as APP1 right after the SOI marker.
+    static QByteArray jpegWithOrientation(const QImage &img, int orientation)
+    {
+        QByteArray jpg = encodeImage(img, "JPEG");
+        QByteArray app1("\xFF\xE1\x00\x22" "Exif\0\0" "II*\0\x08\0\0\0" "\x01\0" "\x12\x01\x03\0\x01\0\0\0", 28);
+        app1.append(char(orientation));
+        app1.append(QByteArray(7, '\0')); // rest of the value, then the offset of the next IFD
+        return jpg.left(2) + app1 + jpg.mid(2);
     }
 
     static int fileVersion(const QString &file)
@@ -213,8 +246,9 @@ private slots:
         const QList<Project::Migration> migrations = {
             {2, {"CREATE TABLE extra (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '')"}},
             {3, {"ALTER TABLE codes ADD COLUMN alias TEXT NOT NULL DEFAULT ''"}},
-            Project::builtInMigrations().last(), // segment anchors, needed by the segment queries
+            Project::builtInMigrations().at(4), // segment anchors (v6), needed by the segment queries
         };
+        QCOMPARE(migrations.last().toVersion, 6);
         Project p;
         p.setMigrations(migrations);
         QCOMPARE(p.schemaVersion(), 6);
@@ -2795,6 +2829,208 @@ private slots:
         QCOMPARE(p.dictEntries(f.tempo).size(), undoable + 2);
         QVERIFY(p.undo()); // one step
         QCOMPARE(p.dictEntries(f.tempo).size(), undoable);
+    }
+
+    // ------------------------------------------------------------------ image documents (#27)
+
+    void imageDocumentRoundTrip()
+    {
+        const QImage source = twoColorImage(100, 60);
+        QVERIFY(source.save(path("foto.png")));
+        QVERIFY(Images::isImageFile("x/FOTO.JPG"));
+        QVERIFY(!Images::isImageFile("x/nota.txt"));
+        QVERIFY(Importers::fileDialogFilter().contains("*.webp"));
+
+        QString error;
+        const QByteArray bytes = Images::readFile(path("foto.png"), &error);
+        QVERIFY2(!bytes.isEmpty(), qPrintable(error));
+
+        const QString file = path("img.tsra");
+        qint64 doc = 0, code = 0, area = 0;
+        {
+            Project p;
+            QVERIFY(p.create(file));
+            code = p.addCode(0, "Tema", Qt::green);
+            p.clearUndoHistory();
+            doc = p.addImageDocument(p.groups().first().id, "Foto", bytes, path("foto.png"));
+            QVERIFY(doc > 0);
+            QCOMPARE(p.document(doc).kind, DocumentKind::Image);
+            QCOMPARE(p.documentData(doc), bytes);
+            QCOMPARE(p.documentImage(doc).size(), QSize(100, 60));
+            QCOMPARE(p.documentText(doc), QString());
+
+            area = p.addAreaSegment(doc, code, 0, 10, 5, 60, 40, 0, "commento");
+            QVERIFY(area > 0);
+
+            // Renaming does not touch the content; the whole import is one undo step.
+            QVERIFY(p.renameDocument(doc, "Altra foto"));
+            QCOMPARE(p.documentData(doc), bytes);
+            QVERIFY(p.undo()); // rename
+            QVERIFY(p.undo()); // area
+            QVERIFY(p.undo()); // import
+            QCOMPARE(p.documents().size(), 0);
+            QVERIFY(p.documentData(doc).isEmpty());
+            QVERIFY(p.redo());
+            QCOMPARE(p.documentData(doc), bytes);
+            QVERIFY(p.redo());
+            QVERIFY(p.redo());
+
+            // Deleting the document removes the blob; undo brings it back.
+            QVERIFY(p.deleteDocument(doc));
+            QVERIFY(p.documentData(doc).isEmpty());
+            QVERIFY(p.undo());
+            QCOMPARE(p.documentData(doc), bytes);
+            QCOMPARE(p.segment(area).comment, QString("commento"));
+
+            QVERIFY(p.saveCopyAs(path("img-copia.tsra")));
+        }
+        for (const QString &name : {QString("img.tsra"), QString("img-copia.tsra")}) {
+            Project p;
+            QVERIFY(p.open(path(name)));
+            QCOMPARE(p.documentData(doc), bytes);
+            const Segment s = p.segment(area);
+            QCOMPARE(s.kind, SegmentKind::Area);
+            QCOMPARE(s.x1, 10.0);
+            QCOMPARE(s.y2, 40.0);
+            // The crop is the area of the image, in the original pixels.
+            const QImage crop = Images::crop(p.documentImage(doc), s);
+            QCOMPARE(crop.size(), QSize(50, 35));
+            QCOMPARE(crop.pixelColor(0, 0), QColor(Qt::red));
+            QCOMPARE(crop.pixelColor(49, 34), QColor(Qt::blue));
+        }
+    }
+
+    void imageFormatsAndErrors()
+    {
+        const QImage img = twoColorImage(40, 20);
+        for (const char *format : {"PNG", "JPEG", "BMP"}) {
+            const QString name = QString("f.%1").arg(QString(format).toLower());
+            writeFile(name, encodeImage(img, format));
+            QString error;
+            QVERIFY2(!Images::readFile(path(name), &error).isEmpty(), qPrintable(name + ": " + error));
+        }
+        // TIFF and WebP depend on the plugins Qt ships; when the writer is there, the reader must be.
+        for (const char *format : {"TIFF", "WEBP"}) {
+            if (!QImageWriter::supportedImageFormats().contains(format))
+                continue;
+            const QString name = QString("f.%1").arg(QString(format).toLower());
+            writeFile(name, encodeImage(img, format));
+            QString error;
+            QVERIFY2(!Images::readFile(path(name), &error).isEmpty(), qPrintable(name + ": " + error));
+        }
+        // Not an image, though named like one; a missing file.
+        writeFile("falso.png", "questo non e' un PNG");
+        QString error;
+        QVERIFY(Images::readFile(path("falso.png"), &error).isEmpty());
+        QVERIFY(!error.isEmpty());
+        error.clear();
+        QVERIFY(Images::readFile(path("assente.png"), &error).isEmpty());
+        QVERIFY(!error.isEmpty());
+    }
+
+    void imageExifOrientationIsAppliedOnce()
+    {
+        // Stored 40x20, red left / blue right, with Orientation 6 (rotate 90 degrees clockwise to display).
+        const QByteArray jpeg = jpegWithOrientation(twoColorImage(40, 20), 6);
+        writeFile("exif.jpg", jpeg);
+        QString error;
+        QVERIFY2(!Images::readFile(path("exif.jpg"), &error).isEmpty(), qPrintable(error));
+
+        Project p;
+        QVERIFY(p.create(path("exif.tsra")));
+        const qint64 doc = p.addImageDocument(p.groups().first().id, "Ruotata", jpeg);
+        QCOMPARE(p.documentData(doc), jpeg); // stored as it came
+        const QImage upright = p.documentImage(doc);
+        QCOMPARE(upright.size(), QSize(20, 40));
+        // Upright: red on top, blue below, so area coordinates and crops refer to what the user sees.
+        QVERIFY(qRed(upright.pixel(10, 5)) > 200 && qBlue(upright.pixel(10, 5)) < 80);
+        QVERIFY(qBlue(upright.pixel(10, 35)) > 200 && qRed(upright.pixel(10, 35)) < 80);
+        // An area covering the lower half is in the upright frame: it is the blue part.
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 a = p.addAreaSegment(doc, code, 0, 0, 22, 20, 40);
+        QVERIFY(a > 0);
+        const QImage crop = Images::crop(upright, p.segment(a));
+        QCOMPARE(crop.size(), QSize(20, 18));
+        QVERIFY(qBlue(crop.pixel(5, 5)) > 200);
+        // Areas outside the image give nothing.
+        Segment far;
+        far.x1 = 500;
+        far.y1 = 500;
+        far.x2 = 600;
+        far.y2 = 600;
+        QVERIFY(Images::crop(upright, far).isNull());
+    }
+
+    void imageAreasInExports()
+    {
+        Project p;
+        QVERIFY(p.create(path("export-img.tsra")));
+        const QImage img = twoColorImage(80, 40);
+        const qint64 g = p.groups().first().id;
+        const qint64 doc = p.addImageDocument(g, "Foto", encodeImage(img, "PNG"));
+        const qint64 text = p.addDocument(g, "Testo", "Una frase da codificare");
+        const qint64 code = p.addCode(0, "Tema", QColor("#336699"));
+        const qint64 a = p.addAreaSegment(doc, code, 0, 0, 0, 40, 40, 3, "metà rossa");
+        QVERIFY(a > 0);
+        QVERIFY(p.addSegment(text, code, 0, 3) > 0);
+
+        // Text-based lists still skip the area; the explicit ones include it.
+        QCOMPARE(p.allSegments().size(), 1);
+        const QList<Segment> all = p.allSegments(true);
+        QCOMPARE(all.size(), 2);
+
+        const Exporters::Table table = Exporters::segmentsTable(p, all);
+        QCOMPARE(table.size(), 3);
+        QStringList areaRow;
+        for (const QStringList &row : table)
+            if (row.value(1) == "Foto")
+                areaRow = row;
+        QVERIFY(!areaRow.isEmpty());
+        QVERIFY(areaRow.last().contains("40 × 40"));
+        QCOMPARE(areaRow.value(6), QString("metà rossa"));
+
+        const QString html = path("segmenti-img.html");
+        QString error;
+        QVERIFY2(Exporters::exportSegmentsHtml(p, all, html, &error), qPrintable(error));
+        QFile f(html);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QString content = QString::fromUtf8(f.readAll());
+        QVERIFY(content.contains("class=\"text\">Una</div>"));
+        const QRegularExpression re("src=\"data:image/png;base64,([A-Za-z0-9+/=]+)\"");
+        const QRegularExpressionMatch m = re.match(content);
+        QVERIFY2(m.hasMatch(), "the cropped area must be embedded as an image");
+        QImage embedded;
+        QVERIFY(embedded.loadFromData(QByteArray::fromBase64(m.captured(1).toLatin1())));
+        QCOMPARE(embedded.size(), QSize(40, 40));
+        QCOMPARE(embedded.pixelColor(20, 20), QColor(Qt::red));
+
+        // The workbook export has the area too, and the memo label of an area is readable.
+        const QList<Xlsx::Sheet> sheets = Exporters::projectSheets(p);
+        bool found = false;
+        for (const Xlsx::Sheet &s : sheets)
+            for (const QStringList &row : s.rows)
+                found = found || row.contains("metà rossa");
+        QVERIFY(found);
+        QVERIFY(Exporters::memoTargetLabel(p, MemoTarget::Segment, a).contains("40 × 40"));
+    }
+
+    void imageDocumentsMigrateFromV6()
+    {
+        const QString file = path("v6-img.tsra");
+        {
+            Project old;
+            old.setMigrations(Project::builtInMigrations().mid(0, 5)); // up to schema 6
+            QVERIFY(old.create(file));
+            QCOMPARE(old.addMediaDocument(old.groups().first().id, "Foto", DocumentKind::Image) > 0, true);
+        }
+        QCOMPARE(fileVersion(file), 6);
+        Project p;
+        QVERIFY(p.open(file));
+        QCOMPARE(p.schemaVersion(), 7);
+        QCOMPARE(fileVersion(file), 7);
+        const qint64 doc = p.documents().first().id;
+        QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
+        QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
     }
 
     void wordCloudLayoutDoesNotOverlap()

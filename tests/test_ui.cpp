@@ -8,6 +8,7 @@
 #include "ui/StatsDialog.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
+#include "ui/ImageView.h"
 #include "ui/LinksDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
@@ -22,8 +23,12 @@
 #include "ui/VariablesDialog.h"
 #include "ui/WordFrequencyDialog.h"
 
+#include <QBuffer>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QWheelEvent>
 #include <QDir>
 #include <QImage>
 #include <QLineEdit>
@@ -1024,6 +1029,135 @@ private slots:
         searchDialog.searchFor("video");
         QCOMPARE(searchDialog.findChild<QLineEdit *>()->text(), QString("video"));
         QCOMPARE(searchDialog.findChild<QTableWidget *>()->rowCount(), 1); // whole word: not "videochiamata"
+    }
+
+    void imageDocumentView()
+    {
+        Project p; // separate from the example project, whose document counts other tests rely on
+        QVERIFY(p.create(m_dir.filePath("images.tsra")));
+        QImage img(200, 100, QImage::Format_RGB32);
+        img.fill(Qt::white);
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        QVERIFY(img.save(&buffer, "PNG"));
+        const qint64 group = p.groups().first().id;
+        const qint64 doc = p.addImageDocument(group, "Cartello", bytes);
+        const qint64 text = p.addDocument(group, "Testo", "Una frase");
+        const qint64 tema = p.addCode(0, "Tema", QColor("#d62728"));
+        const qint64 altro = p.addCode(0, "Altro", QColor("#1f77b4"));
+
+        DocumentView view(&p);
+        view.resize(800, 600);
+        view.show();
+        QSignalSpy status(&view, &DocumentView::statusMessage);
+        view.openDocument(doc);
+        QVERIFY(view.isImage());
+        ImageView *iv = view.imageView();
+        QVERIFY(iv->hasImage());
+        QCOMPARE(iv->imageSize(), QSize(200, 100));
+        QVERIFY(!view.hasSelection());
+        QCOMPARE(view.codeSelection(tema), qint64(0)); // nothing selected
+        QCOMPARE(p.segmentsForDocument(doc, true).size(), 0);
+
+        // Dragging a rectangle selects an area (in image pixels), and Ctrl+E-style coding stores it.
+        const QPoint from = iv->mapFromScene(QPointF(20, 10));
+        const QPoint to = iv->mapFromScene(QPointF(120, 60));
+        QTest::mousePress(iv->viewport(), Qt::LeftButton, Qt::NoModifier, from);
+        QTest::mouseMove(iv->viewport(), (from + to) / 2);
+        QTest::mouseMove(iv->viewport(), to);
+        QTest::mouseRelease(iv->viewport(), Qt::LeftButton, Qt::NoModifier, to);
+        QVERIFY(view.hasSelection());
+        QVERIFY(qAbs(iv->selection().left() - 20) <= 2 && qAbs(iv->selection().top() - 10) <= 2);
+        QVERIFY(qAbs(iv->selection().width() - 100) <= 3 && qAbs(iv->selection().height() - 50) <= 3);
+        const qint64 area = view.codeSelection(tema);
+        QVERIFY(area > 0);
+        const Segment s = p.segment(area);
+        QCOMPARE(s.kind, SegmentKind::Area);
+        QCOMPARE(s.page, 0);
+        QVERIFY(qAbs(s.x2 - s.x1 - 100) <= 3);
+        QCOMPARE(iv->areasAt(QPointF(50, 30)), QList<qint64>{area});
+        QVERIFY(iv->areasAt(QPointF(150, 90)).isEmpty());
+
+        // A click on empty space clears the selection; a click on the area selects it and reports its codes.
+        QTest::mouseClick(iv->viewport(), Qt::LeftButton, Qt::NoModifier, iv->mapFromScene(QPointF(180, 90)));
+        QVERIFY(!view.hasSelection());
+        status.clear();
+        QTest::mouseClick(iv->viewport(), Qt::LeftButton, Qt::NoModifier, iv->mapFromScene(QPointF(50, 30)));
+        QVERIFY(view.hasSelection());
+        QCOMPARE(iv->highlightedArea(), area);
+        QCOMPARE(iv->selection(), QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1));
+        QVERIFY(!status.isEmpty() && status.last().first().toString().contains("Tema"));
+
+        // A comment shows up in the area's tooltip text and in the label.
+        QVERIFY(p.setSegmentComment(area, "scritta sbiadita"));
+        QCOMPARE(iv->highlightedArea(), area); // the view reloaded and kept the highlight
+        QTest::mouseClick(iv->viewport(), Qt::LeftButton, Qt::NoModifier, iv->mapFromScene(QPointF(50, 30)));
+        QVERIFY(status.last().first().toString().contains("scritta sbiadita"));
+
+        // Another code dropped on the selected area codes the same rectangle.
+        auto *mime = new QMimeData;
+        mime->setData(Ui::CodeMimeType, QByteArray::number(altro));
+        const QPoint inside = iv->mapFromScene(QPointF(50, 30));
+        QDragEnterEvent enter(inside, Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
+        QVERIFY(QCoreApplication::sendEvent(iv->viewport(), &enter));
+        QVERIFY(enter.isAccepted());
+        QDropEvent drop(inside, Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(iv->viewport(), &drop);
+        delete mime;
+        const QList<Segment> segs = p.segmentsForDocument(doc, true);
+        QCOMPARE(segs.size(), 2);
+        QCOMPARE(segs[0].x1, segs[1].x1);
+        QCOMPARE(iv->areasAt(QPointF(50, 30)).size(), 2);
+
+        // The wheel zooms and stops fitting the window; "Adatta" brings it back.
+        QVERIFY(iv->isFitted());
+        const double before = iv->zoom();
+        QWheelEvent wheel(QPointF(inside), QPointF(iv->viewport()->mapToGlobal(inside)), QPoint(), QPoint(0, 240),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(iv->viewport(), &wheel);
+        QVERIFY(iv->zoom() > before);
+        QVERIFY(!iv->isFitted());
+        iv->fitToWindow();
+        QVERIFY(iv->isFitted());
+
+        // Links and text editing do not apply to images.
+        view.startLink();
+        QVERIFY(!view.hasPendingLink());
+        view.setEditing(true);
+        QVERIFY(!view.isEditing());
+
+        // The segments panel lists the areas with a thumbnail, and the exports include them.
+        SegmentsPanel panel(&p);
+        panel.resize(1000, 300);
+        panel.setActivation({doc}, {tema});
+        QCOMPARE(panel.resultCount(), 1);
+        QVERIFY(panel.segments().isEmpty()); // no text to analyse
+        const QTableWidget *table = panel.findChild<QTableWidget *>();
+        QCOMPARE(table->rowCount(), 1);
+        QVERIFY(!table->item(0, 2)->icon().isNull());
+        QVERIFY(table->item(0, 2)->text().contains("Area"));
+        QCOMPARE(table->item(0, 4)->text(), QString("scritta sbiadita"));
+        QTest::qWait(50); // let pending layout requests run before the grab
+        shot(&view, "image_document");
+        shot(&panel, "image_segments");
+
+        // Opening a text document and coming back keeps the areas; the text view is not affected.
+        view.openDocument(text);
+        QVERIFY(!view.isImage());
+        view.selectRange(0, 3);
+        QVERIFY(view.hasSelection());
+        view.openDocument(doc);
+        QVERIFY(view.isImage());
+        QCOMPARE(iv->areasAt(QPointF(50, 30)).size(), 2);
+        view.selectRange(0, 0, area); // as when a retrieved segment is activated
+        QCOMPARE(iv->highlightedArea(), area);
+
+        // Removing a coding updates the view.
+        QVERIFY(p.deleteSegment(segs[1].id));
+        QCOMPARE(iv->areasAt(QPointF(50, 30)).size(), 1);
+        view.closeDocument();
+        QVERIFY(!iv->hasImage());
     }
 
     void mainWindow()

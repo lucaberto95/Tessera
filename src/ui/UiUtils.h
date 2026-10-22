@@ -25,6 +25,7 @@ void showInfo(QWidget *parent, const QString &title, const QString &text);
 
 QIcon colorIcon(const QColor &color, int size = 14);
 QIcon memoIcon();
+QIcon imageIcon(); // image documents in the document tree
 
 bool confirm(QWidget *parent, const QString &title, const QString &text);
 void showError(QWidget *parent, const QString &text);

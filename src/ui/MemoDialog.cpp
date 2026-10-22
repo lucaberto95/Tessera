@@ -1,4 +1,5 @@
 #include "ui/MemoDialog.h"
+#include "core/Images.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
 #include "ui/UiUtils.h"
@@ -375,7 +376,7 @@ MemoLinkPicker::MemoLinkPicker(Project *project, const QList<MemoLink> &existing
     for (const Code &c : project->codes())
         codes.insert(c.id, c);
     for (const Document &d : project->documents()) {
-        const QList<Segment> segments = project->segmentsForDocument(d.id);
+        const QList<Segment> segments = project->segmentsForDocument(d.id, true);
         if (segments.isEmpty())
             continue;
         auto *di = new QTreeWidgetItem(segmentsRoot, {d.name});
@@ -383,7 +384,9 @@ MemoLinkPicker::MemoLinkPicker(Project *project, const QList<MemoLink> &existing
         di->setIcon(0, style()->standardIcon(QStyle::SP_FileIcon));
         const QString text = project->documentText(d.id);
         for (const Segment &s : segments)
-            checkable(di, tr("%1: %2").arg(codes.value(s.codeId).name, TextUtils::excerpt(text, s.start, s.end, 80)),
+            checkable(di, tr("%1: %2").arg(codes.value(s.codeId).name,
+                                           s.kind == SegmentKind::Text ? TextUtils::excerpt(text, s.start, s.end, 80)
+                                                                       : Images::areaLabel(s)),
                       MemoTarget::Segment, s.id);
     }
 

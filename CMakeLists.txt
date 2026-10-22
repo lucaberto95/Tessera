@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Tessera VERSION 0.16.0 LANGUAGES CXX)
+project(Tessera VERSION 0.17.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,7 @@ qt_add_library(tessera_core STATIC
     src/core/Model.h
     src/core/Project.h src/core/Project.cpp
     src/core/Importers.h src/core/Importers.cpp
+    src/core/Images.h src/core/Images.cpp
     src/core/Exporters.h src/core/Exporters.cpp
     src/core/Qdpx.h src/core/Qdpx.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
@@ -44,6 +45,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/CodeTree.h src/ui/CodeTree.cpp
     src/ui/DocumentView.h src/ui/DocumentView.cpp
     src/ui/CodingStripe.h src/ui/CodingStripe.cpp
+    src/ui/ImageView.h src/ui/ImageView.cpp
     src/ui/SegmentsPanel.h src/ui/SegmentsPanel.cpp
     src/ui/MemoDialog.h src/ui/MemoDialog.cpp
     src/ui/MemoManager.h src/ui/MemoManager.cpp
