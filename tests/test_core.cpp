@@ -8,6 +8,7 @@
 #include "core/Qdpx.h"
 #include "core/Retrieval.h"
 #include "core/Stats.h"
+#include "core/Summaries.h"
 #include "core/Survey.h"
 #include "core/TextUtils.h"
 #include "core/VariableFilter.h"
@@ -3245,8 +3246,8 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 8);
-        QCOMPARE(fileVersion(file), 8);
+        QCOMPARE(p.schemaVersion(), 9);
+        QCOMPARE(fileVersion(file), 9);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
@@ -3398,13 +3399,196 @@ private slots:
         QCOMPARE(fileVersion(file), 7);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 8);
+        QCOMPARE(fileVersion(file), 9);
         const qint64 doc = p.documents().first().id;
         const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
         QVERIFY(a > 0);
         QCOMPARE(p.segment(a).areaText, QString("testo"));
     }
-    void wordCloudLayoutDoesNotOverlap()
+    void summariesPersistCascadeAndUndo()
+    {
+        const QString file = path("summaries.tsra");
+        qint64 d1 = 0, d2 = 0, a = 0, b = 0;
+        {
+            Project p;
+            QVERIFY(p.create(file));
+            const qint64 g = p.groups().first().id;
+            d1 = p.addDocument(g, "D1", "uno due tre");
+            d2 = p.addDocument(g, "D2", "quattro");
+            a = p.addCode(0, "A", Qt::red);
+            b = p.addCode(0, "B", Qt::blue);
+            QSignalSpy spy(&p, &Project::summariesChanged);
+            QVERIFY(p.setSummary(d1, a, "prima"));
+            QCOMPARE(spy.count(), 1);
+            QCOMPARE(p.summary(d1, a).body, QString("prima"));
+            QVERIFY(p.setSummary(d1, a, "prima")); // unchanged: nothing written
+            QCOMPARE(spy.count(), 1);
+            QVERIFY(p.setSummary(d1, b, "x"));
+            QVERIFY(p.setSummary(d2, a, "y"));
+            QCOMPARE(p.summaries().size(), 3);
+            QCOMPARE(p.summaryCountForCode(a), 2);
+            QCOMPARE(p.summaryCountForDocument(d1), 2);
+        }
+        {
+            // Closed and reopened: the summaries are there.
+            Project p;
+            QVERIFY(p.open(file));
+            QCOMPARE(p.summary(d1, a).body, QString("prima"));
+            QCOMPARE(p.summary(d1, a).author, p.author());
+            QVERIFY(p.summary(d1, a).modifiedAt.isValid());
+            QVERIFY(!p.summary(d2, b).id);
+
+            // A blank body deletes the summary.
+            QVERIFY(p.setSummary(d2, a, " \n "));
+            QVERIFY(!p.summary(d2, a).id);
+            QVERIFY(p.setSummary(d2, a, "y")); // not an unchanged one any more
+            QCOMPARE(p.summaries().size(), 3);
+
+            // Deleting a code or a document deletes its summaries; undo brings them back.
+            QVERIFY(p.deleteCode(b));
+            QCOMPARE(p.summaries().size(), 2);
+            QVERIFY(p.undo());
+            QCOMPARE(p.summary(d1, b).body, QString("x"));
+            QVERIFY(p.deleteDocument(d2));
+            QCOMPARE(p.summaries().size(), 2);
+            QVERIFY(p.undo());
+            QCOMPARE(p.summary(d2, a).body, QString("y"));
+        }
+        {
+            // Writing is one undo step: consecutive edits of one summary merge.
+            Project p;
+            QVERIFY(p.create(path("summary-undo.tsra")));
+            const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
+            const qint64 code = p.addCode(0, "A", Qt::red);
+            const qint64 other = p.addCode(0, "B", Qt::red);
+            p.clearUndoHistory();
+            p.setSummary(doc, code, "a");
+            p.setSummary(doc, code, "ab");
+            p.setSummary(doc, code, "abc");
+            QCOMPARE(p.undoLabel(), QString("Sintesi"));
+            QVERIFY(p.undo());
+            QVERIFY(!p.canUndo()); // one step for all three
+            QVERIFY(!p.summary(doc, code).id);
+            QVERIFY(p.redo());
+            QCOMPARE(p.summary(doc, code).body, QString("abc"));
+
+            // Another cell, or any other change in between, starts a new step.
+            p.setSummary(doc, other, "k");
+            p.setSummary(doc, code, "abcd");
+            QVERIFY(p.undo());
+            QCOMPARE(p.summary(doc, code).body, QString("abc"));
+            QCOMPARE(p.summary(doc, other).body, QString("k"));
+            QVERIFY(p.undo());
+            QVERIFY(!p.summary(doc, other).id);
+            QCOMPARE(p.summary(doc, code).body, QString("abc"));
+            p.setSummary(doc, code, "abcde");
+            p.addCode(0, "C", Qt::green);
+            p.setSummary(doc, code, "abcdef");
+            QVERIFY(p.undo()); // only the last edit
+            QCOMPARE(p.summary(doc, code).body, QString("abcde"));
+        }
+    }
+    void summaryTablesAndExport()
+    {
+        Project p;
+        QVERIFY(p.create(path("summary-tables.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "Intervista 1", "uno");
+        const qint64 d2 = p.addDocument(g, "Intervista 2", "due");
+        const qint64 d3 = p.addDocument(g, "Intervista 3", "tre");
+        const qint64 theme = p.addCode(0, "Tema", Qt::red);
+        const qint64 sub = p.addCode(theme, "Sotto", Qt::blue);
+        const qint64 age = p.addVariable("Eta", VariableType::Integer);
+        p.setVariableValue(d1, age, "30");
+        p.setVariableValue(d2, age, "45");
+        p.setSummary(d1, theme, "Sintesi; con \"virgolette\"\ne a capo");
+        p.setSummary(d2, sub, "solo sotto");
+        const qint64 set = p.addDocumentSet("Metà", {d3, d1});
+
+        Summaries::TableConfig cfg;
+        cfg.documentIds = {d2, d1};
+        cfg.codeIds = {sub, theme};
+        cfg.variableIds = {age};
+        // JSON round trip
+        const Summaries::TableConfig back = Summaries::configFromJson(Summaries::configToJson(cfg));
+        QCOMPARE(back.documentIds, cfg.documentIds);
+        QCOMPARE(back.codeIds, cfg.codeIds);
+        QCOMPARE(back.variableIds, cfg.variableIds);
+        QCOMPARE(back.setId, qint64(0));
+
+        // Rows follow the document tree order, columns the order of the codes, variables come first.
+        Exporters::Table t = Summaries::buildTable(p, cfg);
+        QCOMPARE(t.size(), 3);
+        QCOMPARE(t[0], (QStringList{"Documento", "Eta", "Tema > Sotto", "Tema"}));
+        QCOMPARE(t[1], (QStringList{"Intervista 1", "30", "", "Sintesi; con \"virgolette\"\ne a capo"}));
+        QCOMPARE(t[2], (QStringList{"Intervista 2", "45", "solo sotto", ""}));
+
+        // A saved table, regenerated when a summary changes.
+        const qint64 id = p.addSummaryTable("Confronto", Summaries::configToJson(cfg));
+        QVERIFY(id > 0);
+        QCOMPARE(p.summaryTables().size(), 1);
+        QCOMPARE(Summaries::buildTable(p, Summaries::configFromJson(p.summaryTable(id).configJson)), t);
+        p.setSummary(d2, theme, "nuova");
+        t = Summaries::buildTable(p, Summaries::configFromJson(p.summaryTable(id).configJson));
+        QCOMPARE(t[2].last(), QString("nuova"));
+
+        // Rows from a set; elements deleted since are skipped.
+        cfg.setId = set;
+        cfg.variableIds.clear();
+        t = Summaries::buildTable(p, cfg);
+        QCOMPARE(t.size(), 3);
+        QCOMPARE(t[1].first(), QString("Intervista 1"));
+        QCOMPARE(t[2].first(), QString("Intervista 3"));
+        QCOMPARE(t[0].size(), 3);
+        p.deleteCode(sub);
+        QCOMPARE(Summaries::buildTable(p, cfg)[0], (QStringList{"Documento", "Tema"}));
+
+        // Rename and delete.
+        QVERIFY(p.updateSummaryTable(id, "Nuovo nome", Summaries::configToJson(cfg)));
+        QCOMPARE(p.summaryTable(id).name, QString("Nuovo nome"));
+        QCOMPARE(Summaries::configFromJson(p.summaryTable(id).configJson).setId, set);
+
+        // Exports: CSV, HTML and a worksheet (summaries as wrapped text).
+        cfg.setId = 0;
+        cfg.codeIds = {theme};
+        cfg.variableIds = {age};
+        const Exporters::Table table = Summaries::buildTable(p, cfg);
+        QString error;
+        QVERIFY(Exporters::writeCsv(path("sum.csv"), table, &error));
+        QCOMPARE(Exporters::readCsv(path("sum.csv"), &error), table);
+        QVERIFY(Exporters::writeHtmlTable(path("sum.html"), "Confronto", table, &error));
+        QFile html(path("sum.html"));
+        QVERIFY(html.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(html.readAll()).contains("virgolette"));
+        const Xlsx::Sheet sheet = Summaries::buildSheet(p, cfg, "Confronto");
+        QVERIFY(sheet.wrapColumns.contains(2));
+        QVERIFY(sheet.textColumns.contains(2));
+        QVERIFY(!sheet.textColumns.contains(1)); // the variable keeps its number
+        QVERIFY(Xlsx::writeWorkbook(path("sum.xlsx"), {sheet}, &error));
+        const Xlsx::Table read = Xlsx::readFirstSheet(path("sum.xlsx"), &error);
+        QCOMPARE(read.size(), table.size());
+        QCOMPARE(read[1][2], table[1][2]);
+
+        QVERIFY(p.deleteSummaryTable(id));
+        QVERIFY(p.summaryTables().isEmpty());
+    }
+    void summariesMigrateFromV8()
+    {
+        const QString file = path("v8-summaries.tsra");
+        {
+            Project old;
+            old.setMigrations(Project::builtInMigrations().mid(0, 7)); // up to schema 8
+            QVERIFY(old.create(file));
+            old.addCode(0, "A", Qt::red);
+        }
+        QCOMPARE(fileVersion(file), 8);
+        Project p;
+        QVERIFY(p.open(file));
+        QCOMPARE(fileVersion(file), 9);
+        const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
+        QVERIFY(p.setSummary(doc, p.codes().first().id, "ok"));
+        QVERIFY(p.addSummaryTable("T", "{}") > 0);
+    }    void wordCloudLayoutDoesNotOverlap()
     {
         QList<QSizeF> sizes;
         for (int i = 0; i < 40; ++i)

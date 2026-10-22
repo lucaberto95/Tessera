@@ -55,6 +55,8 @@ private:
     void showRetrieval();
     void showCooccurrence();
     void showStats();
+    void showSummaryGrid();
+    void showSummaryTables();
     void showDictionaries();
     void showWordFrequencies();
     void showVariableFilter();
@@ -116,6 +118,8 @@ private:
     QAction *m_retrieval = nullptr;
     QAction *m_cooccurrence = nullptr;
     QAction *m_statsAction = nullptr;
+    QAction *m_summaryGrid = nullptr;
+    QAction *m_summaryTables = nullptr;
     QAction *m_dictionaries = nullptr;
     QAction *m_wordFrequencies = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;

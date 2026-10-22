@@ -14,6 +14,8 @@
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
+#include "ui/SummaryGridDialog.h"
+#include "ui/SummaryTablesDialog.h"
 #include "ui/MatrixDialog.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/VariableFilterDialog.h"
@@ -191,6 +193,8 @@ void MainWindow::createActions()
     m_retrieval = make(tr("Recupero &complesso…"), &MainWindow::showRetrieval, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
     m_cooccurrence = make(tr("Co-&occorrenze dei codici…"), &MainWindow::showCooccurrence);
     m_statsAction = make(tr("&Statistiche e tabelle incrociate…"), &MainWindow::showStats);
+    m_summaryGrid = make(tr("&Griglia delle sintesi…"), &MainWindow::showSummaryGrid);
+    m_summaryTables = make(tr("Tabelle &riassuntive…"), &MainWindow::showSummaryTables);
     m_wordFrequencies = make(tr("&Frequenze di parole, nuvola e parole in contesto…"), &MainWindow::showWordFrequencies);
     m_dictionaries = make(tr("&Dizionari e analisi del contenuto…"), &MainWindow::showDictionaries);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
@@ -266,6 +270,8 @@ void MainWindow::createMenus()
     analysis->addAction(m_retrieval);
     analysis->addAction(m_cooccurrence);
     analysis->addAction(m_statsAction);
+    analysis->addAction(m_summaryGrid);
+    analysis->addAction(m_summaryTables);
     analysis->addAction(m_wordFrequencies);
     analysis->addAction(m_dictionaries);
     analysis->addAction(m_activateByVariables);
@@ -861,6 +867,22 @@ void MainWindow::showCooccurrence()
 void MainWindow::showStats()
 {
     auto *dlg = new StatsDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showSummaryGrid()
+{
+    auto *dlg = new SummaryGridDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showSummaryTables()
+{
+    auto *dlg = new SummaryTablesDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();

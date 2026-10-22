@@ -425,6 +425,7 @@ void Project::emitAllChanged()
     emit variablesChanged();
     emit linksChanged();
     emit dictionariesChanged();
+    emit summariesChanged();
 }
 
 // ---------------------------------------------------------------- undo / redo
@@ -443,7 +444,8 @@ bool Project::installUndoTriggers()
     static const char *const tables[] = {"document_groups", "documents", "codes", "segments",
                                          "memos", "variables", "variable_values",
                                          "document_sets", "document_set_members", "links", "memo_links",
-                                         "dictionaries", "dict_categories", "dict_entries", "document_data"};
+                                         "dictionaries", "dict_categories", "dict_entries", "document_data",
+                                         "summaries", "summary_tables"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -519,6 +521,7 @@ void Project::closeUndoStep()
     while (m_undoSteps.size() > MaxUndoSteps)
         m_undoSteps.removeFirst();
     m_redoSteps.clear();
+    ++m_stepSerial;
     emit undoStateChanged();
 }
 
@@ -555,6 +558,7 @@ bool Project::undo()
         return fail(tr("Impossibile annullare: %1").arg(m_lastError));
     }
     m_redoSteps.append(redoStep);
+    m_summaryDoc = 0;
     emitAllChanged();
     emit undoStateChanged();
     return true;
@@ -571,6 +575,7 @@ bool Project::redo()
         return fail(tr("Impossibile ripetere: %1").arg(m_lastError));
     }
     m_undoSteps.append(undoStep);
+    m_summaryDoc = 0;
     emitAllChanged();
     emit undoStateChanged();
     return true;
@@ -583,6 +588,7 @@ void Project::clearUndoHistory()
     const bool had = canUndo() || canRedo();
     m_undoSteps.clear();
     m_redoSteps.clear();
+    m_summaryDoc = 0;
     if (had)
         emit undoStateChanged();
 }
@@ -682,6 +688,18 @@ QList<Project::Migration> Project::builtInMigrations()
          {// Text of a coded PDF area (issue #26): what was selected, kept with the coding so that lists and
           // exports show it without decoding the PDF.
           QStringLiteral("ALTER TABLE segments ADD COLUMN area_text TEXT NOT NULL DEFAULT ''")}},
+        {9,
+         {// Summaries per document x code and saved summary tables (issue #14).
+          QStringLiteral("CREATE TABLE summaries ("
+                         " id INTEGER PRIMARY KEY,"
+                         " document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,"
+                         " code_id INTEGER NOT NULL REFERENCES codes(id) ON DELETE CASCADE,"
+                         " body TEXT NOT NULL DEFAULT '', author TEXT, modified_at TEXT, uuid TEXT NOT NULL,"
+                         " UNIQUE (document_id, code_id))"),
+          QStringLiteral("CREATE INDEX idx_summaries_code ON summaries(code_id)"),
+          QStringLiteral("CREATE TABLE summary_tables ("
+                         " id INTEGER PRIMARY KEY, name TEXT NOT NULL, config_json TEXT NOT NULL DEFAULT '{}',"
+                         " position INTEGER NOT NULL DEFAULT 0, uuid TEXT NOT NULL)")}},
     };
 }
 
@@ -1990,6 +2008,148 @@ QHash<qint64, QHash<qint64, QString>> Project::allVariableValues() const
     return out;
 }
 
+// ---------------------------------------------------------------- summaries
+
+namespace {
+const QString kSummaryColumns = QStringLiteral("id, document_id, code_id, body, author, modified_at, uuid");
+
+Summary readSummary(const QSqlQuery &q)
+{
+    Summary s;
+    s.id = q.value(0).toLongLong();
+    s.documentId = q.value(1).toLongLong();
+    s.codeId = q.value(2).toLongLong();
+    s.body = q.value(3).toString();
+    s.author = q.value(4).toString();
+    s.modifiedAt = QDateTime::fromString(q.value(5).toString(), Qt::ISODateWithMs);
+    s.uuid = q.value(6).toString();
+    return s;
+}
+} // namespace
+
+QList<Summary> Project::summaries() const
+{
+    QList<Summary> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT ") + kSummaryColumns + QStringLiteral(" FROM summaries ORDER BY id"));
+    while (q.next())
+        out << readSummary(q);
+    return out;
+}
+
+Summary Project::summary(qint64 documentId, qint64 codeId) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT ") + kSummaryColumns +
+              QStringLiteral(" FROM summaries WHERE document_id = ? AND code_id = ?"));
+    q.addBindValue(documentId);
+    q.addBindValue(codeId);
+    if (q.exec() && q.next())
+        return readSummary(q);
+    return {};
+}
+
+int Project::summaryCountForCode(qint64 codeId) const
+{
+    return scalar(QStringLiteral("SELECT COUNT(*) FROM summaries WHERE code_id = ? AND body <> ''"), {codeId}).toInt();
+}
+
+int Project::summaryCountForDocument(qint64 documentId) const
+{
+    return scalar(QStringLiteral("SELECT COUNT(*) FROM summaries WHERE document_id = ? AND body <> ''"), {documentId})
+        .toInt();
+}
+
+bool Project::setSummary(qint64 documentId, qint64 codeId, const QString &body)
+{
+    const Summary existing = summary(documentId, codeId);
+    const bool blank = body.trimmed().isEmpty();
+    if (blank && !existing.id)
+        return true;
+    if (!blank && existing.id && existing.body == body)
+        return true;
+    setUndoLabel(tr("Sintesi"));
+    const bool mergeable = m_batchDepth == 0 && m_summaryDoc == documentId && m_summaryCode == codeId &&
+                           m_summaryStepSerial == m_stepSerial && m_undoSteps.size() >= 1;
+    const quint64 serialBefore = m_stepSerial;
+    bool ok;
+    if (blank)
+        ok = exec(QStringLiteral("DELETE FROM summaries WHERE id = ?"), {existing.id});
+    else if (existing.id)
+        ok = exec(QStringLiteral("UPDATE summaries SET body = ?, author = ?, modified_at = ? WHERE id = ?"),
+                  {body, m_author, isoNow(), existing.id});
+    else
+        ok = insert(QStringLiteral("INSERT INTO summaries(document_id, code_id, body, author, modified_at, uuid)"
+                                   " VALUES (?, ?, ?, ?, ?, ?)"),
+                    {documentId, codeId, body, m_author, isoNow(), newUuid()}) != 0;
+    if (!ok)
+        return false;
+    notify(&Project::summariesChanged);
+    if (m_batchDepth > 0) {
+        m_summaryDoc = 0;
+        return true;
+    }
+    if (mergeable && m_stepSerial == serialBefore + 1 && m_undoSteps.size() >= 2) {
+        const UndoStep last = m_undoSteps.takeLast();
+        m_undoSteps.last().statements += last.statements;
+    }
+    m_summaryDoc = documentId;
+    m_summaryCode = codeId;
+    m_summaryStepSerial = m_stepSerial;
+    return true;
+}
+
+QList<SummaryTable> Project::summaryTables() const
+{
+    QList<SummaryTable> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id, name, config_json, position, uuid FROM summary_tables ORDER BY position, id"));
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toString(), q.value(3).toInt(),
+                    q.value(4).toString()});
+    return out;
+}
+
+SummaryTable Project::summaryTable(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, name, config_json, position, uuid FROM summary_tables WHERE id = ?"));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return {q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toString(), q.value(3).toInt(),
+                q.value(4).toString()};
+    return {};
+}
+
+qint64 Project::addSummaryTable(const QString &name, const QString &configJson, const QString &uuid)
+{
+    setUndoLabel(tr("Nuova tabella riassuntiva"));
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO summary_tables(name, config_json, position, uuid) VALUES (?, ?, ?, ?)"),
+        {name, configJson, nextPosition(QStringLiteral("summary_tables")), uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notify(&Project::summariesChanged);
+    return id;
+}
+
+bool Project::updateSummaryTable(qint64 id, const QString &name, const QString &configJson)
+{
+    setUndoLabel(tr("Modifica tabella riassuntiva"));
+    if (!exec(QStringLiteral("UPDATE summary_tables SET name = ?, config_json = ? WHERE id = ?"),
+              {name, configJson, id}))
+        return false;
+    notify(&Project::summariesChanged);
+    return true;
+}
+
+bool Project::deleteSummaryTable(qint64 id)
+{
+    setUndoLabel(tr("Elimina tabella riassuntiva"));
+    if (!exec(QStringLiteral("DELETE FROM summary_tables WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::summariesChanged);
+    return true;
+}
 // ---------------------------------------------------------------- dictionaries
 
 QList<Dictionary> Project::dictionaries() const

@@ -222,6 +222,11 @@ void CodeTree::deleteCode(qint64 id)
     QString text = tr("Eliminare il codice \"%1\" e tutte le sue codifiche?").arg(m_project->code(id).name);
     if (subcodes)
         text += QLatin1Char('\n') + tr("Verranno eliminati anche %n sottocodici.", nullptr, subcodes);
+    int summaries = m_project->summaryCountForCode(id);
+    for (qint64 sub : m_project->codeDescendants(id))
+        summaries += m_project->summaryCountForCode(sub);
+    if (summaries)
+        text += QLatin1Char('\n') + tr("Verranno eliminate anche %n sintesi.", nullptr, summaries);
     if (Ui::confirm(this, tr("Elimina codice"), text))
         m_project->deleteCode(id);
 }

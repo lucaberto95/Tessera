@@ -148,6 +148,27 @@ struct DictEntry {
     QString pattern;
 };
 
+// The researcher's own synthesis of what a document says about a code (issue #14). At most one per
+// document x code; plain text.
+struct Summary {
+    qint64 id = 0;
+    qint64 documentId = 0;
+    qint64 codeId = 0;
+    QString body;
+    QString author;
+    QDateTime modifiedAt;
+    QString uuid;
+};
+
+// A saved summary table: documents as rows, codes as columns. `configJson` is described in Summaries.h.
+struct SummaryTable {
+    qint64 id = 0;
+    QString name;
+    QString configJson;
+    int position = 0;
+    QString uuid;
+};
+
 QString documentKindToString(DocumentKind k);
 DocumentKind documentKindFromString(const QString &s);
 QString segmentKindToString(SegmentKind k);

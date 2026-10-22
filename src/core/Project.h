@@ -215,8 +215,23 @@ public:
     bool setDictEntryPattern(qint64 id, const QString &pattern);
     bool deleteDictEntry(qint64 id);
 
+    // Summaries (document x code) and saved summary tables. Deleting a document or a code deletes its
+    // summaries. An empty (or blank) body deletes the summary. Consecutive edits of the same summary
+    // with nothing else in between are merged into one undo step, so writing is one step to undo.
+    QList<Summary> summaries() const;
+    Summary summary(qint64 documentId, qint64 codeId) const; // id == 0 if there is none
+    int summaryCountForCode(qint64 codeId) const;            // non-empty summaries
+    int summaryCountForDocument(qint64 documentId) const;
+    bool setSummary(qint64 documentId, qint64 codeId, const QString &body);
+    QList<SummaryTable> summaryTables() const;
+    SummaryTable summaryTable(qint64 id) const;
+    qint64 addSummaryTable(const QString &name, const QString &configJson, const QString &uuid = {});
+    bool updateSummaryTable(qint64 id, const QString &name, const QString &configJson);
+    bool deleteSummaryTable(qint64 id);
+
 signals:
     void opened();
+    void summariesChanged();
     void closed();
     void groupsChanged();
     void documentsChanged();
@@ -268,6 +283,11 @@ private:
     QString m_stepLabel;
     bool m_undoReady = false;
     bool m_replaying = false;
+    // Undo-step merging of summary edits: the summary written by the latest step, if no step came since.
+    quint64 m_stepSerial = 0;
+    quint64 m_summaryStepSerial = 0;
+    qint64 m_summaryDoc = 0;
+    qint64 m_summaryCode = 0;
 };
 
 QString newUuid();

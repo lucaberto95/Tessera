@@ -55,6 +55,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   Retrieval      recupero complesso dei segmenti su segmenti in memoria
   Cooccurrence   matrice codici × codici (sovrapposizione / vicinanza / stesso documento), Jaccard, layout force-directed
   Stats          statistiche delle variabili, gruppi, tabelle incrociate codici × gruppi, chi-quadrato, codici -> variabili
+  Summaries      sintesi (v9, #14): `TableConfig` <-> JSON, `buildTable`/`buildSheet` (documenti × codici + variabili), `segmentText`
   VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
   Dictionaries   `tokenize`, `findMatches`, `analyze` (documenti × categorie), `autocode`, `countsToVariables`,
                  import/export (Categoria/Voce in .xlsx/.csv, elenco di parole .txt)
@@ -165,6 +166,15 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   segmenti e link in memoria; al salvataggio `updateDocumentText` scrive tutto insieme (un passo di undo).
   Durante la modifica Ctrl+Z appartiene all'editor e Annulla/Ripeti sono disattivate.
 
+- **Sintesi** (v9, #14): `summaries(document_id, code_id, body, ...)` UNIQUE per coppia, CASCADE su documento e codice;
+  `summary_tables(name, config_json)` con la configurazione in `Summaries::TableConfig` (documenti o set, codici, variabili;
+  il set si rilegge a ogni generazione). `Project::setSummary` con testo vuoto/bianco cancella la riga; modifiche consecutive
+  della stessa sintesi **senza altri passi in mezzo** si fondono in un solo passo di annulla (`m_stepSerial`/`m_summaryStepSerial`,
+  azzerati da undo/redo/clearUndoHistory): scrivere una sintesi = un solo Ctrl+Z. `SummaryGridDialog` salva dopo 1,5 s di pausa,
+  al cambio di cella, alla chiusura e alla perdita del fuoco (il salvataggio ricostruisce la griglia: rimettere la cella corrente
+  dopo `flush()`). Le sintesi **non** vanno nel QDPX (REFI-QDA non ha un elemento adatto): si esportano da "Tabelle riassuntive"
+  in Excel/CSV/HTML. Le conferme di eliminazione di codici e documenti citano le sintesi che si perderebbero.
+
 ### Insidie già incontrate
 
 - Una `QString` nulla va in SQL come NULL: `bindAll()` la converte in `''` (colonne NOT NULL).
@@ -224,7 +234,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 Aggiornare questo elenco quando una issue viene chiusa.
 

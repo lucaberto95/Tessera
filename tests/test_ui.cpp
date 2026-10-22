@@ -6,6 +6,8 @@
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
+#include "ui/SummaryGridDialog.h"
+#include "ui/SummaryTablesDialog.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
 #include "core/Pdfs.h"
@@ -627,7 +629,104 @@ private slots:
         QCOMPARE(table->item(1, 1)->text(), QString("1"));
     }
 
-    void dictionaryDialog()
+    void summaryGridDialog()
+    {
+        const QString file = m_dir.filePath("summary-grid.tsra");
+        qint64 d1 = 0, d2 = 0, a = 0, b = 0;
+        {
+            Project p;
+            QVERIFY(p.create(file));
+            const qint64 g = p.groups().first().id;
+            d1 = p.addDocument(g, "D1", "alfa beta gamma delta");
+            d2 = p.addDocument(g, "D2", "epsilon zeta");
+            a = p.addCode(0, "A", Qt::red);
+            b = p.addCode(0, "B", Qt::blue);
+            p.addSegment(d1, a, 0, 4);
+            p.addSegment(d1, a, 5, 9);
+            p.addSegment(d2, b, 0, 7);
+
+            SummaryGridDialog dlg(&p, {}, {});
+            dlg.show();
+            QCOMPARE(dlg.grid()->rowCount(), 2);
+            QCOMPARE(dlg.grid()->columnCount(), 2);
+            QCOMPARE(dlg.grid()->item(0, 0)->text(), QString("2")); // D1 x A
+            QVERIFY(dlg.grid()->item(0, 1)->text().isEmpty());
+            QVERIFY(dlg.grid()->item(0, 0)->icon().isNull());
+
+            dlg.selectCell(d1, a);
+            QCOMPARE(dlg.currentDocument(), d1);
+            QCOMPARE(dlg.segmentRows(), 2);
+            dlg.setEditorText("La sintesi di D1 su A");
+            // Switching cell saves.
+            dlg.selectCell(d2, b);
+            QCOMPARE(p.summary(d1, a).body, QString("La sintesi di D1 su A"));
+            QVERIFY(!dlg.grid()->item(0, 0)->icon().isNull()); // marked
+            QVERIFY(dlg.editorText().isEmpty());
+            // A cell without segments can have a summary too.
+            dlg.selectCell(d2, a);
+            QCOMPARE(dlg.segmentRows(), 1); // the placeholder line
+            dlg.setEditorText("senza segmenti");
+            dlg.flush();
+            QCOMPARE(p.summary(d2, a).body, QString("senza segmenti"));
+            // Back to the first: the text is loaded.
+            dlg.selectCell(d1, a);
+            QCOMPARE(dlg.editorText(), QString("La sintesi di D1 su A"));
+            // Closing saves what is being typed.
+            dlg.setEditorText("riscritta");
+            dlg.close();
+            QCOMPARE(p.summary(d1, a).body, QString("riscritta"));
+            shot(&dlg, "summary-grid");
+        }
+        // Reopen the project and the grid: the summaries are there.
+        Project p;
+        QVERIFY(p.open(file));
+        SummaryGridDialog dlg(&p, {d1}, {a});
+        QCOMPARE(dlg.grid()->rowCount(), 1);
+        QVERIFY(!dlg.grid()->item(0, 0)->icon().isNull());
+        dlg.selectCell(d1, a);
+        QCOMPARE(dlg.editorText(), QString("riscritta"));
+        // A change made elsewhere (here: undo) refreshes the editor.
+        QVERIFY(p.setSummary(d1, a, "esterna"));
+        QCOMPARE(dlg.editorText(), QString("esterna"));
+        QVERIFY(p.undo());
+        QCOMPARE(dlg.editorText(), QString("riscritta"));
+    }
+    void summaryTablesDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("summary-tables.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "D1", "uno");
+        const qint64 d2 = p.addDocument(g, "D2", "due");
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        const qint64 b = p.addCode(0, "B", Qt::blue);
+        const qint64 age = p.addVariable("Eta", VariableType::Integer);
+        p.setVariableValue(d1, age, "30");
+        p.setSummary(d1, a, "s1");
+
+        SummaryTablesDialog dlg(&p, {}, {});
+        dlg.show();
+        QCOMPARE(dlg.currentTableId(), qint64(0));
+        const qint64 id = dlg.createTable("Confronto");
+        QCOMPARE(dlg.currentTableId(), id);
+        QCOMPARE(dlg.currentTable().size(), 3);               // all documents and codes
+        QCOMPARE(dlg.currentTable()[0].size(), 3);
+        QCOMPARE(dlg.preview()->rowCount(), 2);
+        Summaries::TableConfig cfg = dlg.config();
+        cfg.codeIds = {a};
+        cfg.variableIds = {age};
+        dlg.setConfig(cfg);
+        QCOMPARE(dlg.currentTable()[0], (QStringList{"Documento", "Eta", "A"}));
+        QCOMPARE(dlg.currentTable()[1], (QStringList{"D1", "30", "s1"}));
+        // Saved in the project...
+        QCOMPARE(Summaries::configFromJson(p.summaryTable(id).configJson).variableIds, QList<qint64>{age});
+        // ...and regenerated when a summary changes.
+        p.setSummary(d2, a, "s2");
+        QCOMPARE(dlg.currentTable()[2][2], QString("s2"));
+        QCOMPARE(dlg.preview()->item(1, 2)->text(), QString("s2"));
+        Q_UNUSED(b);
+        shot(&dlg, "summary-tables");
+    }    void dictionaryDialog()
     {
         Project p;
         QVERIFY(p.create(m_dir.filePath("dictionary.tsra")));

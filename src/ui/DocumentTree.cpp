@@ -313,11 +313,15 @@ void DocumentTree::deleteItem(QTreeWidgetItem *item)
         m_project->deleteDocumentSet(id);
         break;
     case DocumentItem:
-        if (!Ui::confirm(this, tr("Elimina documento"),
-                         tr("Eliminare il documento \"%1\" e tutte le sue codifiche?").arg(item->text(0))))
+    {
+        QString text = tr("Eliminare il documento \"%1\" e tutte le sue codifiche?").arg(item->text(0));
+        if (const int summaries = m_project->summaryCountForDocument(id))
+            text += QLatin1Char('\n') + tr("Verranno eliminate anche %n sintesi.", nullptr, summaries);
+        if (!Ui::confirm(this, tr("Elimina documento"), text))
             return;
         m_project->deleteDocument(id);
         break;
+    }
     }
 }
 
