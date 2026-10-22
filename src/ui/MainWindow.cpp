@@ -13,6 +13,7 @@
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
 #include "ui/AgreementDialog.h"
+#include "ui/AiAssistDialog.h"
 #include "ui/AiSettingsDialog.h"
 #include "ui/ReportDialog.h"
 #include "ui/CooccurrenceDialog.h"
@@ -215,6 +216,11 @@ void MainWindow::createActions()
 
     m_userName = make(tr("&Nome utente…"), &MainWindow::setUserName, {}, false);
     m_aiSettings = make(tr("&AI…"), &MainWindow::showAiSettings, {}, false);
+    m_aiSummarizeDoc = make(tr("&Riassumi il documento aperto…"), [this] { aiSummarizeDocument(m_view->documentId()); });
+    m_aiSummarizeCode = make(tr("Riassumi i &segmenti del codice selezionato…"),
+                             [this] { aiSummarizeCode(m_codes->currentCodeId()); });
+    m_aiExplain = make(tr("&Spiega la selezione…"), [this] { aiPassage(int(Ai::Assist::Task::Explain), 0); });
+    m_aiTranslate = make(tr("&Traduci la selezione…"), [this] { aiPassage(int(Ai::Assist::Task::Translate), 0); });
     m_about = make(tr("&Informazioni su Tessera"), &MainWindow::about, {}, false);
 }
 
@@ -291,6 +297,14 @@ void MainWindow::createMenus()
     analysis->addAction(m_exportSegmentsHtml);
     analysis->addAction(m_exportSegmentsXlsx);
     analysis->addAction(m_exportSegmentsCsv);
+
+    QMenu *ai = menuBar()->addMenu(tr("AI"));
+    ai->addAction(m_aiSummarizeDoc);
+    ai->addAction(m_aiSummarizeCode);
+    ai->addAction(m_aiExplain);
+    ai->addAction(m_aiTranslate);
+    ai->addSeparator();
+    ai->addAction(m_aiSettings);
 
     QMenu *memos = menuBar()->addMenu(tr("&Memo"));
     memos->addAction(m_projectMemo);
@@ -400,6 +414,9 @@ void MainWindow::connectProject()
     connect(m_documents, &DocumentTree::activationChanged, this, &MainWindow::updateRetrieval);
     connect(m_documents, &DocumentTree::importRequested, this, &MainWindow::importDocuments);
     connect(m_documents, &DocumentTree::newTextDocumentRequested, this, &MainWindow::newTextDocument);
+    connect(m_documents, &DocumentTree::aiSummaryRequested, this, &MainWindow::aiSummarizeDocument);
+    connect(m_codes, &CodeTree::aiSummaryRequested, this, &MainWindow::aiSummarizeCode);
+    connect(m_view, &DocumentView::aiPassageRequested, this, &MainWindow::aiPassage);
     connect(m_codes, &CodeTree::activationChanged, this, &MainWindow::updateRetrieval);
     connect(m_codes, &CodeTree::currentCodeChanged, this, &MainWindow::updateActions);
     connect(m_view, &DocumentView::selectionChanged, this, &MainWindow::updateActions);
@@ -1083,6 +1100,102 @@ void MainWindow::setUserName()
 void MainWindow::showAiSettings()
 {
     AiSettingsDialog dlg(m_project->isOpen() ? m_project : nullptr, this);
+    dlg.exec();
+}
+
+void MainWindow::aiSummarizeDocument(qint64 documentId)
+{
+    if (!documentId) {
+        Ui::showError(this, tr("Apri prima un documento."));
+        return;
+    }
+    const Document doc = m_project->document(documentId);
+    if (doc.kind != DocumentKind::Text && doc.kind != DocumentKind::Pdf) {
+        Ui::showError(this, tr("Il riassunto con l'AI funziona sui documenti di testo e sui PDF."));
+        return;
+    }
+    const QString text = m_project->documentText(documentId);
+    if (text.trimmed().isEmpty()) {
+        Ui::showError(this, tr("Il documento non contiene testo."));
+        return;
+    }
+    AiAssistDialog dlg(m_project, Ai::Assist::Task::SummarizeDocument, {{QString(), text}},
+                       tr("Documento: %1").arg(doc.name), {MemoTarget::Document, documentId, {}}, this);
+    dlg.exec();
+}
+
+void MainWindow::aiSummarizeCode(qint64 codeId)
+{
+    if (!codeId) {
+        Ui::showError(this, tr("Seleziona prima un codice."));
+        return;
+    }
+    // The code and its subcodes: a parent code often has no segments of its own.
+    QSet<qint64> codeIds{codeId};
+    for (qint64 c : m_project->codeDescendants(codeId))
+        codeIds.insert(c);
+    QList<Ai::Assist::Source> sources;
+    QHash<qint64, QString> texts;
+    QSet<qint64> documents;
+    for (const Segment &s : m_project->allSegments(true)) {
+        if (!codeIds.contains(s.codeId))
+            continue;
+        QString text;
+        if (s.kind == SegmentKind::Text) {
+            if (!texts.contains(s.documentId))
+                texts.insert(s.documentId, m_project->documentText(s.documentId));
+            text = texts.value(s.documentId).mid(s.start, s.end - s.start);
+        } else if (s.kind == SegmentKind::Area) {
+            text = s.areaText;
+        }
+        if (text.trimmed().isEmpty())
+            continue;
+        sources.append({m_project->document(s.documentId).name, text.trimmed()});
+        documents.insert(s.documentId);
+    }
+    if (sources.isEmpty()) {
+        Ui::showError(this, tr("Il codice non ha segmenti con testo da riassumere."));
+        return;
+    }
+    AiAssistDialog dlg(m_project, Ai::Assist::Task::SummarizeSegments, sources,
+                       tr("Codice: %1").arg(m_project->codePath(codeId)), {MemoTarget::Code, codeId, {}}, this);
+    if (documents.size() == 1 && codeIds.size() == 1)
+        dlg.setSummaryTarget(*documents.begin(), codeId);
+    dlg.exec();
+}
+
+void MainWindow::aiPassage(int taskValue, qint64 segmentId)
+{
+    const auto task = Ai::Assist::Task(taskValue);
+    const qint64 documentId = m_view->documentId();
+    if (!documentId) {
+        Ui::showError(this, tr("Apri prima un documento."));
+        return;
+    }
+    QString text;
+    AiAssistDialog::MemoDestination dest{MemoTarget::Document, documentId, {}};
+    if (segmentId) {
+        for (const Segment &s : m_project->segmentsForDocument(documentId, true)) {
+            if (s.id != segmentId)
+                continue;
+            text = s.kind == SegmentKind::Text ? m_project->documentText(documentId).mid(s.start, s.end - s.start)
+                                               : s.areaText;
+            dest = {MemoTarget::Segment, segmentId, {}};
+        }
+    } else {
+        text = m_view->selectedText();
+        QString quote = text.simplified();
+        if (quote.size() > 200)
+            quote = quote.left(200) + QStringLiteral("…");
+        dest.quote = quote;
+    }
+    if (text.trimmed().isEmpty()) {
+        Ui::showError(this, tr("Seleziona prima un brano di testo."));
+        return;
+    }
+    const QString subject = tr("%1: %2").arg(segmentId ? tr("Segmento") : tr("Brano selezionato"),
+                                             text.simplified().left(160));
+    AiAssistDialog dlg(m_project, task, {{QString(), text.trimmed()}}, subject, dest, this);
     dlg.exec();
 }
 

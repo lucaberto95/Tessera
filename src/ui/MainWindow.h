@@ -73,6 +73,10 @@ private:
     void createReport();
     void setUserName();
     void showAiSettings();
+    // AI functions (issue #40): each opens AiAssistDialog, which sends nothing until the user presses "Genera".
+    void aiSummarizeDocument(qint64 documentId);
+    void aiSummarizeCode(qint64 codeId);
+    void aiPassage(int task, qint64 segmentId);
     void about();
     void openSegment(qint64 documentId, int start, int end, qint64 segmentId);
     void showMemoTarget(int targetType, qint64 targetId);
@@ -139,5 +143,9 @@ private:
     QAction *m_memos = nullptr;
     QAction *m_userName = nullptr;
     QAction *m_aiSettings = nullptr;
+    QAction *m_aiSummarizeDoc = nullptr;
+    QAction *m_aiSummarizeCode = nullptr;
+    QAction *m_aiExplain = nullptr;
+    QAction *m_aiTranslate = nullptr;
     QAction *m_about = nullptr;
 };

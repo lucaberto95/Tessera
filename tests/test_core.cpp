@@ -1,5 +1,6 @@
 #include "FakeHttp.h"
 #include "core/Agreement.h"
+#include "core/ai/AiAssist.h"
 #include "core/ai/AiClient.h"
 #include "core/ai/AiConfig.h"
 #include "core/Cooccurrence.h"
@@ -4920,6 +4921,185 @@ private slots:
         QCOMPARE(p.aiLog().size(), 1);
         QVERIFY(p.clearAiLog());
         QVERIFY(p.aiLog().isEmpty());
+    }
+
+    // ---------------------------------------------------------------- AI summaries, explanations, translations (issue #40)
+
+private:
+    static Ai::Response runAssist(Ai::Assist::Run &run, int ms = 8000)
+    {
+        if (!run.isFinished()) {
+            QSignalSpy spy(&run, &Ai::Assist::Run::finished);
+            run.start();
+            spy.wait(ms);
+        }
+        return run.response();
+    }
+
+    static QString sentSystem(const FakeHttp::Req &r)
+    {
+        const QJsonArray m = QJsonDocument::fromJson(r.body).object().value("messages").toArray();
+        return m.at(0).toObject().value("content").toString();
+    }
+    static QString sentUser(const FakeHttp::Req &r)
+    {
+        const QJsonArray m = QJsonDocument::fromJson(r.body).object().value("messages").toArray();
+        return m.at(1).toObject().value("content").toString();
+    }
+
+private slots:
+    void aiAssistPrompts()
+    {
+        using namespace Ai::Assist;
+        Options o;
+        o.length = Length::Short;
+        o.language = "francese";
+        o.instructions = "concentrati sulle difficolta";
+        for (Task t : {Task::SummarizeDocument, Task::SummarizeSegments, Task::Explain, Task::Translate}) {
+            const QString s = systemPrompt(t, o);
+            QVERIFY2(!s.isEmpty(), "prompt resource missing");
+            QVERIFY(s.contains("francese"));                       // output language always explicit
+            QVERIFY(s.contains("concentrati sulle difficolta"));   // additional instructions
+            QVERIFY(!s.contains("{language}") && !s.contains("{length}") && !s.contains("{instructions}"));
+        }
+        QVERIFY(systemPrompt(Task::SummarizeDocument, o).contains("short"));
+        QVERIFY(!usesLength(Task::Translate));
+        QVERIFY(combinePrompt(Task::SummarizeDocument, o).contains("francese"));
+        // Without instructions the sentence is not there; an empty language means Italian.
+        Options plain;
+        const QString s = systemPrompt(Task::Explain, plain);
+        QVERIFY(!s.contains("Additional instructions"));
+        QVERIFY(s.contains("Italian"));
+    }
+
+    void aiAssistSingleRequestAndNoSendBeforeStart()
+    {
+        using namespace Ai::Assist;
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, completion("  Un riassunto breve.  ")}; };
+        Ai::Client client(localConfig(srv));
+        Options o;
+        o.language = "italiano";
+        Run run(&client, Task::SummarizeDocument, o, {{QString(), "Testo dell'intervista sul lavoro da remoto."}});
+        QTest::qWait(100);
+        QCOMPARE(srv.requests.size(), 0); // creating a Run sends nothing
+        const Ai::Response r = runAssist(run);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.text, QString("Un riassunto breve."));
+        QCOMPARE(srv.requests.size(), 1);
+        QCOMPARE(run.requestsMade(), 1);
+        QVERIFY(sentSystem(srv.requests.first()).contains("italiano"));
+        QCOMPARE(sentUser(srv.requests.first()), QString("Testo dell'intervista sul lavoro da remoto."));
+        QVERIFY(!srv.requests.first().headers.value("authorization").isEmpty());
+    }
+
+    void aiAssistMapReduceLongDocument()
+    {
+        using namespace Ai::Assist;
+        FakeHttp srv;
+        int n = 0;
+        srv.handler = [&n](const FakeHttp::Req &) { return FakeHttp::Res{200, completion(QString("parziale %1").arg(++n))}; };
+        Ai::Client client(localConfig(srv));
+        QString text;
+        for (int i = 0; i < 30; ++i)
+            text += QString("Paragrafo numero %1 con alcune parole di riempimento per allungare il testo.\n\n").arg(i);
+        Run run(&client, Task::SummarizeDocument, Options(), {{QString(), text}});
+        run.setMaxChunkTokens(200);
+        QVERIFY(planChunks(Task::SummarizeDocument, {{QString(), text}}, 200).size() > 2);
+        QSignalSpy progress(&run, &Run::progress);
+        const Ai::Response r = runAssist(run);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        const qsizetype chunks = planChunks(Task::SummarizeDocument, {{QString(), text}}, 200).size();
+        QVERIFY(srv.requests.size() > chunks); // one per chunk plus the merging requests
+        QVERIFY(sentSystem(srv.requests.first()).contains("part 1 of"));
+        QVERIFY(sentUser(srv.requests.last()).contains("parziale 1")); // the last request merges partial results
+        QVERIFY(sentSystem(srv.requests.last()).contains("merge"));
+        QCOMPARE(r.text, QString("parziale %1").arg(n));
+        QVERIFY(progress.count() >= chunks);
+    }
+
+    void aiAssistTranslateConcatenates()
+    {
+        using namespace Ai::Assist;
+        FakeHttp srv;
+        int n = 0;
+        srv.handler = [&n](const FakeHttp::Req &) { return FakeHttp::Res{200, completion(QString("T%1").arg(++n))}; };
+        Ai::Client client(localConfig(srv));
+        QString text;
+        for (int i = 0; i < 40; ++i)
+            text += QString("Frase dell'intervistato numero %1 che parla di altro ancora.\n\n").arg(i);
+        Options o;
+        o.language = "inglese";
+        Run run(&client, Task::Translate, o, {{QString(), text}});
+        run.setMaxChunkTokens(200);
+        const qsizetype chunks = planChunks(Task::Translate, {{QString(), text}}, 200).size();
+        QVERIFY(chunks > 1);
+        const Ai::Response r = runAssist(run);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(srv.requests.size(), int(chunks)); // no merging for translations
+        QVERIFY(sentSystem(srv.requests.first()).contains("inglese"));
+        QVERIFY(r.text.startsWith("T1\n\nT2"));
+    }
+
+    void aiAssistSegmentsKeepCitations()
+    {
+        using namespace Ai::Assist;
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, completion("Sintesi [Intervista 1] [Intervista 2]")}; };
+        Ai::Client client(localConfig(srv));
+        const QList<Source> sources{{"Intervista 1", "Lavoro da casa, piu' libertà."}, {"Intervista 2", "Mi manca l'ufficio."}};
+        const QString user = userText(Task::SummarizeSegments, sources);
+        QVERIFY(user.contains("[Intervista 1]\nLavoro") && user.contains("[Intervista 2]\nMi manca"));
+        Run run(&client, Task::SummarizeSegments, Options(), sources);
+        const Ai::Response r = runAssist(run);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(srv.requests.size(), 1);
+        QVERIFY(sentUser(srv.requests.first()).contains("[Intervista 2]"));
+        QVERIFY(sentSystem(srv.requests.first()).contains("square brackets"));
+        QVERIFY(r.text.contains("[Intervista 1]"));
+        // Chunks never separate a passage from its label.
+        QList<Source> many;
+        for (int i = 0; i < 20; ++i)
+            many.append({QString("Intervista %1").arg(i), QString("Dichiarazione %1 abbastanza lunga da occupare spazio nel blocco.").arg(i)});
+        const QStringList chunks = planChunks(Task::SummarizeSegments, many, 120);
+        QVERIFY(chunks.size() > 1);
+        for (const QString &c : chunks)
+            QVERIFY(c.startsWith("[Intervista "));
+        QStringList all = chunks;
+        QCOMPARE(all.join("\n\n").count("[Intervista "), 20);
+    }
+
+    void aiAssistErrorsAndCancel()
+    {
+        using namespace Ai::Assist;
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{401, R"({"error":{"message":"bad key"}})"}; };
+        {
+            Ai::Client client(localConfig(srv));
+            Run run(&client, Task::Explain, Options(), {{QString(), "bundle"}});
+            const Ai::Response r = runAssist(run);
+            QVERIFY(!r.ok);
+            QCOMPARE(r.kind, Ai::ErrorKind::Unauthorized);
+            QVERIFY(!r.error.isEmpty());
+        }
+        {
+            Ai::Client client(localConfig(srv));
+            Run run(&client, Task::Explain, Options(), {{QString(), "   "}}); // nothing to send
+            const Ai::Response r = runAssist(run);
+            QVERIFY(!r.ok);
+            QCOMPARE(srv.requests.size(), 1); // still only the first request
+        }
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, {}, true}; };
+        {
+            Ai::Client client(localConfig(srv));
+            Run run(&client, Task::Translate, Options(), {{QString(), "ciao"}});
+            QSignalSpy spy(&run, &Run::finished);
+            run.start();
+            QTest::qWait(100);
+            run.cancel();
+            QTRY_COMPARE(spy.count(), 1);
+            QCOMPARE(run.response().kind, Ai::ErrorKind::Cancelled);
+        }
     }
 };
 

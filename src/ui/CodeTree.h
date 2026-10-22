@@ -31,6 +31,7 @@ public:
 signals:
     void activationChanged();
     void currentCodeChanged(qint64 id);
+    void aiSummaryRequested(qint64 codeId); // "Riassumi i segmenti con l'AI…" (issue #40)
 
 protected:
     void contextMenuEvent(QContextMenuEvent *event) override;

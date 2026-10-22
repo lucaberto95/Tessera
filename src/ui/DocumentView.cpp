@@ -1,3 +1,4 @@
+#include "core/ai/AiAssist.h"
 #include "ui/DocumentView.h"
 #include "core/Images.h"
 #include "core/Pdfs.h"
@@ -875,6 +876,11 @@ void DocumentView::showTextMenu(const QPoint &globalPos, int position)
     }
 
     menu.addSeparator();
+    QMenu *ai = menu.addMenu(tr("AI"));
+    ai->setEnabled(selected);
+    ai->addAction(tr("Spiega la selezione…"), this, [this] { emit aiPassageRequested(int(Ai::Assist::Task::Explain), 0); });
+    ai->addAction(tr("Traduci la selezione…"), this, [this] { emit aiPassageRequested(int(Ai::Assist::Task::Translate), 0); });
+    menu.addSeparator();
     QAction *copy = menu.addAction(tr("Copia"), m_edit, &QTextEdit::copy);
     copy->setEnabled(selected);
     menu.addAction(tr("Seleziona tutto"), m_edit, &QTextEdit::selectAll);
@@ -919,6 +925,8 @@ void DocumentView::addSegmentActions(QMenu *sub, const Segment &s)
     });
     sub->addAction(Ui::memoIcon(), tr("Memo…"), this,
                    [this, s] { Ui::editMemo(this, m_project, int(MemoTarget::Segment), s.id); });
+    sub->addAction(tr("Spiega con l'AI…"), this, [this, s] { emit aiPassageRequested(int(Ai::Assist::Task::Explain), s.id); });
+    sub->addAction(tr("Traduci con l'AI…"), this, [this, s] { emit aiPassageRequested(int(Ai::Assist::Task::Translate), s.id); });
     sub->addSeparator();
     sub->addAction(tr("Rimuovi codifica"), this, [this, s] { m_project->deleteSegment(s.id); });
 }

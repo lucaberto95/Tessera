@@ -249,6 +249,7 @@ void CodeTree::contextMenuEvent(QContextMenuEvent *event)
         menu.addAction(tr("Colore…"), this, [this, id] { changeColor(id); });
         menu.addAction(tr("Descrizione…"), this, [this, id] { editDescription(id); });
         menu.addAction(Ui::memoIcon(), tr("Memo…"), this, [this, id] { editMemo(id); });
+        menu.addAction(tr("Riassumi i segmenti con l'AI…"), this, [this, id] { emit aiSummaryRequested(id); });
         menu.addSeparator();
         menu.addAction(tr("Attiva solo questo codice"), this, [this, id] {
             m_active = {id};

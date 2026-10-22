@@ -33,6 +33,7 @@ signals:
     void activationChanged();
     void importRequested(qint64 groupId);
     void newTextDocumentRequested(qint64 groupId);
+    void aiSummaryRequested(qint64 documentId); // "Riassumi con l'AI…" (issue #40)
 
 protected:
     void contextMenuEvent(QContextMenuEvent *event) override;

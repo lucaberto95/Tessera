@@ -37,6 +37,15 @@ qt_add_library(tessera_core STATIC
     src/core/DemoProject.h src/core/DemoProject.cpp
     src/core/ai/AiConfig.h src/core/ai/AiConfig.cpp
     src/core/ai/AiClient.h src/core/ai/AiClient.cpp
+    src/core/ai/AiAssist.h src/core/ai/AiAssist.cpp
+)
+# Prompts of the AI functions (issue #40), embedded so tests and the app find them anywhere.
+qt_add_resources(tessera_core ai_prompts PREFIX "/ai" BASE "${CMAKE_SOURCE_DIR}/resources/ai" FILES
+    resources/ai/summarize_document.txt
+    resources/ai/summarize_segments.txt
+    resources/ai/explain.txt
+    resources/ai/translate.txt
+    resources/ai/combine.txt
 )
 target_include_directories(tessera_core PUBLIC src)
 target_compile_definitions(tessera_core PUBLIC TESSERA_VERSION_STRING="${PROJECT_VERSION}")
@@ -78,6 +87,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/DictionaryDialog.h src/ui/DictionaryDialog.cpp
     src/ui/WordFrequencyDialog.h src/ui/WordFrequencyDialog.cpp
     src/ui/AiSettingsDialog.h src/ui/AiSettingsDialog.cpp
+    src/ui/AiAssistDialog.h src/ui/AiAssistDialog.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent)

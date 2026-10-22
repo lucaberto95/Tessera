@@ -89,6 +89,8 @@ signals:
     void statusMessage(const QString &message);
     void pendingLinkChanged();
     void linkFollowed(qint64 documentId); // the view now shows that document
+    // "Spiega"/"Traduci con l'AI…" (issue #40): task is Ai::Assist::Task as int; segmentId 0 = the selection.
+    void aiPassageRequested(int task, qint64 segmentId);
 
 private:
     struct LinkEnd {

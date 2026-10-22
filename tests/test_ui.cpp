@@ -3,6 +3,7 @@
 #include "FakeHttp.h"
 #include "core/DemoProject.h"
 #include "core/ai/AiConfig.h"
+#include "ui/AiAssistDialog.h"
 #include "ui/AiSettingsDialog.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
@@ -39,6 +40,12 @@
 #include "ui/WordFrequencyDialog.h"
 
 #include <QBuffer>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTemporaryDir>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -1846,6 +1853,192 @@ private slots:
                 for (QAction *e : a->menu()->actions())
                     found = found || e->text().contains("AI");
         QVERIFY(found);
+    }
+
+    // ---------------------------------------------------------------- AI functions (issue #40)
+
+    static QByteArray aiReply(const QString &content)
+    {
+        return QJsonDocument(QJsonObject{{"choices", QJsonArray{QJsonObject{
+                   {"message", QJsonObject{{"role", "assistant"}, {"content", content}}}}}}})
+            .toJson(QJsonDocument::Compact);
+    }
+
+    void aiAssistDialogFlow()
+    {
+        using namespace Ai::Assist;
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, aiReply("Riassunto di prova.")}; };
+        QTemporaryDir dir;
+        Ai::Settings::useFilesForTesting(dir.filePath("s.ini"), dir.filePath("admin.ini"));
+        Project p;
+        QVERIFY(p.create(dir.filePath("assist.tsra")));
+        p.setAuthor("Ricercatore");
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista 1", "Lavoro da casa e molto comodo.");
+
+        // No provider: nothing is sent and the user is told what to do.
+        {
+            AiAssistDialog dlg(&p, Task::SummarizeDocument, {{QString(), p.documentText(doc)}}, "Documento",
+                               {MemoTarget::Document, doc, {}});
+            QVERIFY(dlg.inputDescription().contains("1 documento"));
+            QVERIFY(dlg.recipientText().contains("Impostazioni"));
+            dlg.generate();
+            QVERIFY(!dlg.isBusy());
+            QVERIFY(dlg.statusIsError());
+            QCOMPARE(srv.requests.size(), 0);
+        }
+
+        Ai::Config cfg;
+        cfg.provider = Ai::Provider::Local;
+        cfg.baseUrl = srv.url();
+        cfg.model = "llama3";
+        cfg.timeoutSec = 5;
+        QVERIFY(Ai::Settings::save(cfg));
+        p.setAiLogEnabled(true);
+
+        AiAssistDialog dlg(&p, Task::SummarizeDocument, {{QString(), p.documentText(doc)}}, "Documento: Intervista 1",
+                           {MemoTarget::Document, doc, {}});
+        QVERIFY(dlg.recipientText().contains("non lascia il computer"));
+        QTest::qWait(100);
+        QCOMPARE(srv.requests.size(), 0); // opening the panel sends nothing
+        Options o = dlg.options();
+        o.language = "inglese";
+        o.instructions = "sii breve";
+        dlg.setOptions(o);
+        dlg.generate();
+        QVERIFY(dlg.isBusy());
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(dlg.resultText(), QString("Riassunto di prova."));
+        QCOMPARE(srv.requests.size(), 1);
+        QVERIFY(srv.requests.first().body.contains("inglese"));
+        QVERIFY(srv.requests.first().body.contains("sii breve"));
+
+        // Not saved without the confirmation of the user.
+        QVERIFY(p.memos().isEmpty());
+        QCOMPARE(p.aiLog().size(), 1);
+        QCOMPARE(p.aiLog().first().function, QString("summarize_document"));
+
+        // The text can be edited, then saved: a memo of the document written by the AI, undoable.
+        dlg.setResultText("Riassunto di prova, corretto.");
+        const qint64 memoId = dlg.saveAsMemo();
+        QVERIFY(memoId > 0);
+        const Memo memo = p.memoFor(MemoTarget::Document, doc);
+        QCOMPARE(memo.id, memoId);
+        QCOMPARE(memo.body, QString("Riassunto di prova, corretto."));
+        QCOMPARE(memo.author, QString("AI (modello llama3)"));
+        QVERIFY(p.undo());
+        QVERIFY(p.memos().isEmpty());
+
+        // Regenerate: a second request; saving into an existing memo appends instead of overwriting.
+        Memo mine;
+        mine.targetType = MemoTarget::Document;
+        mine.targetId = doc;
+        mine.body = "Nota mia.";
+        QVERIFY(p.saveMemo(mine) > 0);
+        dlg.generate();
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(srv.requests.size(), 2);
+        QVERIFY(dlg.saveAsMemo() > 0);
+        const Memo merged = p.memoFor(MemoTarget::Document, doc);
+        QVERIFY(merged.body.startsWith("Nota mia."));
+        QVERIFY(merged.body.contains("AI (modello llama3)") && merged.body.contains("Riassunto di prova."));
+
+        // Copy.
+        dlg.copyResult();
+        QCOMPARE(QGuiApplication::clipboard()->text(), QString("Riassunto di prova."));
+        Ai::Settings::useFilesForTesting({}, {});
+    }
+
+    void aiAssistDialogCloudConsentSummaryAndCancel()
+    {
+        using namespace Ai::Assist;
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, aiReply("Sintesi [Intervista 1]")}; };
+        QTemporaryDir dir;
+        Ai::Settings::useFilesForTesting(dir.filePath("s.ini"), dir.filePath("admin.ini"));
+        Project p;
+        QVERIFY(p.create(dir.filePath("assist2.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista 1", "Mi piace lavorare da casa.");
+        const qint64 code = p.addCode(0, "Vantaggi", Qt::red);
+        QVERIFY(p.addSegment(doc, code, 0, 26) > 0);
+
+        // A cloud provider that was not confirmed: the question is asked and, declined, nothing is sent.
+        Ai::Config cfg;
+        cfg.provider = Ai::Provider::OpenAi;
+        cfg.baseUrl = srv.url(); // points to the fake server, never to the real one
+        cfg.model = "gpt-test";
+        cfg.apiKey = "sk-test";
+        cfg.timeoutSec = 5;
+        Ai::Settings::save(cfg); // the consent is a separate flag, still missing
+        QVERIFY(!Ai::Settings::cloudConfirmed(Ai::Provider::OpenAi));
+
+        const QList<Source> sources{{"Intervista 1", "Mi piace lavorare da casa."}};
+        AiAssistDialog dlg(&p, Task::SummarizeSegments, sources, "Codice: Vantaggi", {MemoTarget::Code, code, {}});
+        dlg.setSummaryTarget(doc, code);
+        QVERIFY(dlg.inputDescription().contains("1 segmenti") || dlg.inputDescription().contains("segment"));
+        QVERIFY(dlg.recipientText().contains("esce dal tuo computer"));
+        QString asked;
+        bool answer = false;
+        dlg.setConfirmHandler([&](const QString &notice) {
+            asked = notice;
+            return answer;
+        });
+        dlg.generate();
+        QVERIFY(asked.contains("OpenAI"));
+        QVERIFY(!dlg.isBusy());
+        QVERIFY(dlg.statusIsError());
+        QCOMPARE(srv.requests.size(), 0);
+
+        // Confirmed, but a cloud provider over plain http is refused by the client: still nothing is sent.
+        answer = true;
+        dlg.generate();
+        QVERIFY(!dlg.isBusy());
+        QVERIFY(dlg.statusIsError() && dlg.statusText().contains("https"));
+        QCOMPARE(srv.requests.size(), 0);
+        QVERIFY(Ai::Settings::cloudConfirmed(Ai::Provider::OpenAi));
+
+        // A local server: the whole flow works and the summary is signed by the AI.
+        cfg.provider = Ai::Provider::Local;
+        cfg.model = "llama3";
+        QVERIFY(Ai::Settings::save(cfg));
+        dlg.generate();
+        QTRY_VERIFY(!dlg.isBusy());
+        QVERIFY2(srv.requests.size() == 1, qPrintable(dlg.statusText()));
+        QVERIFY(dlg.resultText().contains("[Intervista 1]"));
+        QVERIFY(p.summary(doc, code).id == 0); // not saved yet
+
+        QVERIFY(dlg.saveAsSummary());
+        QCOMPARE(p.summary(doc, code).body, QString("Sintesi [Intervista 1]"));
+        QCOMPARE(p.summary(doc, code).author, QString("AI (modello llama3)"));
+        QVERIFY(p.undo());
+        QCOMPARE(p.summary(doc, code).id, qint64(0));
+
+        // A request in flight can be cancelled.
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{200, {}, true}; };
+        dlg.generate();
+        QVERIFY(dlg.isBusy());
+        dlg.cancelRequest();
+        QTRY_VERIFY(!dlg.isBusy());
+        QVERIFY(dlg.statusText().contains("annullat"));
+        Ai::Settings::useFilesForTesting({}, {});
+    }
+
+    void aiMenuEntries()
+    {
+        MainWindow w;
+        QMenu *ai = nullptr;
+        for (QAction *a : w.menuBar()->actions())
+            if (a->menu() && a->menu()->title() == "AI")
+                ai = a->menu();
+        QVERIFY(ai);
+        QStringList texts;
+        for (QAction *e : ai->actions())
+            texts << e->text().remove('&');
+        const QString all = texts.join("|");
+        QVERIFY(all.contains("Riassumi il documento"));
+        QVERIFY(all.contains("Riassumi i segmenti"));
+        QVERIFY(all.contains("Spiega"));
+        QVERIFY(all.contains("Traduci"));
     }
 };
 
