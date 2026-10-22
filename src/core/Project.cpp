@@ -105,6 +105,7 @@ Document readDocument(const QSqlQuery &q)
     d.importedAt = fromIso(q.value(4));
     d.position = q.value(5).toInt();
     d.uuid = q.value(6).toString();
+    d.kind = documentKindFromString(q.value(7).toString());
     return d;
 }
 
@@ -134,6 +135,14 @@ Segment readSegment(const QSqlQuery &q)
     s.author = q.value(7).toString();
     s.createdAt = fromIso(q.value(8));
     s.uuid = q.value(9).toString();
+    s.kind = segmentKindFromString(q.value(10).toString());
+    s.page = q.value(11).toInt();
+    s.x1 = q.value(12).toDouble();
+    s.y1 = q.value(13).toDouble();
+    s.x2 = q.value(14).toDouble();
+    s.y2 = q.value(15).toDouble();
+    s.tStartMs = q.value(16).toLongLong();
+    s.tEndMs = q.value(17).toLongLong();
     return s;
 }
 
@@ -173,16 +182,54 @@ const QString kLinkColumns = QStringLiteral(
     "l.id, l.from_document_id, l.from_start, l.from_end, l.to_document_id, l.to_start, l.to_end, l.comment,"
     " l.author, l.created_at, l.uuid");
 const QString kDocumentColumns = QStringLiteral(
-    "d.id, d.group_id, d.name, d.source_path, d.imported_at, d.position, d.uuid");
+    "d.id, d.group_id, d.name, d.source_path, d.imported_at, d.position, d.uuid, d.kind");
 const QString kCodeColumns = QStringLiteral("id, parent_id, name, color, description, position, uuid");
 const QString kSegmentColumns = QStringLiteral(
-    "s.id, s.document_id, s.code_id, s.start_pos, s.end_pos, s.weight, s.comment, s.author, s.created_at, s.uuid");
+    "s.id, s.document_id, s.code_id, s.start_pos, s.end_pos, s.weight, s.comment, s.author, s.created_at, s.uuid,"
+    " s.anchor_kind, s.page, s.x1, s.y1, s.x2, s.y2, s.t_start, s.t_end");
 const QString kMemoColumns = QStringLiteral(
     "id, target_type, target_id, title, body, author, created_at, modified_at, uuid");
 
 } // namespace
 
 QString newUuid() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
+
+QString documentKindToString(DocumentKind k)
+{
+    switch (k) {
+    case DocumentKind::Pdf: return QStringLiteral("pdf");
+    case DocumentKind::Image: return QStringLiteral("image");
+    case DocumentKind::Audio: return QStringLiteral("audio");
+    case DocumentKind::Video: return QStringLiteral("video");
+    default: return QStringLiteral("text");
+    }
+}
+
+DocumentKind documentKindFromString(const QString &s)
+{
+    for (DocumentKind k : {DocumentKind::Pdf, DocumentKind::Image, DocumentKind::Audio, DocumentKind::Video})
+        if (s == documentKindToString(k))
+            return k;
+    return DocumentKind::Text;
+}
+
+QString segmentKindToString(SegmentKind k)
+{
+    switch (k) {
+    case SegmentKind::Area: return QStringLiteral("area");
+    case SegmentKind::Time: return QStringLiteral("time");
+    default: return QStringLiteral("text");
+    }
+}
+
+SegmentKind segmentKindFromString(const QString &s)
+{
+    if (s == QLatin1String("area"))
+        return SegmentKind::Area;
+    if (s == QLatin1String("time"))
+        return SegmentKind::Time;
+    return SegmentKind::Text;
+}
 
 QString memoTargetToString(MemoTarget t)
 {
@@ -609,6 +656,19 @@ QList<Project::Migration> Project::builtInMigrations()
                          " category_id INTEGER NOT NULL REFERENCES dict_categories(id) ON DELETE CASCADE,"
                          " pattern TEXT NOT NULL)"),
           QStringLiteral("CREATE INDEX idx_dict_entries_category ON dict_entries(category_id)")}},
+        {6,
+         {// Generalized segments (issue #25): document kind and non-text anchors. Added as nullable/defaulted
+          // columns, so no table is rebuilt and existing rows are untouched. Non-text segments store
+          // start_pos = 0, end_pos = 1 to satisfy the original CHECK (end_pos > start_pos).
+          QStringLiteral("ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'"),
+          QStringLiteral("ALTER TABLE segments ADD COLUMN anchor_kind TEXT NOT NULL DEFAULT 'text'"),
+          QStringLiteral("ALTER TABLE segments ADD COLUMN page INTEGER"),
+          QStringLiteral("ALTER TABLE segments ADD COLUMN x1 REAL"),
+          QStringLiteral("ALTER TABLE segments ADD COLUMN y1 REAL"),
+          QStringLiteral("ALTER TABLE segments ADD COLUMN x2 REAL"),
+          QStringLiteral("ALTER TABLE segments ADD COLUMN y2 REAL"),
+          QStringLiteral("ALTER TABLE segments ADD COLUMN t_start INTEGER"),
+          QStringLiteral("ALTER TABLE segments ADD COLUMN t_end INTEGER")}},
     };
 }
 
@@ -911,6 +971,25 @@ qint64 Project::addDocument(qint64 groupId, const QString &name, const QString &
         {groupId, name, text, sourcePath, isoNow(),
          nextPosition(QStringLiteral("documents"), QStringLiteral("group_id = ?"), {groupId}),
          uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notify(&Project::documentsChanged);
+    return id;
+}
+
+qint64 Project::addMediaDocument(qint64 groupId, const QString &name, DocumentKind kind,
+                                const QString &sourcePath, const QString &uuid)
+{
+    setUndoLabel(tr("Nuovo documento"));
+    if (kind == DocumentKind::Text) {
+        fail(tr("Un documento di testo si crea con il suo testo"));
+        return 0;
+    }
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO documents(group_id, name, content, source_path, imported_at, position, uuid, kind) "
+                       "VALUES (?, ?, '', ?, ?, ?, ?, ?)"),
+        {groupId, name, sourcePath, isoNow(),
+         nextPosition(QStringLiteral("documents"), QStringLiteral("group_id = ?"), {groupId}),
+         uuid.isEmpty() ? newUuid() : uuid, documentKindToString(kind)});
     if (id)
         notify(&Project::documentsChanged);
     return id;
@@ -1285,12 +1364,14 @@ qint64 Project::findCode(qint64 parentId, const QString &name) const
 
 // ---------------------------------------------------------------- segments
 
-QList<Segment> Project::segmentsForDocument(qint64 documentId) const
+QList<Segment> Project::segmentsForDocument(qint64 documentId, bool includeNonText) const
 {
     QList<Segment> out;
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("SELECT ") + kSegmentColumns +
-              QStringLiteral(" FROM segments s WHERE s.document_id = ? ORDER BY s.start_pos, s.end_pos DESC, s.id"));
+              QStringLiteral(" FROM segments s WHERE s.document_id = ?") +
+              (includeNonText ? QString() : QStringLiteral(" AND s.anchor_kind = 'text'")) +
+              QStringLiteral(" ORDER BY s.start_pos, s.end_pos DESC, s.id"));
     q.addBindValue(documentId);
     q.exec();
     while (q.next())
@@ -1298,7 +1379,8 @@ QList<Segment> Project::segmentsForDocument(qint64 documentId) const
     return out;
 }
 
-QList<Segment> Project::segments(const QList<qint64> &documentIds, const QList<qint64> &codeIds) const
+QList<Segment> Project::segments(const QList<qint64> &documentIds, const QList<qint64> &codeIds,
+                                  bool includeNonText) const
 {
     QList<Segment> out;
     if (codeIds.isEmpty())
@@ -1309,6 +1391,8 @@ QList<Segment> Project::segments(const QList<qint64> &documentIds, const QList<q
                   placeholders(codeIds.size()) + QLatin1Char(')');
     if (!documentIds.isEmpty())
         sql += QStringLiteral(" AND s.document_id IN (") + placeholders(documentIds.size()) + QLatin1Char(')');
+    if (!includeNonText)
+        sql += QStringLiteral(" AND s.anchor_kind = 'text'");
     sql += QStringLiteral(" ORDER BY g.position, g.id, d.position, d.id, s.start_pos, s.id");
     QSqlQuery q(m_db);
     q.prepare(sql);
@@ -1322,12 +1406,13 @@ QList<Segment> Project::segments(const QList<qint64> &documentIds, const QList<q
     return out;
 }
 
-QList<Segment> Project::allSegments() const
+QList<Segment> Project::allSegments(bool includeNonText) const
 {
     QList<Segment> out;
     QSqlQuery q(m_db);
     q.exec(QStringLiteral("SELECT ") + kSegmentColumns +
-           QStringLiteral(" FROM segments s ORDER BY s.document_id, s.start_pos, s.id"));
+           QStringLiteral(" FROM segments s") + (includeNonText ? QString() : QStringLiteral(" WHERE s.anchor_kind = 'text'")) +
+               QStringLiteral(" ORDER BY s.document_id, s.start_pos, s.id"));
     while (q.next())
         out << readSegment(q);
     return out;
@@ -1356,8 +1441,12 @@ qint64 Project::addSegment(qint64 documentId, qint64 codeId, int start, int end,
         fail(tr("Il segmento è fuori dal testo del documento"));
         return 0;
     }
+    if (document(documentId).kind != DocumentKind::Text) {
+        fail(tr("Un segmento di testo richiede un documento di testo"));
+        return 0;
+    }
     const qint64 existing = scalar(QStringLiteral("SELECT id FROM segments WHERE document_id = ? AND code_id = ? "
-                                                  "AND start_pos = ? AND end_pos = ?"),
+                                                  "AND anchor_kind = 'text' AND start_pos = ? AND end_pos = ?"),
                                    {documentId, codeId, start, end})
                                 .toLongLong();
     if (existing)
@@ -1366,6 +1455,75 @@ qint64 Project::addSegment(qint64 documentId, qint64 codeId, int start, int end,
         QStringLiteral("INSERT INTO segments(document_id, code_id, start_pos, end_pos, weight, comment, author, "
                        "created_at, uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
         {documentId, codeId, start, end, weight, comment, m_author, isoNow(), uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notifySegments(documentId);
+    return id;
+}
+
+qint64 Project::addAreaSegment(qint64 documentId, qint64 codeId, int page, double x1, double y1, double x2,
+                              double y2, int weight, const QString &comment, const QString &uuid)
+{
+    setUndoLabel(tr("Codifica"));
+    const DocumentKind kind = document(documentId).kind;
+    if (kind != DocumentKind::Pdf && kind != DocumentKind::Image) {
+        fail(tr("Un'area si codifica solo in un PDF o in un'immagine"));
+        return 0;
+    }
+    if (page < 0 || (kind == DocumentKind::Pdf) != (page >= 1)) {
+        fail(tr("Pagina non valida"));
+        return 0;
+    }
+    // Normalise so that (x1, y1) is the top left corner.
+    if (x2 < x1)
+        std::swap(x1, x2);
+    if (y2 < y1)
+        std::swap(y1, y2);
+    if (x1 < 0 || y1 < 0 || x2 <= x1 || y2 <= y1) {
+        fail(tr("Area vuota o non valida"));
+        return 0;
+    }
+    const qint64 existing = scalar(QStringLiteral("SELECT id FROM segments WHERE document_id = ? AND code_id = ? AND "
+                                                  "anchor_kind = 'area' AND page = ? AND x1 = ? AND y1 = ? AND "
+                                                  "x2 = ? AND y2 = ?"),
+                                   {documentId, codeId, page, x1, y1, x2, y2})
+                                .toLongLong();
+    if (existing)
+        return existing;
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO segments(document_id, code_id, start_pos, end_pos, weight, comment, author, "
+                       "created_at, uuid, anchor_kind, page, x1, y1, x2, y2) "
+                       "VALUES (?, ?, 0, 1, ?, ?, ?, ?, ?, 'area', ?, ?, ?, ?, ?)"),
+        {documentId, codeId, weight, comment, m_author, isoNow(), uuid.isEmpty() ? newUuid() : uuid, page, x1, y1,
+         x2, y2});
+    if (id)
+        notifySegments(documentId);
+    return id;
+}
+
+qint64 Project::addTimeSegment(qint64 documentId, qint64 codeId, qint64 startMs, qint64 endMs, int weight,
+                               const QString &comment, const QString &uuid)
+{
+    setUndoLabel(tr("Codifica"));
+    const DocumentKind kind = document(documentId).kind;
+    if (kind != DocumentKind::Audio && kind != DocumentKind::Video) {
+        fail(tr("Un intervallo di tempo si codifica solo in un audio o in un video"));
+        return 0;
+    }
+    if (startMs < 0 || endMs <= startMs) {
+        fail(tr("Intervallo di tempo vuoto o non valido"));
+        return 0;
+    }
+    const qint64 existing = scalar(QStringLiteral("SELECT id FROM segments WHERE document_id = ? AND code_id = ? AND "
+                                                  "anchor_kind = 'time' AND t_start = ? AND t_end = ?"),
+                                   {documentId, codeId, startMs, endMs})
+                                .toLongLong();
+    if (existing)
+        return existing;
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO segments(document_id, code_id, start_pos, end_pos, weight, comment, author, "
+                       "created_at, uuid, anchor_kind, t_start, t_end) "
+                       "VALUES (?, ?, 0, 1, ?, ?, ?, ?, ?, 'time', ?, ?)"),
+        {documentId, codeId, weight, comment, m_author, isoNow(), uuid.isEmpty() ? newUuid() : uuid, startMs, endMs});
     if (id)
         notifySegments(documentId);
     return id;

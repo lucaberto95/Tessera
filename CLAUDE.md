@@ -22,23 +22,23 @@ C++20 + Qt 6.10 (Widgets, Sql/SQLite, Pdf, Charts). L'utente scrive in italiano:
 Toolchain: VS 2022 Build Tools (MSVC 14.44, CMake e Ninja inclusi), Qt 6.10.3 in
 `C:\Qt\6.10.3\msvc2022_64` (moduli `qtpdf qtcharts`). cmake/ninja non servono nel PATH.
 
-```bat
+``bat
 build.cmd Release        :: configura + compila in build\Release (app, libreria, test)
 deploy.cmd               :: dist\Tessera autonoma (Qt + runtime VC++ app-local)
 deploy.cmd zip           :: + dist\Tessera-<versione>-win64.zip per le release
-```
+``
 
 Da PowerShell: `cmd /c ".\build.cmd Release"`. Argomenti CMake extra solo via `TESSERA_CMAKE_ARGS`
 (es. `-DTESSERA_BUILD_APP=OFF` = solo core + test): `cmd` spezza i `-DX=Y` passati direttamente.
 
 Test (offscreen, nessuna finestra):
 
-```powershell
+``powershell
 $env:PATH = "C:\Qt\6.10.3\msvc2022_64\bin;$env:PATH"
 $env:QT_QPA_FONTDIR = 'C:\Windows\Fonts'     # senza, il testo offscreen è a quadratini
 build\Release\tessera_tests.exe -platform offscreen -o out.txt,txt
 build\Release\tessera_ui_tests.exe -platform offscreen -o out_ui.txt,txt
-```
+``
 
 Dalla shell di Claude Code i test non stampano nulla: leggere il file di `-o`; l'exit code = numero di
 fallimenti. `$env:TESSERA_SHOTS='<cartella>'` salva uno screenshot PNG per vista. L'app accetta
@@ -46,7 +46,7 @@ fallimenti. `$env:TESSERA_SHOTS='<cartella>'` salva uno screenshot PNG per vista
 
 ## Architettura
 
-```
+``
 src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, DocumentLink, Memo, Variable,
                  Dictionary, DictCategory, DictEntry
@@ -76,7 +76,7 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   avanzamento, `Qt6::Concurrent`; il progetto non è thread-safe: i testi si leggono prima, nel thread della UI),
   SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
-```
+``
 
 ### Concetti chiave
 
@@ -96,7 +96,16 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   statements }` in `Project::builtInMigrations()` (una istruzione SQL per voce, versioni crescenti, mai
   modificare una migrazione rilasciata). `open()` rifiuta file più nuovi, salva `"<nome> (backup vN).tsra"` e applica
   le migrazioni in **una transazione** (con `foreign_key_check`), a foreign key **disattivate** e prima dei trigger
-  di undo. Nei test `setMigrations()` simula versioni vecchie e future. Versione attuale: 5.
+  di undo. Nei test `setMigrations()` simula versioni vecchie e future. Versione attuale: 6.
+- **Segmenti generalizzati** (v6, #25): `documents.kind` (text|pdf|image|audio|video) e `segments.anchor_kind`
+  (text|area|time) + `page, x1, y1, x2, y2` (area; pagina 1-based per i PDF, 0 per le immagini) e
+  `t_start, t_end` (ms). I segmenti non testuali salvano `start_pos=0, end_pos=1` per rispettare il CHECK
+  originale (nessuna tabella ricostruita). `segmentsForDocument/segments/allSegments` restituiscono **solo i
+  segmenti di testo** salvo `includeNonText=true`: il codice basato sul testo (vista, recupero, co-occorrenze,
+  export) conta su start/end reali. API: `addMediaDocument`, `addAreaSegment`, `addTimeSegment`. Ancora non
+  fatti (per #26-#28/#46): contenuto binario dei documenti (blob nel file o collegato), UI per le aree/i tempi,
+  QDPX di documenti/segmenti non testuali (oggi l'export li omette). Le query sui segmenti richiedono le colonne
+  della v6: i test con migrazioni personalizzate devono includerle.
 - **Set di documenti** (`document_sets`, v2): riferimenti a documenti di qualsiasi gruppo. Nel `DocumentTree`
   lo stesso documento compare più volte: l'attivazione è per documento (`syncDocumentCheckBoxes`);
   `activeDocumentIds()` legge solo i gruppi.
@@ -176,7 +185,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#21, #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#21, #25 (solo modello e API: niente UI né blob), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 Aggiornare questo elenco quando una issue viene chiusa.
 

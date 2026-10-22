@@ -213,12 +213,13 @@ private slots:
         const QList<Project::Migration> migrations = {
             {2, {"CREATE TABLE extra (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '')"}},
             {3, {"ALTER TABLE codes ADD COLUMN alias TEXT NOT NULL DEFAULT ''"}},
+            Project::builtInMigrations().last(), // segment anchors, needed by the segment queries
         };
         Project p;
         p.setMigrations(migrations);
-        QCOMPARE(p.schemaVersion(), 3);
+        QCOMPARE(p.schemaVersion(), 6);
         QVERIFY(p.open(path("m1.tsra")));
-        QCOMPARE(p.meta("schema_version"), QString("3"));
+        QCOMPARE(p.meta("schema_version"), QString("6"));
         QCOMPARE(p.allSegments().size(), 1);
         QVERIFY(!p.canUndo());
 
@@ -307,7 +308,13 @@ private slots:
                            " position, uuid) SELECT id, group_id, name, content, source_path, imported_at,"
                            " position, uuid FROM documents",
                            "DROP TABLE documents",
-                           "ALTER TABLE documents_new RENAME TO documents"}}});
+                           "ALTER TABLE documents_new RENAME TO documents",
+                           // segment anchors, needed by the segment queries
+                           "ALTER TABLE segments ADD COLUMN anchor_kind TEXT NOT NULL DEFAULT 'text'",
+                           "ALTER TABLE segments ADD COLUMN page INTEGER", "ALTER TABLE segments ADD COLUMN x1 REAL",
+                           "ALTER TABLE segments ADD COLUMN y1 REAL", "ALTER TABLE segments ADD COLUMN x2 REAL",
+                           "ALTER TABLE segments ADD COLUMN y2 REAL", "ALTER TABLE segments ADD COLUMN t_start INTEGER",
+                           "ALTER TABLE segments ADD COLUMN t_end INTEGER"}}});
         QVERIFY(p.open(path("m4.tsra")));
         QCOMPARE(p.documents().size(), 1);
         QCOMPARE(p.allSegments().size(), 1);
@@ -354,6 +361,107 @@ private slots:
         QVERIFY(p.addLink(doc, 0, 2, doc, 3, 5) > 0);
         QVERIFY(p.undo());
         QVERIFY(p.links().isEmpty());
+    }
+
+    // Issue #25: a v1 project upgrades to generalized segments without losing data.
+    void generalizedSegmentsMigration()
+    {
+        qint64 code = 0;
+        {
+            Project old;
+            old.setMigrations({});
+            QVERIFY(old.create(path("gs1.tsra")));
+            const qint64 d = old.addDocument(old.groups().first().id, "Intervista", "Testo da codificare");
+            code = old.addCode(0, "Tema", Qt::red);
+            QVERIFY(old.addSegment(d, code, 2, 9, 3, "nota") > 0);
+        }
+        Project p;
+        QVERIFY(p.open(path("gs1.tsra")));
+        QVERIFY(!p.migrationBackupPath().isEmpty());
+        QCOMPARE(fileVersion(p.migrationBackupPath()), 1);
+        QCOMPARE(p.documents().first().kind, DocumentKind::Text);
+        const QList<Segment> segs = p.allSegments();
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(segs.first().kind, SegmentKind::Text);
+        QCOMPARE(segs.first().start, 2);
+        QCOMPARE(segs.first().end, 9);
+        QCOMPARE(segs.first().weight, 3);
+        QCOMPARE(segs.first().comment, QString("nota"));
+    }
+
+    void areaAndTimeSegments()
+    {
+        Project p;
+        QVERIFY(p.create(path("anchors.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 text = p.addDocument(g, "Testo", "Un testo di prova");
+        const qint64 pdf = p.addMediaDocument(g, "Rapporto", DocumentKind::Pdf);
+        const qint64 img = p.addMediaDocument(g, "Foto", DocumentKind::Image);
+        const qint64 aud = p.addMediaDocument(g, "Audio", DocumentKind::Audio);
+        QVERIFY(pdf > 0 && img > 0 && aud > 0);
+        QCOMPARE(p.document(pdf).kind, DocumentKind::Pdf);
+        QCOMPARE(p.document(text).kind, DocumentKind::Text);
+        QVERIFY(p.addMediaDocument(g, "x", DocumentKind::Text) == 0);
+
+        // Area: PDF needs a page, images do not; corners are normalised.
+        const qint64 a = p.addAreaSegment(pdf, code, 3, 200, 300, 100, 50, 2, "area");
+        QVERIFY(a > 0);
+        const Segment sa = p.segment(a);
+        QCOMPARE(sa.kind, SegmentKind::Area);
+        QCOMPARE(sa.page, 3);
+        QCOMPARE(sa.x1, 100.0);
+        QCOMPARE(sa.y1, 50.0);
+        QCOMPARE(sa.x2, 200.0);
+        QCOMPARE(sa.y2, 300.0);
+        QCOMPARE(sa.weight, 2);
+        QCOMPARE(p.addAreaSegment(pdf, code, 3, 100, 50, 200, 300), a); // duplicate
+        QCOMPARE(p.addAreaSegment(pdf, code, 0, 1, 1, 5, 5), qint64(0)); // pdf needs a page
+        QVERIFY(p.addAreaSegment(img, code, 1, 1, 1, 5, 5) == 0);        // image has no pages
+        QVERIFY(p.addAreaSegment(img, code, 0, 1, 1, 5, 5) > 0);
+        QVERIFY(p.addAreaSegment(img, code, 0, 1, 1, 1, 5) == 0);        // empty
+        QVERIFY(p.addAreaSegment(text, code, 0, 1, 1, 5, 5) == 0);
+        QVERIFY(p.addAreaSegment(aud, code, 0, 1, 1, 5, 5) == 0);
+
+        // Time.
+        const qint64 t = p.addTimeSegment(aud, code, 1500, 4200);
+        QVERIFY(t > 0);
+        const Segment st = p.segment(t);
+        QCOMPARE(st.kind, SegmentKind::Time);
+        QCOMPARE(st.tStartMs, qint64(1500));
+        QCOMPARE(st.tEndMs, qint64(4200));
+        QCOMPARE(p.addTimeSegment(aud, code, 1500, 4200), t);
+        QVERIFY(p.addTimeSegment(aud, code, 10, 10) == 0);
+        QVERIFY(p.addTimeSegment(pdf, code, 0, 10) == 0);
+        QVERIFY(p.addSegment(pdf, code, 0, 1) == 0);
+
+        // Text-based lists skip non-text segments unless asked.
+        QVERIFY(p.addSegment(text, code, 0, 2) > 0);
+        QCOMPARE(p.allSegments().size(), 1);
+        QCOMPARE(p.allSegments(true).size(), 4);
+        QCOMPARE(p.segmentsForDocument(pdf).size(), 0);
+        QCOMPARE(p.segmentsForDocument(pdf, true).size(), 1);
+        QCOMPARE(p.segments({}, {code}).size(), 1);
+        QCOMPARE(p.segments({}, {code}, true).size(), 4);
+        QCOMPARE(p.segmentCountByDocument().value(pdf), 1);
+
+        // Undo/redo restore the anchor.
+        QVERIFY(p.deleteSegment(t));
+        QVERIFY(p.undo());
+        QCOMPARE(p.segment(t).tEndMs, qint64(4200));
+        QVERIFY(p.deleteDocument(aud));
+        QVERIFY(p.undo());
+        QCOMPARE(p.segment(t).kind, SegmentKind::Time);
+        QCOMPARE(p.document(aud).kind, DocumentKind::Audio);
+
+        // QDPX keeps working: the text document round-trips, non-text ones are left out for now.
+        QString err, report;
+        QVERIFY2(Qdpx::exportProject(p, path("anchors.qdpx"), &err), qPrintable(err));
+        Project q;
+        QVERIFY(q.create(path("anchors2.tsra")));
+        QVERIFY2(Qdpx::importProject(q, path("anchors.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(q.documents().size(), 1);
+        QCOMPARE(q.allSegments().size(), 1);
     }
 
     void documentSets()

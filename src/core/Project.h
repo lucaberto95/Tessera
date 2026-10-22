@@ -79,6 +79,10 @@ public:
     QString documentText(qint64 id) const;
     qint64 addDocument(qint64 groupId, const QString &name, const QString &text,
                        const QString &sourcePath = {}, const QString &uuid = {});
+    // Document with no text (pdf, image, audio, video): its segments are areas or time ranges. The
+    // binary content itself is attached by the importers of those kinds.
+    qint64 addMediaDocument(qint64 groupId, const QString &name, DocumentKind kind,
+                            const QString &sourcePath = {}, const QString &uuid = {});
     bool renameDocument(qint64 id, const QString &name);
     bool moveDocument(qint64 id, qint64 groupId);
     bool deleteDocument(qint64 id);
@@ -112,13 +116,22 @@ public:
     qint64 findCode(qint64 parentId, const QString &name) const;
 
     // Segments (codings)
-    QList<Segment> segmentsForDocument(qint64 documentId) const;
-    QList<Segment> segments(const QList<qint64> &documentIds, const QList<qint64> &codeIds) const;
-    QList<Segment> allSegments() const;
+    // The lists hold text segments only, unless includeNonText is set: text-based code (document view,
+    // retrieval, co-occurrences, exports) relies on start/end being real positions.
+    QList<Segment> segmentsForDocument(qint64 documentId, bool includeNonText = false) const;
+    QList<Segment> segments(const QList<qint64> &documentIds, const QList<qint64> &codeIds,
+                            bool includeNonText = false) const;
+    QList<Segment> allSegments(bool includeNonText = false) const;
     Segment segment(qint64 id) const;
     // Returns the id of the new segment, or of an identical existing one.
     qint64 addSegment(qint64 documentId, qint64 codeId, int start, int end, int weight = 0,
                       const QString &comment = {}, const QString &uuid = {});
+    // Area of a pdf (page >= 1, PDF points) or image (page 0, pixels) document; x1,y1 is the top left corner.
+    qint64 addAreaSegment(qint64 documentId, qint64 codeId, int page, double x1, double y1, double x2, double y2,
+                          int weight = 0, const QString &comment = {}, const QString &uuid = {});
+    // Time range of an audio or video document, in milliseconds.
+    qint64 addTimeSegment(qint64 documentId, qint64 codeId, qint64 startMs, qint64 endMs, int weight = 0,
+                          const QString &comment = {}, const QString &uuid = {});
     bool deleteSegment(qint64 id);
     bool setSegmentComment(qint64 id, const QString &comment);
     bool setSegmentWeight(qint64 id, int weight);

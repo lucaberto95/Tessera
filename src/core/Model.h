@@ -22,8 +22,13 @@ struct DocumentSet {
     QString uuid;
 };
 
+// What a document holds. Only text documents have content in documents.content; the other kinds
+// are anchored by areas (pdf, image) or time ranges (audio, video).
+enum class DocumentKind { Text, Pdf, Image, Audio, Video };
+
 struct Document {
     qint64 id = 0;
+    DocumentKind kind = DocumentKind::Text;
     qint64 groupId = 0;
     QString name;
     QString sourcePath;
@@ -42,12 +47,22 @@ struct Code {
     QString uuid;
 };
 
+// Where a segment sits in its document. Text: start/end; Area: rectangle (and page, for pdf);
+// Time: millisecond range.
+enum class SegmentKind { Text, Area, Time };
+
 struct Segment {
     qint64 id = 0;
     qint64 documentId = 0;
     qint64 codeId = 0;
-    int start = 0; // inclusive
+    SegmentKind kind = SegmentKind::Text;
+    int start = 0; // inclusive; text segments only (non-text segments store 0..1 internally, ignore it)
     int end = 0;   // exclusive
+    // Area: PDF points (origin top left) or pixels of the original image; page is 1-based, 0 for images.
+    int page = 0;
+    double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    // Time: milliseconds from the start of the media.
+    qint64 tStartMs = 0, tEndMs = 0;
     int weight = 0;
     QString comment;
     QString author;
@@ -131,6 +146,10 @@ struct DictEntry {
     QString pattern;
 };
 
+QString documentKindToString(DocumentKind k);
+DocumentKind documentKindFromString(const QString &s);
+QString segmentKindToString(SegmentKind k);
+SegmentKind segmentKindFromString(const QString &s);
 QString memoTargetToString(MemoTarget t);
 MemoTarget memoTargetFromString(const QString &s);
 QString variableTypeToString(VariableType t);

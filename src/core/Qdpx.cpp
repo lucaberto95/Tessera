@@ -109,7 +109,9 @@ QString linkEndGuid(const QString &linkUuid, bool from)
 bool exportProject(const Project &project, const QString &path, QString *error)
 {
     const QList<Code> codes = project.codes();
-    const QList<Document> docs = project.documents();
+    // Only text documents are exported for now: pdf/image/audio/video sources and their selections come with #46.
+    QList<Document> docs = project.documents();
+    docs.removeIf([](const Document &d) { return d.kind != DocumentKind::Text; });
     const QList<DocumentGroup> groups = project.groups();
     const QList<Variable> vars = project.variables();
     const auto values = project.allVariableValues();
@@ -354,6 +356,8 @@ bool exportProject(const Project &project, const QString &path, QString *error)
         if (!setMemos.isEmpty())
             w.writeTextElement(QStringLiteral("Description"), setMemos.first().body);
         for (qint64 id : project.documentSetMembers(s.id)) {
+            if (!docGuid.contains(id))
+                continue;
             w.writeEmptyElement(QStringLiteral("MemberSource"));
             w.writeAttribute(QStringLiteral("targetGUID"), docGuid.value(id));
         }
