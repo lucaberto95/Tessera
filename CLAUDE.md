@@ -148,6 +148,8 @@ successive. Mantenerlo aggiornato a ogni sessione, nello stesso momento in cui c
 - **#5** (ricerca nel documento aperto, Ctrl+F): implementata, in attesa di prova manuale e merge
   nella [PR 55](https://github.com/lucaberto95/Tessera/pull/55). Ctrl+F = ricerca nel documento,
   Ctrl+Shift+F = ricerca lessicale sul progetto.
+- **#4** (import CSV delle variabili con riconoscimento del tipo): implementata, in attesa di prova manuale e merge
+  nella [PR 57](https://github.com/lucaberto95/Tessera/pull/57).
 - Aggiornare questo elenco quando una issue passa in PR o viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`;
