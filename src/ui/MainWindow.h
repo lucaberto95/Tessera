@@ -70,6 +70,7 @@ private:
     void showLinks();
     void editProjectMemo();
     void exportCodebook();
+    void createReport();
     void setUserName();
     void about();
     void openSegment(qint64 documentId, int start, int end, qint64 segmentId);
@@ -119,6 +120,7 @@ private:
     QAction *m_completeLink = nullptr;
     QAction *m_links = nullptr;
     QAction *m_exportCodebook = nullptr;
+    QAction *m_createReport = nullptr;
     QAction *m_search = nullptr;
     QAction *m_matrix = nullptr;
     QAction *m_retrieval = nullptr;

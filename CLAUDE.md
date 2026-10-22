@@ -65,6 +65,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
                  `cloudLayout` (spirale con collisioni). Funzioni pure su testi già letti: girano in un thread
   Agreement      accordo tra codificatori (#23): `compute` a tre livelli (presenza, frequenza, segmenti), kappa di Cohen e Brennan-Prediger,
                  disaccordi; `mapDocuments/mapCodes/remap` portano un secondo progetto nello stesso spazio di id
+  Report         report (#45): `Report::build` -> elenco di `Block` (titolo, indice, titoli 1-3, paragrafo, citazione, meta, tabella) scritto da `writeDocx`/`writePdf`/`writeHtml`; i tre formati partono dallo stesso modello
   Exporters      CSV per Excel (UTF-8 BOM, ';'), HTML, import variabili CSV, tabelle/fogli .xlsx (`*Sheet`, `projectSheets`)
   Images         (`Images::`) suffissi/lettura file immagine, `crop` di un'area, miniature, PNG, `areaLabel`
   Pdfs           (`Pdfs::`) `Doc` (PDF da memoria: testo di pagina, `select` tra due punti, `textInArea`, `render`,
@@ -82,7 +83,7 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   codici/documenti), SurveyImportDialog, DictionaryDialog (non modale), MemoManager, VariablesDialog,
   WordFrequencyDialog (3 schede: frequenze, nuvola, parole in contesto; calcolo con `QtConcurrent` + barra di
   avanzamento, `Qt6::Concurrent`; il progetto non è thread-safe: i testi si leggono prima, nel thread della UI),
-  SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
+  ReportDialog (Crea report, menu Progetto), SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
 
@@ -194,6 +195,8 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 
 - **Accordo tra codificatori** (#23, Agreement.*): i due codificatori sono due autori (`Segment::author`) dello stesso progetto o questo progetto e un altro file (aperto con `Merge::Source`, documenti/codici abbinati per uuid poi nome/percorso; gli id dell'altro progetto si azzerano). Formule nell'header: unità (documento, codice) per presenza e frequenza, segmenti reciproci con soglia overlap/unione per il livello segmenti (solo testo; aree e tempi non confrontati). Cohen indefinito (NaN, "n.d.") quando pe = 1 e al livello segmenti. `addSegment` non duplica un segmento identico: nei test i due codificatori devono usare posizioni diverse.
 
+- **Report** (#45, Report.*): DOCX scritto a mano con `QZipWriter` in un `QBuffer` (poi `QSaveFile`): `styles.xml` con stili veri (Title, Heading1-3 con `outlineLvl`, Quote, Meta, TOC1-3) e indice come campo `TOC` (`w:dirty`: Word lo compila all'apertura e chiede di aggiornare i campi); tabelle `w:tbl` con stile TableGrid. Caratteri vietati in XML 1.0 scartati in `xmlText`. PDF = `QTextDocument::setHtml(toHtml)` + `QPdfWriter` (HTML limitato al sottoinsieme di Qt). Verificato aprendo il DOCX in Word via COM; LibreOffice non è installato su questo PC.
+
 - **Unione di progetti** (#22, Merge.*): legge l'altro progetto con un secondo Project su una **copia** in cartella temporanea
   (aprirlo potrebbe migrarlo e lasciare un backup accanto al file; un .qdpx è importato in un progetto temporaneo) e scrive nel
   progetto aperto solo con l'API pubblica di Project, quindi trigger di undo e segnali funzionano da soli. Chiavi: documenti per
@@ -264,7 +267,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#45 (report DOCX/PDF/HTML con codebook, segmenti, memo, variabili e tabelle riassuntive; senza matrice e senza immagini/aree PDF come miniature), #23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 **#32** documenti con formattazione (titoli, grassetto/corsivo/sottolineato/barrato, elenchi, tabelle come righe a bande da DOCX, ODT, RTF e HTML; logica in `src/core/RichText.*`; non incluso: immagini incorporate, formattazione in MD/PDF e nell'export QDPX, editor rich text: l'editing resta sul testo semplice).
 Aggiornare questo elenco quando una issue viene chiusa.

@@ -4,6 +4,7 @@
 #include "core/Project.h"
 #include "ui/CodeTree.h"
 #include "ui/AgreementDialog.h"
+#include "ui/ReportDialog.h"
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
@@ -896,6 +897,49 @@ private slots:
         QVERIFY(p.allSegments().isEmpty());
     }
 
+    void reportDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("report-ui.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "D", "Una frase da citare nel report.");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        p.addSegment(doc, code, 0, 8);
+
+        ReportDialog dlg(&p);
+        dlg.show();
+        QCOMPARE(dlg.format(), ReportDialog::Format::Docx);
+        QVERIFY(dlg.options().codebook);
+        QVERIFY(dlg.options().segments);
+        Report::Options o = dlg.options();
+        o.title = "Mio report";
+        o.grouping = Report::Grouping::ByDocument;
+        o.examplesPerCode = 3;
+        o.variables = true;
+        dlg.setOptions(o);
+        QCOMPARE(dlg.options().title, QString("Mio report"));
+        QCOMPARE(dlg.options().grouping, Report::Grouping::ByDocument);
+        QCOMPARE(dlg.options().examplesPerCode, 3);
+        QVERIFY(dlg.options().variables);
+
+        const struct { ReportDialog::Format format; const char *file; const char *magic; } cases[] = {
+            {ReportDialog::Format::Docx, "ui-report.docx", "PK"},
+            {ReportDialog::Format::Pdf, "ui-report.pdf", "%PDF"},
+            {ReportDialog::Format::Html, "ui-report.html", "<!DOCTYPE"},
+        };
+        for (const auto &c : cases) {
+            dlg.setFormat(c.format);
+            QCOMPARE(dlg.format(), c.format);
+            const QString out = m_dir.filePath(c.file);
+            QVERIFY(dlg.generate(out));
+            QFile f(out);
+            QVERIFY(f.open(QIODevice::ReadOnly));
+            QVERIFY(f.readAll().startsWith(c.magic));
+            f.close();
+            const QString shots = qEnvironmentVariable("TESSERA_SHOTS"); // keep the files for a manual look
+            if (!shots.isEmpty())
+                QFile::copy(out, QDir(shots).filePath(c.file));
+        }
+    }
     void agreementDialog()
     {
         const QString fileA = m_dir.filePath("agreement-a.tsra"), fileB = m_dir.filePath("agreement-b.tsra");

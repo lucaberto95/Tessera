@@ -8,6 +8,7 @@
 #include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
+#include "core/Report.h"
 #include "core/RichText.h"
 #include "core/Retrieval.h"
 #include "core/Stats.h"
@@ -34,6 +35,7 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextList>
+#include <QXmlStreamReader>
 #include <QTest>
 #include <QUuid>
 #include <QtCore/private/qzipreader_p.h>
@@ -201,6 +203,111 @@ private:
     }
 
 private slots:
+    void reportDocxPdfHtml()
+    {
+        Project p;
+        QVERIFY(p.create(path("report.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "Intervista 1", QString("Mi piace lavorare da casa <e> & basta.\nSeconda riga \U0001F600 emoji."));
+        const qint64 d2 = p.addDocument(g, "Intervista 2", "Il traffico \x01 è un problema.");
+        const qint64 parent = p.addCode(0, "Lavoro", Qt::blue);
+        const qint64 child = p.addCode(parent, "Casa", Qt::green);
+        p.setCodeDescription(parent, "Tutto sul lavoro");
+        const qint64 s1 = p.addSegment(d1, child, 0, 55);
+        p.addSegment(d2, parent, 0, 10);
+        QVERIFY(p.setSegmentComment(s1, "commento chiave"));
+        Memo m;
+        m.targetType = MemoTarget::Project;
+        m.title = "Idee";
+        m.body = "Prima riga\nSeconda riga";
+        QVERIFY(p.saveMemo(m) > 0);
+        const qint64 v = p.addVariable("Età", VariableType::Integer);
+        QVERIFY(p.setVariableValue(d1, v, "42"));
+        Summaries::TableConfig cfg;
+        cfg.documentIds = {d1, d2};
+        cfg.codeIds = {child};
+        p.addSummaryTable("Sintesi", Summaries::configToJson(cfg));
+
+        Report::Options opt;
+        opt.title = "Titolo <prova>";
+        opt.variables = true;
+        opt.summaryTables = true;
+        const Report::Document doc = Report::build(p, opt);
+        QCOMPARE(doc.title, QString("Titolo <prova>"));
+
+        // DOCX: a valid ZIP whose parts are well-formed XML, with real Word styles.
+        const QString docx = path("report.docx");
+        QString error;
+        QVERIFY2(Report::writeDocx(docx, doc, &error), qPrintable(error));
+        QZipReader zip(docx);
+        QVERIFY(zip.isReadable());
+        QStringList parts;
+        for (const auto &fi : zip.fileInfoList())
+            parts << fi.filePath;
+        for (const char *name : {"[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/styles.xml",
+                                 "word/_rels/document.xml.rels", "docProps/core.xml"}) {
+            QVERIFY2(parts.contains(QString::fromLatin1(name)), name);
+            const QByteArray xml = zip.fileData(QString::fromLatin1(name));
+            QXmlStreamReader reader(xml);
+            while (!reader.atEnd())
+                reader.readNext();
+            QVERIFY2(!reader.hasError(), qPrintable(QString("%1: %2").arg(name, reader.errorString())));
+        }
+        const QString body = QString::fromUtf8(zip.fileData("word/document.xml"));
+        const QString styles = QString::fromUtf8(zip.fileData("word/styles.xml"));
+        for (const char *style : {"Title", "Heading1", "Heading2", "Quote", "Normal"})
+            QVERIFY2(styles.contains(QString("w:styleId=\"%1\"").arg(style)), style);
+        QVERIFY(styles.contains("<w:outlineLvl w:val=\"0\"/>")); // headings feed the automatic table of contents
+        QVERIFY(body.contains("<w:pStyle w:val=\"Heading1\"/>"));
+        QVERIFY(body.contains("<w:pStyle w:val=\"Heading2\"/>"));
+        QVERIFY(body.contains("<w:pStyle w:val=\"Quote\"/>"));
+        QVERIFY(body.contains("TOC \\o \"1-3\""));
+        QVERIFY(body.contains("<w:tbl>")); // variables and summary tables
+        QVERIFY(body.contains("Titolo &lt;prova&gt;"));
+        QVERIFY(body.contains("&lt;e&gt; &amp; basta"));
+        QVERIFY(body.contains("commento chiave"));
+        QVERIFY(body.contains("Seconda riga"));
+        QVERIFY(!body.contains(QChar(0x01))); // characters XML cannot hold are dropped
+        QVERIFY(body.contains(QString::fromUcs4(U"\U0001F600")));
+
+        // PDF and HTML
+        const QString pdf = path("report.pdf");
+        QVERIFY2(Report::writePdf(pdf, doc, &error), qPrintable(error));
+        QFile pf(pdf);
+        QVERIFY(pf.open(QIODevice::ReadOnly));
+        QVERIFY(pf.readAll().startsWith("%PDF"));
+        const QString html = path("report.html");
+        QVERIFY2(Report::writeHtml(html, doc, &error), qPrintable(error));
+        QFile hf(html);
+        QVERIFY(hf.open(QIODevice::ReadOnly));
+        const QString h = QString::fromUtf8(hf.readAll());
+        QVERIFY(h.contains("<h1"));
+        QVERIFY(h.contains("Codebook"));
+        QVERIFY(h.contains("&lt;e&gt;"));
+
+        // Options: no codebook / grouping by document / no comments / no examples.
+        Report::Options small;
+        small.contents = false;
+        small.codebook = false;
+        small.memos = false;
+        small.comments = false;
+        small.grouping = Report::Grouping::ByDocument;
+        const QString smallHtml = Report::toHtml(Report::build(p, small));
+        QVERIFY(!smallHtml.contains("Codebook"));
+        QVERIFY(!smallHtml.contains("Idee"));
+        QVERIFY(!smallHtml.contains("commento chiave"));
+        QVERIFY(smallHtml.contains("Intervista 2"));
+        const QString withComment = Report::toHtml(Report::build(p, Report::Options()));
+        QVERIFY(withComment.contains("commento chiave"));
+        QVERIFY(withComment.contains("Idee"));
+        Report::Options noExamples;
+        noExamples.segments = false;
+        noExamples.examplesPerCode = 0;
+        QVERIFY(!Report::toHtml(Report::build(p, noExamples)).contains("Mi piace lavorare"));
+        Report::Options oneExample = noExamples;
+        oneExample.examplesPerCode = 1;
+        QVERIFY(Report::toHtml(Report::build(p, oneExample)).contains("Mi piace lavorare"));
+    }
     void projectLifecycle()
     {
         Project p;

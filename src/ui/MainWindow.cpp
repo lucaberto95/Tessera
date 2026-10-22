@@ -13,6 +13,7 @@
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
 #include "ui/AgreementDialog.h"
+#include "ui/ReportDialog.h"
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
@@ -189,6 +190,7 @@ void MainWindow::createActions()
                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
     m_links = make(tr("C&ollegamenti…"), &MainWindow::showLinks);
     m_exportCodebook = make(tr("Esporta &codebook…"), &MainWindow::exportCodebook);
+    m_createReport = make(tr("Crea &report (Word, PDF, HTML)…"), &MainWindow::createReport);
 
     m_search = make(tr("&Ricerca lessicale…"), &MainWindow::showSearch,
                     QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F), true,
@@ -228,6 +230,7 @@ void MainWindow::createMenus()
     project->addAction(m_mergeProject);
     project->addAction(m_exportQdpx);
     project->addAction(m_exportProjectXlsx);
+    project->addAction(m_createReport);
     project->addSeparator();
     project->addAction(m_example);
     project->addSeparator();
@@ -649,6 +652,14 @@ void MainWindow::exportQdpx()
         statusBar()->showMessage(tr("Progetto esportato in %1").arg(path), 5000);
     else
         Ui::showError(this, error);
+}
+
+void MainWindow::createReport()
+{
+    m_view->commitEdits();
+    ReportDialog dlg(m_project, this);
+    if (dlg.exec() == QDialog::Accepted)
+        statusBar()->showMessage(tr("Report creato"), 5000);
 }
 
 void MainWindow::exportProjectXlsx()
