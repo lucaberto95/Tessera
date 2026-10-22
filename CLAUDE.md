@@ -50,6 +50,9 @@ build\Release\tessera_tests.exe -platform offscreen
 build\Release\tessera_ui_tests.exe -platform offscreen
 ```
 
+Se lanciati dalla shell di Claude Code i test non stampano nulla (l'exit code = numero di fallimenti
+resta valido): per vedere i risultati aggiungere `-o <file>,txt` e leggere il file.
+
 `$env:TESSERA_SHOTS='<cartella>'` fa salvare a `tessera_ui_tests` uno screenshot PNG di ogni vista.
 L'app accetta `--example <file.tsra>` (crea il progetto di esempio) e `--screenshot <png>`
 (salva la finestra dopo 1,5 s ed esce): utili per verificare l'interfaccia vera.
@@ -200,6 +203,11 @@ Ogni issue chiusa fa una release nuova (di norma incremento della versione minor
 2. `build.cmd Release`, eseguire i test, `deploy.cmd zip`.
 3. Commit su `main`, tag `vx.y.z`, push del tag, poi
    `gh release create vx.y.z dist\Tessera-x.y.z-win64.zip -R lucaberto95/Tessera --title ... --notes ...`.
+4. Verificare con `gh release view vx.y.z -R lucaberto95/Tessera --json assets` che lo zip ci sia.
+
+Le release v0.2.0–v0.7.0 erano state create senza zip e i loro tag hanno ancora `VERSION 0.1.0`
+in `CMakeLists.txt`: gli zip sono stati aggiunti dopo, compilando ogni tag con la versione
+corretta impostata solo in locale. Il tag deve contenere il cambio di versione (passo 1 prima del tag).
 
 Repository: https://github.com/lucaberto95/Tessera (privato), branch `main`.
 
