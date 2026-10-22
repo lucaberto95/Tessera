@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.27.0] - 2026-10-22 — Riassunti, spiegazioni e traduzioni con l'AI (#40)
+Commit `6a0680a`
+
+- Menu «AI» e voci nei menu contestuali (documento, codice, selezione, segmento): riassunto del documento, riassunto dei segmenti di un codice (con i sottocodici; citazioni come [Intervista 3]), «Spiega» e «Traduci» per un brano o un segmento.
+- Pannello del risultato: lunghezza (breve, media, lunga), lingua di output, istruzioni aggiuntive; mostra destinatario (locale o cloud) e cosa verrà inviato; la richiesta parte solo con «Genera», è annullabile e il risultato è modificabile. Niente è salvato senza un clic: «Salva come memo» (memo del documento, del codice o del segmento, autore «AI (modello X)»; se il memo esiste il testo firmato si accoda) o «Salva come sintesi» (segmenti di un solo documento); un solo passo di annulla. «Copia» e «Rigenera».
+- `src/core/ai/AiAssist`: prompt scritti da zero in `resources/ai/*.txt` (lingua di output sempre esplicita; il testo è trattato come dato, non come istruzioni), testi lunghi divisi in blocchi (la citazione resta col suo testo), riassunti parziali poi fusi, traduzioni concatenate; ogni esecuzione va nel registro AI se attivo.
+- Test con il server HTTP finto (nessuna rete, nessuna chiave). Non incluso: parafrasi e semplificazione, riferimenti cliccabili nei riassunti, prova con un modello locale reale.
 ## [0.26.0] - 2026-10-22 — Infrastruttura AI (#39)
 Commit `75f1ab4`
 
