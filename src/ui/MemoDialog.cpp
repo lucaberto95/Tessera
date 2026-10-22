@@ -385,8 +385,11 @@ MemoLinkPicker::MemoLinkPicker(Project *project, const QList<MemoLink> &existing
         const QString text = project->documentText(d.id);
         for (const Segment &s : segments)
             checkable(di, tr("%1: %2").arg(codes.value(s.codeId).name,
-                                           s.kind == SegmentKind::Text ? TextUtils::excerpt(text, s.start, s.end, 80)
-                                                                       : Images::areaLabel(s)),
+                                           s.kind == SegmentKind::Text
+                                               ? TextUtils::excerpt(text, s.start, s.end, 80)
+                                               : !s.areaText.isEmpty()
+                                                     ? TextUtils::excerpt(s.areaText, 0, int(s.areaText.size()), 80)
+                                                     : Images::areaLabel(s)),
                       MemoTarget::Segment, s.id);
     }
 

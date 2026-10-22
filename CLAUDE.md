@@ -63,6 +63,8 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
                  `cloudLayout` (spirale con collisioni). Funzioni pure su testi già letti: girano in un thread
   Exporters      CSV per Excel (UTF-8 BOM, ';'), HTML, import variabili CSV, tabelle/fogli .xlsx (`*Sheet`, `projectSheets`)
   Images         (`Images::`) suffissi/lettura file immagine, `crop` di un'area, miniature, PNG, `areaLabel`
+  Pdfs           (`Pdfs::`) `Doc` (PDF da memoria: testo di pagina, `select` tra due punti, `textInArea`, `render`,
+                 `cropArea`), `readFile`, `pageTexts/joinPages/pageOfOffset` (pagine separate da `\f`)
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
   Xlsx           lettore (fogli, stringhe condivise/inline, date dai formati) e scrittore `writeWorkbook(Sheet...)`
   Survey         import di sondaggi (.xlsx/.csv): ruoli colonna, un documento per rispondente, variabili tipizzate
@@ -70,7 +72,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   DemoProject    progetto di esempio (3 interviste sul lavoro da remoto)
 src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWindow)
   MainWindow (menu, azioni, collega i segnali del Project ai pannelli), DocumentTree / CodeTree (caselle di
-  attivazione), DocumentView + CodingStripe (+ ImageView per i documenti immagine), LinksDialog, SegmentsPanel (`setRetrieval`, `setPassages`),
+  attivazione), DocumentView + CodingStripe (+ ImageView per le immagini, PdfView per i PDF), LinksDialog, SegmentsPanel (`setRetrieval`, `setPassages`),
   CooccurrenceDialog, StatsDialog, MemoDialog (non modale, `Ui::editMemo/openMemo`, `MemoLinkPicker`, drop di
   codici/documenti), SurveyImportDialog, DictionaryDialog (non modale), MemoManager, VariablesDialog,
   WordFrequencyDialog (3 schede: frequenze, nuvola, parole in contesto; calcolo con `QtConcurrent` + barra di
@@ -97,7 +99,7 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   statements }` in `Project::builtInMigrations()` (una istruzione SQL per voce, versioni crescenti, mai
   modificare una migrazione rilasciata). `open()` rifiuta file più nuovi, salva `"<nome> (backup vN).tsra"` e applica
   le migrazioni in **una transazione** (con `foreign_key_check`), a foreign key **disattivate** e prima dei trigger
-  di undo. Nei test `setMigrations()` simula versioni vecchie e future. Versione attuale: 7.
+  di undo. Nei test `setMigrations()` simula versioni vecchie e future. Versione attuale: 8.
 - **Segmenti generalizzati** (v6, #25): `documents.kind` (text|pdf|image|audio|video) e `segments.anchor_kind`
   (text|area|time) + `page, x1, y1, x2, y2` (area; pagina 1-based per i PDF, 0 per le immagini) e
   `t_start, t_end` (ms). I segmenti non testuali salvano `start_pos=0, end_pos=1` per rispettare il CHECK
@@ -105,8 +107,8 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   segmenti di testo** salvo `includeNonText=true`: il codice basato sul testo (vista, recupero, co-occorrenze,
   export) conta su start/end reali. API: `addMediaDocument`, `addAreaSegment`, `addTimeSegment`. Le query sui
   segmenti richiedono le colonne della v6: i test con migrazioni personalizzate devono includerle (nei test la v6 è
-  `builtInMigrations().at(4)`, non più `.last()`). Ancora non fatti (per #26/#28/#46): UI per PDF, audio/video e
-  tempi, QDPX di documenti/segmenti non testuali (l'export li omette, immagini comprese).
+  `builtInMigrations().at(4)`, non più `.last()`). Ancora non fatti (per #28/#46): UI per audio/video e
+  tempi, QDPX di documenti/segmenti non testuali (l'export li omette, immagini e PDF compresi).
 - **Documenti immagine** (v7, #27): i byte originali del file stanno in `document_data(document_id, data BLOB)`
   (tabella separata: un blob in `documents` finirebbe nel log di undo a ogni rinomina). `documentImage()` è l'unico
   punto che decodifica e applica l'orientamento EXIF (`setAutoTransform`): visualizzazione, coordinate delle aree e
@@ -118,6 +120,17 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   `SegmentKind::Area` (niente `documentText().mid(start, ...)`). TIFF/WebP richiedono i plugin `qtiff`/`qwebp`
   (modulo Qt `qtimageformats`, assente nel Qt di questo PC: `aqt install-qt ... -m qtimageformats`); `windeployqt`
   li copia da solo se ci sono.
+- **Documenti PDF** (v8, #26): come le immagini, i byte stanno in `document_data`; `documents.content` tiene il testo
+  estratto all'import (pagine unite da `\f`, `Project::addPdfDocument`) e fa da cache per ricerca lessicale, frequenze e
+  dizionari (la codifica automatica salta i PDF: `addSegment` rifiuta i documenti non testuali). Aree in **punti PDF**,
+  origine in alto a sinistra, pagina 1-based, indipendenti dallo zoom. `segments.area_text` (v8) è il testo con cui l'area è
+  stata codificata (selezione o testo nel rettangolo): lista segmenti, export e memo lo mostrano senza aprire il PDF; senza
+  testo si mostra una miniatura (`Pdfs::Doc::cropArea`). `PdfView` (`QAbstractScrollArea`, rendering con `QPdfDocument`,
+  cache di 12 pagine) disegna le pagine, le aree e le barre dei codici nel margine di ogni pagina; trascinare seleziona il testo
+  (glifo più vicino al punto, quindi si può partire dal bianco), Alt+trascinare un rettangolo. `DocumentView` ha una modalità PDF
+  (`isPdf()`, come `isImage()`): `selectRange(start,end,0)` con un offset del testo estratto porta alla pagina (hit della
+  ricerca). Ctrl+F nel documento, collegamenti e modifica non valgono per i PDF. QPdfDocument: `load(QIODevice*)` è `void`
+  (guardare `status()`), `getSelection` vuole che il punto di partenza sia su un glifo.
 - **Set di documenti** (`document_sets`, v2): riferimenti a documenti di qualsiasi gruppo. Nel `DocumentTree`
   lo stesso documento compare più volte: l'attivazione è per documento (`syncDocumentCheckBoxes`);
   `activeDocumentIds()` legge solo i gruppi.
@@ -151,6 +164,9 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - `DocumentView` deve restare iscritto da solo ai segnali del Project (segmenti e link): con dati non aggiornati
   il salvataggio di una modifica al testo cancellerebbe codifiche. `addSegment`/`addLink` rifiutano posizioni fuori testo.
 - Le colonne della `CodingStripe` si assegnano sui pixel (righe visive) e si ricalcolano quando il testo va a capo.
+- `findChild<QLineEdit*>()` in `DocumentView` deve trovare il campo di ricerca: i widget con un QLineEdit interno (`m_pageSpin`)
+  si creano dopo `buildFindBar()`.
+- Nei test un PDF con testo vero si fa con `QPdfWriter` (`setResolution(72)`: unità = punti) e `QPainter::drawText`.
 - `findChild<QTableWidget*>()` in un dialogo con più tabelle restituisce quella sbagliata: nei test `findChildren`.
 - `QZipReader/QZipWriter` sono header privati di QtCore (`Qt6::CorePrivate`). `QZipWriter::close()` chiude il
   dispositivo: niente `QSaveFile` diretto (fatale), scrivere in un `QBuffer` e poi nel `QSaveFile`.
@@ -199,7 +215,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#21, #25 (modello e API), #27 (immagini e aree; non nel QDPX), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#21, #25 (modello e API), #26 (PDF a pagine e aree; non nel QDPX), #27 (immagini e aree; non nel QDPX), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 Aggiornare questo elenco quando una issue viene chiusa.
 

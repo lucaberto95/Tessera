@@ -1,5 +1,6 @@
 #include "core/Exporters.h"
 #include "core/Images.h"
+#include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
 
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 
 namespace Exporters {
 
@@ -207,7 +209,7 @@ Table segmentsTable(const Project &project, const QList<Segment> &segments, bool
         if (s.kind == SegmentKind::Area) { // no text positions: the area is described instead
             rows << QStringList{groupNames.value(d.groupId), d.name, codePaths.value(s.codeId), QString(), QString(),
                                 QString::number(s.weight), s.comment, s.author, dateString(s.createdAt, isoDates),
-                                Images::areaLabel(s)};
+                                s.areaText.isEmpty() ? Images::areaLabel(s) : s.areaText};
             continue;
         }
         rows << QStringList{groupNames.value(d.groupId), d.name, codePaths.value(s.codeId), QString::number(s.start),
@@ -227,6 +229,7 @@ bool exportSegmentsHtml(const Project &project, const QList<Segment> &segments, 
         codes.insert(c.id, c);
     QHash<qint64, QString> texts;
     QHash<qint64, QImage> images; // decoded once per image document
+    QHash<qint64, std::shared_ptr<Pdfs::Doc>> pdfs; // loaded once per PDF document
 
     QString html = QStringLiteral("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>%1</title><style>%2</style>"
                                   "</head><body><h1>%1</h1><p>%3</p>")
@@ -236,10 +239,20 @@ bool exportSegmentsHtml(const Project &project, const QList<Segment> &segments, 
     for (const Segment &s : segments) {
         const Code c = codes.value(s.codeId);
         if (s.kind == SegmentKind::Area) {
-            if (!images.contains(s.documentId))
-                images.insert(s.documentId, project.documentImage(s.documentId));
             // The cropped area travels inside the page as a PNG data URI.
-            const QImage crop = Images::scaledToFit(Images::crop(images.value(s.documentId), s), 900, 700);
+            QImage crop;
+            if (s.page > 0) { // PDF area: rendered from the page
+                if (!pdfs.contains(s.documentId)) {
+                    auto doc = std::make_shared<Pdfs::Doc>();
+                    doc->load(project.documentData(s.documentId));
+                    pdfs.insert(s.documentId, doc);
+                }
+                crop = pdfs.value(s.documentId)->cropArea(s, 900, 700);
+            } else {
+                if (!images.contains(s.documentId))
+                    images.insert(s.documentId, project.documentImage(s.documentId));
+                crop = Images::scaledToFit(Images::crop(images.value(s.documentId), s), 900, 700);
+            }
             html += QStringLiteral("<div class=\"seg\" style=\"border-left-color:%1\"><div class=\"meta\">"
                                    "<span class=\"code\">%2</span> · %3 · %4%5</div><div class=\"area\">%6</div>")
                         .arg(c.color.name(), htmlEscape(project.codePath(s.codeId)), htmlEscape(docs.value(s.documentId).name),
@@ -249,6 +262,8 @@ bool exportSegmentsHtml(const Project &project, const QList<Segment> &segments, 
                                            : QStringLiteral("<img alt=\"\" src=\"data:image/png;base64,") +
                                                  QString::fromLatin1(Images::toPng(crop).toBase64()) +
                                                  QStringLiteral("\">"));
+            if (!s.areaText.isEmpty())
+                html += QStringLiteral("<div class=\"text\">") + htmlEscape(s.areaText) + QStringLiteral("</div>");
             if (!s.comment.isEmpty())
                 html += QStringLiteral("<div class=\"comment\">") + htmlEscape(s.comment) + QStringLiteral("</div>");
             html += QStringLiteral("</div>");
@@ -366,7 +381,8 @@ QString memoTargetLabel(const Project &project, MemoTarget type, qint64 id)
         return QObject::tr("Segmento: %1 / %2 – \"%3\"")
             .arg(project.document(s.documentId).name, project.code(s.codeId).name,
                  s.kind == SegmentKind::Text ? TextUtils::excerpt(project.documentText(s.documentId), s.start, s.end, 50)
-                                             : Images::areaLabel(s));
+                                             : !s.areaText.isEmpty() ? TextUtils::excerpt(s.areaText, 0, int(s.areaText.size()), 50)
+                                                                     : Images::areaLabel(s));
     }
     case MemoTarget::DocumentSet:
         for (const DocumentSet &s : project.documentSets())

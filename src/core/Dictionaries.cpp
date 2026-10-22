@@ -338,6 +338,7 @@ int autocode(Project &project, const Analysis &analysis, const QList<qint64> &ca
     };
 
     QHash<qint64, QString> texts;
+    QHash<qint64, bool> textDocs;
     const qsizetype before = project.allSegments().size(); // addSegment merges duplicates
     project.setUndoLabel(tr("Codifica automatica con il dizionario"));
     project.beginBatch();
@@ -351,6 +352,10 @@ int autocode(Project &project, const Analysis &analysis, const QList<qint64> &ca
         if (usedCodes)
             usedCodes->insert(category, code);
         for (const Hit &h : hits) {
+            if (!textDocs.contains(h.documentId))
+                textDocs.insert(h.documentId, project.document(h.documentId).kind == DocumentKind::Text);
+            if (!textDocs.value(h.documentId)) // a PDF is analysed through its extracted text but not coded as text
+                continue;
             if (!texts.contains(h.documentId))
                 texts.insert(h.documentId, project.documentText(h.documentId));
             const QString &text = texts[h.documentId];

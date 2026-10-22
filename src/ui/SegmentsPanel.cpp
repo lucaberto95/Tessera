@@ -1,6 +1,7 @@
 #include "ui/SegmentsPanel.h"
 #include "core/Exporters.h"
 #include "core/Images.h"
+#include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
 #include "ui/UiUtils.h"
@@ -17,6 +18,8 @@
 #include <QTableWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
+
+#include <memory>
 
 namespace {
 enum Column { DocumentColumn, CodeColumn, TextColumn, WeightColumn, CommentColumn, ColumnCount };
@@ -137,21 +140,41 @@ void SegmentsPanel::refresh()
     m_table->clearContents();
     m_table->setRowCount(int(m_segments.size()));
     QHash<qint64, QImage> images; // decoded only when a thumbnail is missing
+    QHash<qint64, std::shared_ptr<Pdfs::Doc>> pdfs;
     for (int row = 0; row < m_segments.size(); ++row) {
         const Segment &s = m_segments[row];
         if (s.kind == SegmentKind::Area) {
-            // Image area: a thumbnail of the cropped region instead of text.
-            const QString key = QStringLiteral("%1:%2:%3:%4:%5").arg(s.documentId).arg(s.x1).arg(s.y1).arg(s.x2).arg(s.y2);
-            if (!m_thumbnails.contains(key)) {
-                if (!images.contains(s.documentId))
-                    images.insert(s.documentId, m_project->documentImage(s.documentId));
-                const QImage thumb = Images::scaledToFit(Images::crop(images.value(s.documentId), s), ThumbWidth, ThumbHeight);
-                m_thumbnails.insert(key, thumb.isNull() ? QIcon() : QIcon(QPixmap::fromImage(thumb)));
+            // PDF area with text: the text it was coded with. Otherwise (images, PDF areas without text) a
+            // thumbnail of the cropped region.
+            const bool pdf = s.page > 0;
+            QTableWidgetItem *area = nullptr;
+            if (pdf && !s.areaText.isEmpty()) {
+                area = new QTableWidgetItem(TextUtils::excerpt(s.areaText, 0, int(s.areaText.size()), 600));
+                area->setToolTip(Ui::plainToolTip(s.areaText.left(3000)));
+            } else {
+                const QString key = QStringLiteral("%1:%2:%3:%4:%5:%6").arg(s.documentId).arg(s.page).arg(s.x1).arg(s.y1).arg(s.x2).arg(s.y2);
+                if (!m_thumbnails.contains(key)) {
+                    QImage thumb;
+                    if (pdf) {
+                        if (!pdfs.contains(s.documentId)) {
+                            auto pdfDoc = std::make_shared<Pdfs::Doc>();
+                            pdfDoc->load(m_project->documentData(s.documentId));
+                            pdfs.insert(s.documentId, pdfDoc);
+                        }
+                        thumb = pdfs.value(s.documentId)->cropArea(s, ThumbWidth, ThumbHeight);
+                    } else {
+                        if (!images.contains(s.documentId))
+                            images.insert(s.documentId, m_project->documentImage(s.documentId));
+                        thumb = Images::scaledToFit(Images::crop(images.value(s.documentId), s), ThumbWidth, ThumbHeight);
+                    }
+                    m_thumbnails.insert(key, thumb.isNull() ? QIcon() : QIcon(QPixmap::fromImage(thumb)));
+                }
+                area = new QTableWidgetItem(m_thumbnails.value(key), Images::areaLabel(s));
             }
-            auto *doc = new QTableWidgetItem(docNames.value(s.documentId));
+            auto *doc = new QTableWidgetItem(pdf ? tr("%1 · p. %2").arg(docNames.value(s.documentId)).arg(s.page)
+                                                 : docNames.value(s.documentId));
             doc->setToolTip(Ui::plainToolTip(Images::areaLabel(s)));
             auto *code = new QTableWidgetItem(Ui::colorIcon(codes.value(s.codeId).color), m_project->codePath(s.codeId));
-            auto *area = new QTableWidgetItem(m_thumbnails.value(key), Images::areaLabel(s));
             auto *weight = new QTableWidgetItem(s.weight ? QString::number(s.weight) : QString());
             weight->setTextAlignment(Qt::AlignCenter);
             m_table->setItem(row, DocumentColumn, doc);
@@ -311,11 +334,19 @@ void SegmentsPanel::contextMenuEvent(QContextMenuEvent *event)
     QMenu menu(this);
     menu.addAction(tr("Mostra nel documento"), this,
                    [this, seg] { emit segmentActivated(seg.documentId, seg.start, seg.end, seg.id); });
-    if (seg.kind == SegmentKind::Area)
+    if (seg.kind == SegmentKind::Area) {
         menu.addAction(tr("Copia immagine"), this, [this, seg] {
-            QApplication::clipboard()->setImage(Images::crop(m_project->documentImage(seg.documentId), seg));
+            if (seg.page > 0) {
+                Pdfs::Doc doc;
+                doc.load(m_project->documentData(seg.documentId));
+                QApplication::clipboard()->setImage(doc.cropArea(seg, 1600, 1600));
+            } else {
+                QApplication::clipboard()->setImage(Images::crop(m_project->documentImage(seg.documentId), seg));
+            }
         });
-    else
+        if (!seg.areaText.isEmpty())
+            menu.addAction(tr("Copia testo"), this, [seg] { QApplication::clipboard()->setText(seg.areaText); });
+    } else
         menu.addAction(tr("Copia testo"), this, [this, seg] {
             QApplication::clipboard()->setText(m_project->documentText(seg.documentId).mid(seg.start, seg.length()));
         });

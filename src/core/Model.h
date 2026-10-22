@@ -61,6 +61,8 @@ struct Segment {
     // Area: PDF points (origin top left) or pixels of the original image; page is 1-based, 0 for images.
     int page = 0;
     double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    // Area of a pdf: the text it was coded with (selected text or the text inside the rectangle), if any.
+    QString areaText;
     // Time: milliseconds from the start of the media.
     qint64 tStartMs = 0, tEndMs = 0;
     int weight = 0;

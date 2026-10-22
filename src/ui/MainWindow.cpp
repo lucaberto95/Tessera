@@ -3,6 +3,7 @@
 #include "core/Exporters.h"
 #include "core/Images.h"
 #include "core/Importers.h"
+#include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
 #include "core/Survey.h"
@@ -38,6 +39,7 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProgressDialog>
+#include <QPushButton>
 #include <QSettings>
 #include <QSplitter>
 #include <QStatusBar>
@@ -405,7 +407,7 @@ void MainWindow::updateActions()
     m_startLink->setEnabled(canCode);
     m_completeLink->setEnabled(canCode && m_view->hasPendingLink());
     m_newSubcode->setEnabled(open && m_codes->currentCodeId());
-    m_editText->setEnabled(open && m_view->documentId() && !m_view->isImage());
+    m_editText->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf());
 
     // While editing a document's text, Ctrl+Z belongs to the text editor.
     const bool editing = m_view->isEditing();
@@ -625,6 +627,29 @@ void MainWindow::importDocuments(qint64 groupId)
     if (!groupId)
         groupId = m_documents->currentGroupId();
 
+    // A PDF can be kept as pages (to code text and areas) or read as plain text; asked once for the whole import.
+    bool pdfAsPages = true;
+    for (const QString &file : files) {
+        if (!Pdfs::isPdfFile(file))
+            continue;
+        QMessageBox box(QMessageBox::Question, tr("Importa PDF"),
+                        tr("Come vuoi importare i file PDF?\n\n"
+                           "Come PDF: le pagine si vedono com'erano e si codificano il testo selezionato e le aree (figure, tabelle).\n"
+                           "Solo testo: il testo estratto diventa un documento di testo, senza impaginazione."),
+                        QMessageBox::NoButton, this);
+        box.setTextFormat(Qt::PlainText);
+        QPushButton *asPdf = box.addButton(tr("Come PDF (consigliato)"), QMessageBox::AcceptRole);
+        QPushButton *asText = box.addButton(tr("Solo testo"), QMessageBox::AcceptRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(asPdf);
+        box.exec();
+        if (box.clickedButton() == asText)
+            pdfAsPages = false;
+        else if (box.clickedButton() != asPdf)
+            return;
+        break;
+    }
+
     QProgressDialog progress(tr("Importazione dei documenti…"), tr("Annulla"), 0, int(files.size()), this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(400);
@@ -642,6 +667,23 @@ void MainWindow::importDocuments(qint64 groupId)
             const qint64 id = data.isEmpty() ? 0
                                              : m_project->addImageDocument(groupId, QFileInfo(files[i]).completeBaseName(),
                                                                            data, files[i]);
+            if (id)
+                lastId = id;
+            else
+                failures << QFileInfo(files[i]).fileName() + QStringLiteral(": ") +
+                                (error.isEmpty() ? m_project->lastError() : error);
+            continue;
+        }
+        if (pdfAsPages && Pdfs::isPdfFile(files[i])) {
+            QString error;
+            const QByteArray data = Pdfs::readFile(files[i], &error);
+            qint64 id = 0;
+            if (!data.isEmpty()) {
+                Pdfs::Doc doc;
+                doc.load(data);
+                id = m_project->addPdfDocument(groupId, QFileInfo(files[i]).completeBaseName(), data,
+                                               Pdfs::joinPages(Pdfs::pageTexts(doc)), files[i]);
+            }
             if (id)
                 lastId = id;
             else
@@ -737,7 +779,7 @@ void MainWindow::codeWithCurrent()
         return;
     }
     if (!m_view->hasSelection()) {
-        statusBar()->showMessage(tr("Seleziona prima del testo nel documento."), 4000);
+        statusBar()->showMessage(tr("Seleziona prima del testo o un'area nel documento."), 4000);
         return;
     }
     m_view->codeSelection(code);
@@ -746,7 +788,7 @@ void MainWindow::codeWithCurrent()
 void MainWindow::codeWithNewCode()
 {
     if (!m_view->hasSelection()) {
-        statusBar()->showMessage(tr("Seleziona prima del testo nel documento."), 4000);
+        statusBar()->showMessage(tr("Seleziona prima del testo o un'area nel documento."), 4000);
         return;
     }
     const QString suggestion = m_view->selectedText().simplified().left(40);

@@ -17,6 +17,7 @@ qt_add_library(tessera_core STATIC
     src/core/Project.h src/core/Project.cpp
     src/core/Importers.h src/core/Importers.cpp
     src/core/Images.h src/core/Images.cpp
+    src/core/Pdfs.h src/core/Pdfs.cpp
     src/core/Exporters.h src/core/Exporters.cpp
     src/core/Qdpx.h src/core/Qdpx.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
@@ -33,8 +34,8 @@ qt_add_library(tessera_core STATIC
 target_include_directories(tessera_core PUBLIC src)
 target_compile_definitions(tessera_core PUBLIC TESSERA_VERSION_STRING="${PROJECT_VERSION}")
 target_link_libraries(tessera_core
-    PUBLIC Qt6::Core Qt6::Gui Qt6::Sql
-    PRIVATE Qt6::CorePrivate Qt6::Pdf)
+    PUBLIC Qt6::Core Qt6::Gui Qt6::Sql Qt6::Pdf
+    PRIVATE Qt6::CorePrivate)
 
 option(TESSERA_BUILD_APP "Build the desktop application (off = core library and tests only)" ON)
 
@@ -46,6 +47,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/DocumentView.h src/ui/DocumentView.cpp
     src/ui/CodingStripe.h src/ui/CodingStripe.cpp
     src/ui/ImageView.h src/ui/ImageView.cpp
+    src/ui/PdfView.h src/ui/PdfView.cpp
     src/ui/SegmentsPanel.h src/ui/SegmentsPanel.cpp
     src/ui/MemoDialog.h src/ui/MemoDialog.cpp
     src/ui/MemoManager.h src/ui/MemoManager.cpp

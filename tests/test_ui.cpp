@@ -8,7 +8,9 @@
 #include "ui/StatsDialog.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
+#include "core/Pdfs.h"
 #include "ui/ImageView.h"
+#include "ui/PdfView.h"
 #include "ui/LinksDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
@@ -34,9 +36,12 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMimeData>
+#include <QPainter>
+#include <QPdfWriter>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -63,6 +68,26 @@ private:
             w->grab().save(QDir(dir).filePath(name + QStringLiteral(".png")));
     }
 
+    // A4 PDF with real text: the lines of each page are drawn from y = 100 pt, 40 pt apart (72 dpi: units are points).
+    static QByteArray makePdf(const QList<QStringList> &pages)
+    {
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        QPdfWriter writer(&buffer);
+        writer.setPageSize(QPageSize(QPageSize::A4));
+        writer.setResolution(72);
+        QPainter painter(&writer);
+        painter.setFont(QFont(QStringLiteral("Arial"), 14));
+        for (int p = 0; p < pages.size(); ++p) {
+            if (p > 0)
+                writer.newPage();
+            for (int i = 0; i < pages[p].size(); ++i)
+                painter.drawText(QPointF(72, 100 + 40 * i), pages[p][i]);
+        }
+        painter.end();
+        return bytes;
+    }
     qint64 codeNamed(const QString &name) const
     {
         for (const Code &c : m_project->codes())
@@ -1160,6 +1185,184 @@ private slots:
         QVERIFY(!iv->hasImage());
     }
 
+    void pdfDocumentView()
+    {
+        Project p; // separate from the example project, whose document counts other tests rely on
+        const QString file = m_dir.filePath("pdfview.tsra");
+        QVERIFY(p.create(file));
+        const QByteArray bytes = makePdf({{"Primo paragrafo sul lavoro", "Secondo paragrafo sulla casa"}, {"Pagina due"}});
+        Pdfs::Doc pdf;
+        QVERIFY(pdf.load(bytes));
+        const qint64 group = p.groups().first().id;
+        const qint64 doc = p.addPdfDocument(group, "Rapporto", bytes, Pdfs::joinPages(Pdfs::pageTexts(pdf)));
+        const qint64 text = p.addDocument(group, "Testo", "Una frase");
+        QVERIFY(doc > 0 && text > 0);
+        const qint64 tema = p.addCode(0, "Tema", QColor("#d62728"));
+        const qint64 altro = p.addCode(0, "Altro", QColor("#1f77b4"));
+
+        DocumentView view(&p);
+        view.resize(900, 700);
+        view.show();
+        QSignalSpy status(&view, &DocumentView::statusMessage);
+        view.openDocument(doc);
+        QVERIFY(view.isPdf() && !view.isImage());
+        PdfView *pv = view.pdfView();
+        QVERIFY(pv->hasPdf());
+        QCOMPARE(pv->pageCount(), 2);
+        QVERIFY(pv->isFitWidth());
+        QVERIFY(pv->zoom() > 0.5 && pv->zoom() < 2);
+        QVERIFY(!view.hasSelection());
+        QCOMPARE(view.codeSelection(tema), qint64(0)); // nothing selected
+
+        auto drag = [&](int page, const QPointF &a, const QPointF &b, Qt::KeyboardModifiers mods = Qt::NoModifier) {
+            const QPoint from = pv->toViewport(page, a), to = pv->toViewport(page, b);
+            QTest::mousePress(pv->viewport(), Qt::LeftButton, mods, from);
+            QTest::mouseMove(pv->viewport(), (from + to) / 2);
+            QTest::mouseMove(pv->viewport(), to);
+            QTest::mouseRelease(pv->viewport(), Qt::LeftButton, mods, to);
+        };
+        auto rectOf = [](const Segment &s) { return QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1); };
+
+        // Dragging over a line selects its text; coding it stores an area with that text.
+        drag(1, QPointF(60, 80), QPointF(500, 108));
+        QVERIFY(view.hasSelection());
+        QVERIFY(pv->selection().isText);
+        QVERIFY(pv->selection().text.contains("Primo paragrafo sul lavoro"));
+        QVERIFY(!pv->selection().text.contains("Secondo"));
+        QVERIFY(view.selectedText().contains("Primo"));
+        const qint64 textArea = view.codeSelection(tema);
+        QVERIFY(textArea > 0);
+        const Segment ts = p.segment(textArea);
+        QCOMPARE(ts.kind, SegmentKind::Area);
+        QCOMPARE(ts.page, 1);
+        QVERIFY(ts.areaText.contains("Primo paragrafo sul lavoro"));
+        QVERIFY(ts.x2 > ts.x1 && ts.y2 > ts.y1);
+
+        // Alt + drag selects a rectangle, whatever it covers; the text inside is kept with the coding.
+        drag(1, QPointF(60, 135), QPointF(420, 165), Qt::AltModifier);
+        QVERIFY(view.hasSelection());
+        QVERIFY(!pv->selection().isText);
+        QVERIFY(pv->selection().text.contains("Secondo paragrafo"));
+        const qint64 rectArea = view.codeSelection(altro);
+        QVERIFY(rectArea > 0);
+        QVERIFY(p.segment(rectArea).areaText.contains("Secondo paragrafo"));
+        QVERIFY(qAbs(rectOf(p.segment(rectArea)).width() - 360) < 1.5 && qAbs(rectOf(p.segment(rectArea)).height() - 30) < 1.5);
+
+        // A click on empty space clears the selection; a click on a coded area selects it and reports its codes.
+        QTest::mouseClick(pv->viewport(), Qt::LeftButton, Qt::NoModifier, pv->toViewport(1, QPointF(450, 300)));
+        QVERIFY(!view.hasSelection());
+        status.clear();
+        QTest::mouseClick(pv->viewport(), Qt::LeftButton, Qt::NoModifier, pv->toViewport(1, rectOf(ts).center()));
+        QVERIFY(view.hasSelection());
+        QCOMPARE(pv->highlightedArea(), textArea);
+        QVERIFY(!status.isEmpty() && status.last().first().toString().contains("Tema"));
+        QCOMPARE(pv->selection().rect, rectOf(ts));
+
+        // Positions are in points: at any zoom the same codings sit on the same text, and a rectangle drawn
+        // at another zoom gives the same coordinates.
+        for (double zoom : {0.5, 1.0, 2.25, 4.0}) {
+            pv->setZoom(zoom);
+            QVERIFY(!pv->isFitWidth());
+            QCOMPARE(pv->areasAt(1, rectOf(ts).center()), QList<qint64>{textArea});
+            QVERIFY(pv->areasAt(1, QPointF(450, 300)).isEmpty());
+            pv->scrollToRect(1, rectOf(ts));
+            QTest::mouseClick(pv->viewport(), Qt::LeftButton, Qt::NoModifier, QPoint(5, 5)); // some other place first
+            pv->clearSelection();
+            QTest::mouseClick(pv->viewport(), Qt::LeftButton, Qt::NoModifier, pv->toViewport(1, rectOf(ts).center()));
+            QCOMPARE(pv->highlightedArea(), textArea);
+            QCOMPARE(pv->selection().rect, rectOf(ts));
+            pv->clearSelection();
+        }
+        pv->setZoom(2.0);
+        pv->scrollToRect(1, QRectF(60, 135, 360, 30));
+        drag(1, QPointF(60, 135), QPointF(420, 165), Qt::AltModifier);
+        QVERIFY(qAbs(pv->selection().rect.left() - 60) < 1 && qAbs(pv->selection().rect.width() - 360) < 1.5);
+        pv->clearSelection();
+        pv->fitWidth();
+        QVERIFY(pv->isFitWidth());
+
+        // The code bars of the margin select the area too.
+        pv->scrollToRect(1, rectOf(ts));
+        QCOMPARE(p.segmentsForDocument(doc, true).size(), 2);
+
+        // Pages: the page box and search hits move the view; the info line tells where we are.
+        QSpinBox *pageBox = view.findChild<QSpinBox *>();
+        QVERIFY(pageBox && pageBox->isVisible());
+        QCOMPARE(pageBox->maximum(), 2);
+        pageBox->setValue(2);
+        QCOMPARE(pv->currentPage(), 2);
+        pv->goToPage(1);
+        QCOMPARE(pageBox->value(), 1);
+        view.selectRange(int(p.documentText(doc).indexOf("Pagina due")), 0, 0);
+        QCOMPARE(pv->currentPage(), 2);
+        view.selectRange(0, 0, rectArea); // as when a retrieved segment is activated
+        QCOMPARE(pv->currentPage(), 1);
+        QCOMPARE(pv->highlightedArea(), rectArea);
+
+        // Links, text editing and the find bar do not apply to PDFs.
+        view.startLink();
+        QVERIFY(!view.hasPendingLink());
+        view.setEditing(true);
+        QVERIFY(!view.isEditing());
+        view.showFindBar();
+        QVERIFY(!view.isFindBarVisible());
+
+        // The segments panel shows the text of an area, or a thumbnail when it has none.
+        const qint64 bare = p.addAreaSegment(doc, tema, 2, 60, 80, 300, 110);
+        QVERIFY(bare > 0);
+        SegmentsPanel panel(&p);
+        panel.resize(1000, 300);
+        panel.setActivation({doc}, {tema, altro});
+        QCOMPARE(panel.resultCount(), 3);
+        QVERIFY(panel.segments().isEmpty()); // no text positions to analyse
+        const QTableWidget *table = panel.findChild<QTableWidget *>();
+        QStringList cells;
+        bool thumbnail = false;
+        for (int r = 0; r < table->rowCount(); ++r) {
+            cells << table->item(r, 2)->text();
+            thumbnail = thumbnail || !table->item(r, 2)->icon().isNull();
+            QVERIFY(table->item(r, 0)->text().contains("Rapporto · p."));
+        }
+        QVERIFY(cells.join("|").contains("Primo paragrafo sul lavoro"));
+        QVERIFY(cells.join("|").contains("Secondo paragrafo"));
+        QVERIFY(thumbnail);
+        QTest::qWait(50);
+        shot(&view, "pdf_document");
+        shot(&panel, "pdf_segments");
+
+        // The lexical search reads the PDF's text.
+        SearchDialog search(&p, [] { return QList<qint64>{}; }, [] { return qint64(0); });
+        search.searchFor("casa");
+        QCOMPARE(search.findChild<QTableWidget *>()->rowCount(), 1);
+
+        // Removing a coding updates the view; other documents are shown as usual.
+        QVERIFY(p.deleteSegment(rectArea));
+        QCOMPARE(pv->areasAt(1, QPointF(200, 150)).size(), 0);
+        view.openDocument(text);
+        QVERIFY(!view.isPdf() && !view.isImage());
+        QVERIFY(!pv->isVisible());
+        view.selectRange(0, 3);
+        QVERIFY(view.hasSelection());
+        view.openDocument(doc);
+        QVERIFY(view.isPdf());
+        QCOMPARE(pv->areasAt(1, rectOf(ts).center()).size(), 1);
+        view.closeDocument();
+        QVERIFY(!pv->hasPdf());
+
+        // Closing and reopening the project: the codings are where they were, at any zoom.
+        Project again;
+        QVERIFY(again.open(file));
+        const Segment back = again.segment(textArea);
+        QCOMPARE(back.page, 1);
+        QCOMPARE(rectOf(back), rectOf(ts));
+        QCOMPARE(back.areaText, ts.areaText);
+        DocumentView view2(&again);
+        view2.resize(900, 700);
+        view2.show();
+        view2.openDocument(doc);
+        view2.pdfView()->setZoom(1.7);
+        QCOMPARE(view2.pdfView()->areasAt(1, rectOf(ts).center()), QList<qint64>{textArea});
+    }
     void mainWindow()
     {
         MainWindow w;

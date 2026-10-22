@@ -91,6 +91,11 @@ public:
     // Image document with its file content, in one undo step. The bytes are stored as they are.
     qint64 addImageDocument(qint64 groupId, const QString &name, const QByteArray &data,
                             const QString &sourcePath = {}, const QString &uuid = {});
+    // PDF document shown as pages (issue #26): the file bytes are kept as they are, `text` is the text
+    // extracted at import (pages joined with '\f', see Pdfs::joinPages), stored as the document's content
+    // so that lexical search, word frequencies and dictionaries see it. One undo step.
+    qint64 addPdfDocument(qint64 groupId, const QString &name, const QByteArray &data, const QString &text,
+                          const QString &sourcePath = {}, const QString &uuid = {});
     // Decoded image with the EXIF orientation applied; area coordinates are pixels of this image.
     // Null for other kinds or undecodable data.
     QImage documentImage(qint64 id) const;
@@ -138,8 +143,10 @@ public:
     qint64 addSegment(qint64 documentId, qint64 codeId, int start, int end, int weight = 0,
                       const QString &comment = {}, const QString &uuid = {});
     // Area of a pdf (page >= 1, PDF points) or image (page 0, pixels) document; x1,y1 is the top left corner.
+    // `areaText` is the text of a pdf area (selected text or the text inside the rectangle).
     qint64 addAreaSegment(qint64 documentId, qint64 codeId, int page, double x1, double y1, double x2, double y2,
-                          int weight = 0, const QString &comment = {}, const QString &uuid = {});
+                          int weight = 0, const QString &comment = {}, const QString &uuid = {},
+                          const QString &areaText = {});
     // Time range of an audio or video document, in milliseconds.
     qint64 addTimeSegment(qint64 documentId, qint64 codeId, qint64 startMs, qint64 endMs, int weight = 0,
                           const QString &comment = {}, const QString &uuid = {});

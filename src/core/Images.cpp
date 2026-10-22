@@ -85,11 +85,11 @@ QByteArray toPng(const QImage &image)
 
 QString areaLabel(const Segment &area)
 {
-    const QString size = QObject::tr("%1 × %2 px").arg(int(std::lround(area.x2 - area.x1))).arg(int(std::lround(area.y2 - area.y1)));
+    const int w = int(std::lround(area.x2 - area.x1)), h = int(std::lround(area.y2 - area.y1));
     const QString where = QObject::tr("(%1, %2)").arg(int(std::lround(area.x1))).arg(int(std::lround(area.y1)));
-    if (area.page > 0)
-        return QObject::tr("Area %1 a %2, pagina %3").arg(size, where).arg(area.page);
-    return QObject::tr("Area %1 a %2").arg(size, where);
+    if (area.page > 0) // PDF: points on a page
+        return QObject::tr("Area %1 × %2 pt a %3, pagina %4").arg(w).arg(h).arg(where).arg(area.page);
+    return QObject::tr("Area %1 × %2 px a %3").arg(w).arg(h).arg(where);
 }
 
 } // namespace Images

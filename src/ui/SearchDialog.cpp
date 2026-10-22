@@ -172,10 +172,17 @@ void SearchDialog::autocode()
 
     QHash<qint64, QString> texts;
     const qsizetype before = m_project->allSegments().size();
-    int stale = 0;
+    int stale = 0, skipped = 0;
+    QHash<qint64, bool> textDocs;
     m_project->setUndoLabel(tr("Codifica automatica"));
     m_project->beginBatch();
     for (const Hit &h : m_hits) {
+        if (!textDocs.contains(h.documentId))
+            textDocs.insert(h.documentId, m_project->document(h.documentId).kind == DocumentKind::Text);
+        if (!textDocs.value(h.documentId)) { // PDF pages are coded by selecting on the page, not by text position
+            ++skipped;
+            continue;
+        }
         if (!texts.contains(h.documentId))
             texts.insert(h.documentId, m_project->documentText(h.documentId));
         const QString &text = texts[h.documentId];
@@ -193,6 +200,8 @@ void SearchDialog::autocode()
     m_project->commitBatch();
     const int created = int(m_project->allSegments().size() - before);
     QString message = tr("%n nuovi segmenti codificati.", nullptr, created);
+    if (skipped)
+        message += QLatin1Char('\n') + tr("%n risultati in documenti PDF non sono stati codificati.", nullptr, skipped);
     if (stale)
         message += QLatin1Char('\n') + tr("%n risultati ignorati perché il testo è cambiato dopo la ricerca: "
                                           "ripeti la ricerca.", nullptr, stale);

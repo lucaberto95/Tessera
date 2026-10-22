@@ -102,6 +102,27 @@ QIcon imageIcon()
     return icon;
 }
 
+QIcon pdfIcon()
+{
+    static QIcon icon = [] {
+        QPixmap pm(16, 16);
+        pm.fill(Qt::transparent);
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(Qt::white);
+        p.setPen(QColor(0x7f7f7f));
+        p.drawRect(QRectF(2.5, 1.5, 11, 13));
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0xc62828));
+        p.drawRect(QRectF(3, 7, 10, 4));
+        p.setPen(QColor(0xa0a0a0));
+        p.drawLine(QPointF(4.5, 4.5), QPointF(11.5, 4.5));
+        p.drawLine(QPointF(4.5, 13), QPointF(11.5, 13));
+        return QIcon(pm);
+    }();
+    return icon;
+}
+
 bool confirm(QWidget *parent, const QString &title, const QString &text)
 {
     return plainMessage(parent, QMessageBox::Question, title, text, QMessageBox::Yes | QMessageBox::No,

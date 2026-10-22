@@ -145,6 +145,7 @@ Segment readSegment(const QSqlQuery &q)
     s.y2 = q.value(15).toDouble();
     s.tStartMs = q.value(16).toLongLong();
     s.tEndMs = q.value(17).toLongLong();
+    s.areaText = q.value(18).toString();
     return s;
 }
 
@@ -188,7 +189,7 @@ const QString kDocumentColumns = QStringLiteral(
 const QString kCodeColumns = QStringLiteral("id, parent_id, name, color, description, position, uuid");
 const QString kSegmentColumns = QStringLiteral(
     "s.id, s.document_id, s.code_id, s.start_pos, s.end_pos, s.weight, s.comment, s.author, s.created_at, s.uuid,"
-    " s.anchor_kind, s.page, s.x1, s.y1, s.x2, s.y2, s.t_start, s.t_end");
+    " s.anchor_kind, s.page, s.x1, s.y1, s.x2, s.y2, s.t_start, s.t_end, s.area_text");
 const QString kMemoColumns = QStringLiteral(
     "id, target_type, target_id, title, body, author, created_at, modified_at, uuid");
 
@@ -677,6 +678,10 @@ QList<Project::Migration> Project::builtInMigrations()
           QStringLiteral("CREATE TABLE document_data ("
                          " document_id INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,"
                          " data BLOB NOT NULL)")}},
+        {8,
+         {// Text of a coded PDF area (issue #26): what was selected, kept with the coding so that lists and
+          // exports show it without decoding the PDF.
+          QStringLiteral("ALTER TABLE segments ADD COLUMN area_text TEXT NOT NULL DEFAULT ''")}},
     };
 }
 
@@ -1023,6 +1028,21 @@ qint64 Project::addImageDocument(qint64 groupId, const QString &name, const QByt
     beginBatch();
     const qint64 id = addMediaDocument(groupId, name, DocumentKind::Image, sourcePath, uuid);
     if (!id || !setDocumentData(id, data)) {
+        rollbackBatch();
+        return 0;
+    }
+    commitBatch();
+    return id;
+}
+
+qint64 Project::addPdfDocument(qint64 groupId, const QString &name, const QByteArray &data, const QString &text,
+                               const QString &sourcePath, const QString &uuid)
+{
+    setUndoLabel(tr("Nuovo documento"));
+    beginBatch();
+    const qint64 id = addMediaDocument(groupId, name, DocumentKind::Pdf, sourcePath, uuid);
+    // The extracted text is a cache for search, frequencies and dictionaries; the PDF stays the document.
+    if (!id || !setDocumentData(id, data) || !exec(QStringLiteral("UPDATE documents SET content = ? WHERE id = ?"), {text, id})) {
         rollbackBatch();
         return 0;
     }
@@ -1511,7 +1531,8 @@ qint64 Project::addSegment(qint64 documentId, qint64 codeId, int start, int end,
 }
 
 qint64 Project::addAreaSegment(qint64 documentId, qint64 codeId, int page, double x1, double y1, double x2,
-                              double y2, int weight, const QString &comment, const QString &uuid)
+                              double y2, int weight, const QString &comment, const QString &uuid,
+                              const QString &areaText)
 {
     setUndoLabel(tr("Codifica"));
     const DocumentKind kind = document(documentId).kind;
@@ -1541,10 +1562,10 @@ qint64 Project::addAreaSegment(qint64 documentId, qint64 codeId, int page, doubl
         return existing;
     const qint64 id = insert(
         QStringLiteral("INSERT INTO segments(document_id, code_id, start_pos, end_pos, weight, comment, author, "
-                       "created_at, uuid, anchor_kind, page, x1, y1, x2, y2) "
-                       "VALUES (?, ?, 0, 1, ?, ?, ?, ?, ?, 'area', ?, ?, ?, ?, ?)"),
+                       "created_at, uuid, anchor_kind, page, x1, y1, x2, y2, area_text) "
+                       "VALUES (?, ?, 0, 1, ?, ?, ?, ?, ?, 'area', ?, ?, ?, ?, ?, ?)"),
         {documentId, codeId, weight, comment, m_author, isoNow(), uuid.isEmpty() ? newUuid() : uuid, page, x1, y1,
-         x2, y2});
+         x2, y2, areaText});
     if (id)
         notifySegments(documentId);
     return id;

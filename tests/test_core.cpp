@@ -3,6 +3,7 @@
 #include "core/Exporters.h"
 #include "core/Images.h"
 #include "core/Importers.h"
+#include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
 #include "core/Retrieval.h"
@@ -19,6 +20,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImageWriter>
+#include <QPainter>
+#include <QPdfWriter>
 #include <QRegularExpression>
 #include <QSignalSpy>
 #include <QSqlDatabase>
@@ -123,6 +126,28 @@ private:
         app1.append(char(orientation));
         app1.append(QByteArray(7, '\0')); // rest of the value, then the offset of the next IFD
         return jpg.left(2) + app1 + jpg.mid(2);
+    }
+
+    // A4 PDF with real text: the lines of each page are drawn at x = 72 pt, from y = 100 pt, 40 pt apart.
+    // The writer's resolution is 72 dpi, so painter units are PDF points.
+    static QByteArray makePdf(const QList<QStringList> &pages)
+    {
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        QPdfWriter writer(&buffer);
+        writer.setPageSize(QPageSize(QPageSize::A4));
+        writer.setResolution(72);
+        QPainter painter(&writer);
+        painter.setFont(QFont(QStringLiteral("Arial"), 14));
+        for (int p = 0; p < pages.size(); ++p) {
+            if (p > 0)
+                writer.newPage();
+            for (int i = 0; i < pages[p].size(); ++i)
+                painter.drawText(QPointF(72, 100 + 40 * i), pages[p][i]);
+        }
+        painter.end();
+        return bytes;
     }
 
     static int fileVersion(const QString &file)
@@ -247,13 +272,14 @@ private slots:
             {2, {"CREATE TABLE extra (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '')"}},
             {3, {"ALTER TABLE codes ADD COLUMN alias TEXT NOT NULL DEFAULT ''"}},
             Project::builtInMigrations().at(4), // segment anchors (v6), needed by the segment queries
+            Project::builtInMigrations().at(6), // PDF area text (v8), read by the segment queries
         };
-        QCOMPARE(migrations.last().toVersion, 6);
+        QCOMPARE(migrations.last().toVersion, 8);
         Project p;
         p.setMigrations(migrations);
-        QCOMPARE(p.schemaVersion(), 6);
+        QCOMPARE(p.schemaVersion(), 8);
         QVERIFY(p.open(path("m1.tsra")));
-        QCOMPARE(p.meta("schema_version"), QString("6"));
+        QCOMPARE(p.meta("schema_version"), QString("8"));
         QCOMPARE(p.allSegments().size(), 1);
         QVERIFY(!p.canUndo());
 
@@ -348,7 +374,8 @@ private slots:
                            "ALTER TABLE segments ADD COLUMN page INTEGER", "ALTER TABLE segments ADD COLUMN x1 REAL",
                            "ALTER TABLE segments ADD COLUMN y1 REAL", "ALTER TABLE segments ADD COLUMN x2 REAL",
                            "ALTER TABLE segments ADD COLUMN y2 REAL", "ALTER TABLE segments ADD COLUMN t_start INTEGER",
-                           "ALTER TABLE segments ADD COLUMN t_end INTEGER"}}});
+                           "ALTER TABLE segments ADD COLUMN t_end INTEGER",
+                           "ALTER TABLE segments ADD COLUMN area_text TEXT NOT NULL DEFAULT ''"}}});
         QVERIFY(p.open(path("m4.tsra")));
         QCOMPARE(p.documents().size(), 1);
         QCOMPARE(p.allSegments().size(), 1);
@@ -3026,13 +3053,165 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 7);
-        QCOMPARE(fileVersion(file), 7);
+        QCOMPARE(p.schemaVersion(), 8);
+        QCOMPARE(fileVersion(file), 8);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
     }
 
+    void pdfTextAndGeometry()
+    {
+        const QByteArray bytes = makePdf({{"Primo paragrafo sul lavoro", "Secondo paragrafo sulla casa"}, {"Pagina due"}});
+        writeFile("doc.pdf", bytes);
+        QString error;
+        QVERIFY2(!Pdfs::readFile(path("doc.pdf"), &error).isEmpty(), qPrintable(error));
+        writeFile("rotto.pdf", "questo non e' un PDF");
+        QVERIFY(Pdfs::readFile(path("rotto.pdf"), &error).isEmpty());
+        QVERIFY(!error.isEmpty());
+        QVERIFY(Pdfs::isPdfFile("X.PDF") && !Pdfs::isPdfFile("x.png"));
+
+        Pdfs::Doc doc;
+        QVERIFY(doc.load(bytes));
+        QCOMPARE(doc.pageCount(), 2);
+        QVERIFY(qAbs(doc.pageSize(1).width() - 595) < 3 && qAbs(doc.pageSize(1).height() - 842) < 3);
+        QVERIFY(doc.pageText(1).contains("Primo paragrafo sul lavoro"));
+        QVERIFY(doc.pageText(1).contains("Secondo paragrafo sulla casa"));
+        QCOMPARE(doc.pageText(2), QString("Pagina due"));
+        QVERIFY(doc.pageText(3).isEmpty());
+
+        // Dragging over the first line selects it; coordinates are points from the top left of the page.
+        const Pdfs::Doc::Selection sel = doc.select(1, QPointF(60, 80), QPointF(500, 108));
+        QVERIFY2(sel.text.contains("Primo paragrafo sul lavoro"), qPrintable(sel.text));
+        QVERIFY(!sel.text.contains("Secondo"));
+        QVERIFY2(sel.rect.top() > 90 && sel.rect.bottom() < 120 && sel.rect.left() > 70 && sel.rect.left() < 95,
+                 qPrintable(QString("%1,%2 %3x%4").arg(sel.rect.left()).arg(sel.rect.top()).arg(sel.rect.width()).arg(sel.rect.height())));
+
+        // The text inside a rectangle, with the lines in order and line breaks kept.
+        QCOMPARE(doc.textInArea(1, QRectF(60, 80, 480, 28)), QString("Primo paragrafo sul lavoro"));
+        const QString both = doc.textInArea(1, QRectF(60, 80, 480, 70));
+        QVERIFY2(both.contains("lavoro\nSecondo") || both.contains("lavoro Secondo"), qPrintable(both));
+        QVERIFY(doc.textInArea(1, QRectF(400, 400, 50, 50)).isEmpty());
+        QVERIFY(doc.textInArea(2, QRectF(60, 80, 480, 28)).contains("Pagina due"));
+
+        // Rendering and cropping an area.
+        const QImage page = doc.render(1, QSize(595, 842));
+        QCOMPARE(page.size(), QSize(595, 842));
+        Segment area;
+        area.page = 1;
+        area.x1 = 60;
+        area.y1 = 80;
+        area.x2 = 300;
+        area.y2 = 110;
+        const QImage crop = doc.cropArea(area, 480, 100);
+        QVERIFY(!crop.isNull() && crop.width() <= 480 && crop.height() <= 100);
+        bool dark = false; // the crop holds the glyphs, not a blank page
+        for (int y = 0; y < crop.height() && !dark; ++y)
+            for (int x = 0; x < crop.width() && !dark; ++x)
+                dark = qGray(crop.pixel(x, y)) < 100;
+        QVERIFY(dark);
+        area.page = 9;
+        QVERIFY(doc.cropArea(area, 100, 100).isNull());
+
+        // The content kept for search: pages separated by a form feed.
+        const QString content = Pdfs::joinPages(Pdfs::pageTexts(doc));
+        QCOMPARE(content.count(QLatin1Char('\f')), 1);
+        QCOMPARE(Pdfs::pageOfOffset(content, 3), 1);
+        QCOMPARE(Pdfs::pageOfOffset(content, int(content.indexOf("Pagina due"))), 2);
+    }
+
+    void pdfDocumentsAndAreasPersist()
+    {
+        const QByteArray bytes = makePdf({{"Primo paragrafo sul lavoro", "Secondo paragrafo sulla casa"}, {"Pagina due"}});
+        const QString file = path("pdf.tsra");
+        qint64 doc = 0, code = 0, textArea = 0, rectArea = 0;
+        {
+            Project p;
+            QVERIFY(p.create(file));
+            Pdfs::Doc d;
+            QVERIFY(d.load(bytes));
+            doc = p.addPdfDocument(p.groups().first().id, "Rapporto", bytes, Pdfs::joinPages(Pdfs::pageTexts(d)), "rapporto.pdf");
+            QVERIFY(doc > 0);
+            QCOMPARE(p.document(doc).kind, DocumentKind::Pdf);
+            QCOMPARE(p.documentData(doc), bytes);
+            QVERIFY(p.documentText(doc).contains("Pagina due")); // searchable
+            code = p.addCode(0, "Lavoro", Qt::red);
+            textArea = p.addAreaSegment(doc, code, 1, 72, 88, 330, 106, 0, {}, {}, "Primo paragrafo sul lavoro");
+            rectArea = p.addAreaSegment(doc, code, 2, 60, 80, 300, 110);
+            QVERIFY(textArea > 0 && rectArea > 0);
+            QVERIFY(p.addSegment(doc, code, 0, 3) == 0); // no text segments on a PDF
+            QCOMPARE(p.allSegments().size(), 0);
+            QCOMPARE(p.allSegments(true).size(), 2);
+            // A PDF area needs a page, an image area must not have one.
+            QCOMPARE(p.addAreaSegment(doc, code, 0, 1, 1, 5, 5), qint64(0));
+            // Coding the same rectangle again gives the same coding.
+            QCOMPARE(p.addAreaSegment(doc, code, 1, 72, 88, 330, 106), textArea);
+
+            // Undo takes the whole import away, with its blob and extracted text.
+            QVERIFY(p.undo()); // rectArea
+            QVERIFY(p.undo()); // textArea
+            QCOMPARE(p.allSegments(true).size(), 0);
+            QVERIFY(p.redo() && p.redo());
+            QCOMPARE(p.allSegments(true).size(), 2);
+        }
+        Project p;
+        QVERIFY(p.open(file));
+        QCOMPARE(p.documentData(doc), bytes);
+        const Segment t = p.segment(textArea);
+        QCOMPARE(t.kind, SegmentKind::Area);
+        QCOMPARE(t.page, 1);
+        QCOMPARE(t.areaText, QString("Primo paragrafo sul lavoro"));
+        QCOMPARE(QRectF(t.x1, t.y1, t.x2 - t.x1, t.y2 - t.y1), QRectF(72, 88, 258, 18));
+        QCOMPARE(p.segment(rectArea).areaText, QString());
+
+        // Lists, tables and the HTML export show the text, or the cropped page when there is none.
+        const QList<Segment> all = p.allSegments(true);
+        const Exporters::Table table = Exporters::segmentsTable(p, all);
+        QStringList cells;
+        for (const QStringList &row : table)
+            cells << row.last();
+        QVERIFY(cells.contains("Primo paragrafo sul lavoro"));
+        QVERIFY(cells.join("|").contains("pagina 2"));
+        QString error;
+        const QString html = path("pdf.html");
+        QVERIFY2(Exporters::exportSegmentsHtml(p, all, html, &error), qPrintable(error));
+        QFile f(html);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QString content = QString::fromUtf8(f.readAll());
+        QVERIFY(content.contains("Primo paragrafo sul lavoro"));
+        QCOMPARE(content.count("data:image/png;base64,"), 2);
+        QVERIFY(Exporters::memoTargetLabel(p, MemoTarget::Segment, textArea).contains("Primo paragrafo"));
+
+        // The extracted text takes part in the analyses that read documentText, but a PDF is not coded as text.
+        QVERIFY(p.documentText(doc).contains("Secondo paragrafo"));
+        const qint64 dict = p.addDictionary("Lessico");
+        const qint64 cat = p.addDictCategory(dict, 0, "Lavoro");
+        QVERIFY(p.addDictEntry(cat, "lavoro") > 0);
+        const Dictionaries::Analysis analysis = Dictionaries::analyze(p, dict);
+        QCOMPARE(analysis.count(cat, doc), 1);
+        const qsizetype before = p.allSegments(true).size();
+        QCOMPARE(Dictionaries::autocode(p, analysis, {cat}, {}, Dictionaries::Extent::Word), 0);
+        QCOMPARE(p.allSegments(true).size(), before);
+    }
+
+    void pdfDocumentsMigrateFromV7()
+    {
+        const QString file = path("v7-pdf.tsra");
+        {
+            Project old;
+            old.setMigrations(Project::builtInMigrations().mid(0, 6)); // up to schema 7: no area text yet
+            QVERIFY(old.create(file));
+            QVERIFY(old.addMediaDocument(old.groups().first().id, "Rapporto", DocumentKind::Pdf) > 0);
+        }
+        QCOMPARE(fileVersion(file), 7);
+        Project p;
+        QVERIFY(p.open(file));
+        QCOMPARE(fileVersion(file), 8);
+        const qint64 doc = p.documents().first().id;
+        const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
+        QVERIFY(a > 0);
+        QCOMPARE(p.segment(a).areaText, QString("testo"));
+    }
     void wordCloudLayoutDoesNotOverlap()
     {
         QList<QSizeF> sizes;

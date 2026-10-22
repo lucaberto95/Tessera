@@ -1,12 +1,15 @@
 #include "ui/DocumentView.h"
 #include "core/Images.h"
+#include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
 #include "ui/CodingStripe.h"
 #include "ui/ImageView.h"
+#include "ui/PdfView.h"
 #include "ui/UiUtils.h"
 
 #include <QCheckBox>
+#include <QClipboard>
 #include <QContextMenuEvent>
 #include <QDragEnterEvent>
 #include <QGuiApplication>
@@ -20,6 +23,7 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QShortcut>
+#include <QSpinBox>
 #include <QStackedWidget>
 #include <QTextBlock>
 #include <QTextEdit>
@@ -188,6 +192,7 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     , m_edit(new DocTextEdit)
     , m_stripe(new CodingStripe(m_edit))
     , m_imageView(new ImageView)
+    , m_pdfView(new PdfView)
     , m_fitButton(new QToolButton)
     , m_actualButton(new QToolButton)
     , m_zoomLabel(new QLabel)
@@ -249,6 +254,8 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     header->addWidget(m_title);
     header->addSpacing(12);
     header->addWidget(m_info, 1);
+    auto *pageSlot = new QHBoxLayout; // the page box is created last (see below)
+    header->addLayout(pageSlot);
     header->addWidget(m_zoomLabel);
     header->addWidget(m_fitButton);
     header->addWidget(m_actualButton);
@@ -262,10 +269,42 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     m_actualButton->setText(tr("100%"));
     m_actualButton->setToolTip(tr("Mostra l'immagine a dimensione reale"));
     m_zoomLabel->setStyleSheet(QStringLiteral("color: palette(mid)"));
-    connect(m_fitButton, &QToolButton::clicked, m_imageView, &ImageView::fitToWindow);
-    connect(m_actualButton, &QToolButton::clicked, m_imageView, &ImageView::actualSize);
-    connect(m_imageView, &ImageView::zoomChanged, this,
-            [this] { m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(m_imageView->zoom() * 100))); });
+    connect(m_fitButton, &QToolButton::clicked, this, [this] {
+        if (m_isPdf)
+            m_pdfView->fitWidth();
+        else
+            m_imageView->fitToWindow();
+    });
+    connect(m_actualButton, &QToolButton::clicked, this, [this] {
+        if (m_isPdf)
+            m_pdfView->actualSize();
+        else
+            m_imageView->actualSize();
+    });
+    connect(m_imageView, &ImageView::zoomChanged, this, &DocumentView::updateZoomLabel);
+    connect(m_pdfView, &PdfView::zoomChanged, this, &DocumentView::updateZoomLabel);
+    connect(m_pdfView, &PdfView::currentPageChanged, this, [this](int page) {
+        const QSignalBlocker block(m_pageSpin);
+        m_pageSpin->setValue(page);
+    });
+    connect(m_pdfView, &PdfView::selectionChanged, this, [this] {
+        // A new selection leaves the previously clicked area.
+        if (m_pdfView->highlightedArea()) {
+            const PdfView::Selection sel = m_pdfView->selection();
+            bool same = false;
+            for (const Segment &s : std::as_const(m_segments))
+                same = same || (s.id == m_pdfView->highlightedArea() && s.page == sel.page
+                                && QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1) == sel.rect);
+            if (!same)
+                m_pdfView->highlightArea(0);
+        }
+        updatePdfInfo();
+        emit selectionChanged();
+    });
+    connect(m_pdfView, &PdfView::areaClicked, this, &DocumentView::onPdfAreaClicked);
+    connect(m_pdfView, &PdfView::areaContextMenu, this, &DocumentView::showPdfMenu);
+    connect(m_pdfView, &PdfView::codeDropped, this, &DocumentView::onPdfCodeDropped);
+    m_pdfView->hide();
     connect(m_imageView, &ImageView::selectionChanged, this, [this] {
         // Selecting nothing (or a new rectangle) leaves the previously clicked area.
         if (m_imageView->highlightedArea()) {
@@ -308,6 +347,19 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     m_textBody->setLayout(body);
     docLayout->addWidget(m_textBody, 1);
     docLayout->addWidget(m_imageView, 1);
+    docLayout->addWidget(m_pdfView, 1);
+
+    // Created after the find bar: tests (and code) looking for the document's first QLineEdit must find the find field.
+    m_pageSpin = new QSpinBox;
+    pageSlot->addWidget(m_pageSpin);
+    m_pageSpin->setPrefix(tr("Pagina "));
+    m_pageSpin->setToolTip(tr("Vai alla pagina"));
+    m_pageSpin->setKeyboardTracking(false);
+    connect(m_pageSpin, &QSpinBox::valueChanged, this, [this](int page) {
+        if (m_isPdf && page != m_pdfView->currentPage())
+            m_pdfView->goToPage(page);
+    });
+    m_pageSpin->hide();
 
     // The view keeps itself in sync with the project (stale segments would be lost when saving edits).
     connect(m_project, &Project::segmentsChanged, this, &DocumentView::onSegmentsChanged);
@@ -336,10 +388,17 @@ void DocumentView::openDocument(qint64 id)
     m_docId = id;
     m_highlighted = 0;
     setImageMode(doc.kind == DocumentKind::Image);
+    setPdfMode(doc.kind == DocumentKind::Pdf);
     if (m_isImage) {
         m_edit->clear();
         m_links.clear();
         m_imageView->setImage(m_project->documentImage(id));
+    } else if (m_isPdf) {
+        m_edit->clear();
+        m_links.clear();
+        m_pdfView->setPdf(m_project->documentData(id));
+        m_pageSpin->setRange(1, std::max(1, m_pdfView->pageCount()));
+        m_pageSpin->setValue(1);
     } else {
         setDisplayedText(m_project->documentText(id));
         m_edit->moveCursor(QTextCursor::Start);
@@ -375,7 +434,9 @@ void DocumentView::closeDocument()
     m_edit->clear();
     m_stripe->setSegments({}, {});
     setImageMode(false);
+    setPdfMode(false);
     m_imageView->clear();
+    m_pdfView->clear();
     m_stack->setCurrentIndex(0);
     emit selectionChanged();
 }
@@ -384,12 +445,14 @@ bool DocumentView::hasSelection() const
 {
     if (m_isImage)
         return m_docId && m_imageView->hasSelection();
+    if (m_isPdf)
+        return m_docId && m_pdfView->hasSelection();
     return m_docId && m_edit->textCursor().hasSelection();
 }
 
 std::pair<int, int> DocumentView::selection() const
 {
-    if (m_isImage)
+    if (m_isImage || m_isPdf)
         return {0, 0};
     const QTextCursor c = m_edit->textCursor();
     return {c.selectionStart(), c.selectionEnd()};
@@ -399,6 +462,8 @@ QString DocumentView::selectedText() const
 {
     if (m_isImage)
         return {};
+    if (m_isPdf)
+        return m_pdfView->selection().text;
     const auto [s, e] = selection();
     return rawText(m_edit).mid(s, e - s);
 }
@@ -413,6 +478,14 @@ qint64 DocumentView::codeSelection(qint64 codeId)
             return 0;
         }
         return codeImageArea(codeId, m_imageView->selection());
+    }
+    if (m_isPdf) {
+        if (!m_pdfView->hasSelection()) {
+            emit statusMessage(tr("Seleziona del testo nella pagina, o un rettangolo con Alt + trascinamento, per codificarlo."));
+            return 0;
+        }
+        const PdfView::Selection sel = m_pdfView->selection();
+        return codePdfArea(codeId, sel.page, sel.rect, sel.text);
     }
     if (m_editing) {
         Ui::showError(this, tr("Termina la modifica del testo prima di codificare."));
@@ -449,8 +522,8 @@ void DocumentView::startLink()
 {
     if (!m_docId)
         return;
-    if (m_isImage) {
-        emit statusMessage(tr("I collegamenti non sono disponibili per le immagini."));
+    if (m_isImage || m_isPdf) {
+        emit statusMessage(tr("I collegamenti non sono disponibili per immagini e PDF."));
         return;
     }
     if (m_editing) {
@@ -473,8 +546,8 @@ qint64 DocumentView::completeLink()
 {
     if (!m_docId || !hasPendingLink())
         return 0;
-    if (m_isImage) {
-        emit statusMessage(tr("I collegamenti non sono disponibili per le immagini."));
+    if (m_isImage || m_isPdf) {
+        emit statusMessage(tr("I collegamenti non sono disponibili per immagini e PDF."));
         return 0;
     }
     if (m_editing) {
@@ -614,6 +687,20 @@ void DocumentView::selectRange(int start, int end, qint64 segmentId)
         }
         return;
     }
+    if (m_isPdf) {
+        for (const Segment &s : std::as_const(m_segments)) {
+            if (s.id == segmentId && s.kind == SegmentKind::Area) {
+                m_pdfView->setSelection(s.page, QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1), s.areaText);
+                m_pdfView->highlightArea(s.id, true);
+                updatePdfInfo();
+                m_pdfView->setFocus();
+                return;
+            }
+        }
+        // A position in the extracted text (a search hit): show its page.
+        m_pdfView->goToPage(Pdfs::pageOfOffset(m_project->documentText(m_docId), start));
+        return;
+    }
     const int len = m_edit->document()->characterCount() - 1;
     QTextCursor c(m_edit->document());
     c.setPosition(qBound(0, start, len));
@@ -634,9 +721,13 @@ void DocumentView::selectRange(int start, int end, qint64 segmentId)
 
 void DocumentView::reloadSegments()
 {
-    m_segments = m_docId ? m_project->segmentsForDocument(m_docId, m_isImage) : QList<Segment>{};
+    m_segments = m_docId ? m_project->segmentsForDocument(m_docId, m_isImage || m_isPdf) : QList<Segment>{};
     if (m_isImage) {
         reloadImageAreas();
+        return;
+    }
+    if (m_isPdf) {
+        reloadPdfAreas();
         return;
     }
     m_stripe->setSegments(m_segments, m_codes);
@@ -835,14 +926,177 @@ void DocumentView::setImageMode(bool image)
     m_isImage = image;
     if (image)
         hideFindBar();
-    m_textBody->setVisible(!image);
+    m_textBody->setVisible(!image && !m_isPdf);
     m_imageView->setVisible(image);
-    m_editButton->setVisible(!image);
-    m_fitButton->setVisible(image);
-    m_actualButton->setVisible(image);
-    m_zoomLabel->setVisible(image);
-    if (image)
-        m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(m_imageView->zoom() * 100)));
+    m_editButton->setVisible(!image && !m_isPdf);
+    m_fitButton->setVisible(image || m_isPdf);
+    m_actualButton->setVisible(image || m_isPdf);
+    m_zoomLabel->setVisible(image || m_isPdf);
+    if (image) {
+        m_fitButton->setText(tr("Adatta"));
+        m_fitButton->setToolTip(tr("Adatta l'immagine alla finestra"));
+        m_actualButton->setToolTip(tr("Mostra l'immagine a dimensione reale"));
+        updateZoomLabel();
+    }
+}
+
+void DocumentView::updateZoomLabel()
+{
+    const double zoom = m_isPdf ? m_pdfView->zoom() : m_imageView->zoom();
+    m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(zoom * 100)));
+}
+
+// ---------------------------------------------------------------- PDF documents
+
+void DocumentView::setPdfMode(bool pdf)
+{
+    if (pdf == m_isPdf)
+        return;
+    m_isPdf = pdf;
+    if (pdf)
+        hideFindBar();
+    m_pdfView->setVisible(pdf);
+    m_pageSpin->setVisible(pdf);
+    m_textBody->setVisible(!pdf && !m_isImage);
+    m_editButton->setVisible(!pdf && !m_isImage);
+    m_fitButton->setVisible(pdf || m_isImage);
+    m_actualButton->setVisible(pdf || m_isImage);
+    m_zoomLabel->setVisible(pdf || m_isImage);
+    if (pdf) {
+        m_fitButton->setText(tr("Larghezza"));
+        m_fitButton->setToolTip(tr("Adatta le pagine alla larghezza della finestra (Ctrl + rotellina per lo zoom)"));
+        m_actualButton->setToolTip(tr("Mostra le pagine a dimensione reale"));
+        updateZoomLabel();
+    }
+}
+
+void DocumentView::reloadPdfAreas()
+{
+    QList<PdfView::Area> areas;
+    for (const Segment &s : std::as_const(m_segments)) {
+        if (s.kind != SegmentKind::Area)
+            continue;
+        QString tip = segmentLabel(s) + QStringLiteral(" · ") + tr("pagina %1").arg(s.page);
+        if (!s.areaText.isEmpty())
+            tip += QStringLiteral("\n") + s.areaText.left(300);
+        areas.append({s.id, s.page, QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1), m_codes.value(s.codeId).color, tip});
+    }
+    m_pdfView->setAreas(areas);
+    updatePdfInfo();
+}
+
+// Header line: the page count, or the codes of the clicked area, or the size of the selection.
+void DocumentView::updatePdfInfo()
+{
+    if (!m_isPdf)
+        return;
+    QString info = m_pdfView->hasPdf() ? tr("PDF · %n pagine", nullptr, m_pdfView->pageCount()) : tr("PDF non leggibile");
+    const PdfView::Selection sel = m_pdfView->selection();
+    if (m_pdfView->highlightedArea()) {
+        QStringList labels;
+        for (const Segment &s : std::as_const(m_segments))
+            if (s.kind == SegmentKind::Area && s.page == sel.page && QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1) == sel.rect)
+                labels << segmentLabel(s);
+        if (labels.isEmpty())
+            labels << segmentLabel(m_project->segment(m_pdfView->highlightedArea()));
+        info += QStringLiteral(" · ") + tr("Area codificata (pagina %1): ").arg(sel.page) + labels.join(QStringLiteral(" | "));
+    } else if (sel.page > 0) {
+        info += QStringLiteral(" · ") + (sel.isText ? tr("Testo selezionato (pagina %1, %2 caratteri)") : tr("Area selezionata (pagina %1, %2 caratteri di testo)"))
+                                              .arg(sel.page).arg(sel.text.size());
+    }
+    m_info->setText(info);
+}
+
+void DocumentView::onPdfAreaClicked(const QList<qint64> &ids)
+{
+    if (ids.isEmpty())
+        return;
+    // The clicked area becomes the selection, so Ctrl+E adds a further code to the same rectangle.
+    for (const Segment &s : std::as_const(m_segments)) {
+        if (s.id == ids.first()) {
+            m_pdfView->setSelection(s.page, QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1), s.areaText);
+            m_pdfView->highlightArea(s.id);
+            updatePdfInfo();
+            QStringList labels;
+            for (qint64 id : ids)
+                for (const Segment &o : std::as_const(m_segments))
+                    if (o.id == id)
+                        labels << segmentLabel(o);
+            emit statusMessage(labels.join(QStringLiteral(" | ")));
+            return;
+        }
+    }
+}
+
+qint64 DocumentView::codePdfArea(qint64 codeId, int page, const QRectF &rect, const QString &text)
+{
+    const qint64 id = m_project->addAreaSegment(m_docId, codeId, page, rect.left(), rect.top(), rect.right(), rect.bottom(),
+                                                0, {}, {}, text);
+    if (id)
+        emit statusMessage(tr("Codificato con \"%1\"").arg(m_project->codePath(codeId)));
+    else
+        Ui::showError(this, m_project->lastError());
+    return id;
+}
+
+void DocumentView::onPdfCodeDropped(qint64 codeId, int page, const QPointF &pagePos)
+{
+    if (!m_docId || !codeId)
+        return;
+    // A code dropped on the selection codes it; otherwise on the coded area under the pointer.
+    const PdfView::Selection sel = m_pdfView->selection();
+    if (sel.page == page && sel.page > 0 && sel.rect.contains(pagePos)) {
+        codeSelection(codeId);
+        return;
+    }
+    const QList<qint64> ids = m_pdfView->areasAt(page, pagePos);
+    for (const Segment &s : std::as_const(m_segments))
+        if (!ids.isEmpty() && s.id == ids.first()) {
+            codePdfArea(codeId, s.page, QRectF(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1), s.areaText);
+            return;
+        }
+    emit statusMessage(tr("Seleziona del testo o un'area, o trascina il codice su un'area già codificata."));
+}
+
+void DocumentView::showPdfMenu(const QList<qint64> &ids, const QPoint &globalPos)
+{
+    if (!m_docId)
+        return;
+    QMenu menu(this);
+    const bool selected = hasSelection();
+    const qint64 current = m_currentCode ? m_currentCode() : 0;
+    QAction *codeCurrent = menu.addAction(
+        current ? tr("Codifica con \"%1\"").arg(m_project->code(current).name) : tr("Codifica con il codice selezionato"),
+        this, [this, current] { codeSelection(current); });
+    codeCurrent->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
+    codeCurrent->setEnabled(selected && current);
+    QAction *codeNew = menu.addAction(tr("Codifica con un nuovo codice…"), this,
+                                      [this] { emit newCodeForSelectionRequested(); });
+    codeNew->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+    codeNew->setEnabled(selected);
+    addCodeWithMenu(&menu, selected);
+
+    bool any = false;
+    for (qint64 id : ids) {
+        for (const Segment &s : std::as_const(m_segments)) {
+            if (s.id != id)
+                continue;
+            if (!any)
+                menu.addSeparator();
+            any = true;
+            QMenu *sub = menu.addMenu(Ui::colorIcon(m_codes.value(s.codeId).color), segmentLabel(s));
+            sub->addAction(tr("Seleziona area"), this, [this, s] { selectRange(0, 0, s.id); });
+            addSegmentActions(sub, s);
+        }
+    }
+    menu.addSeparator();
+    QAction *copy = menu.addAction(tr("Copia testo"), this,
+                                   [this] { QGuiApplication::clipboard()->setText(m_pdfView->selection().text); });
+    copy->setEnabled(selected && !m_pdfView->selection().text.isEmpty());
+    menu.addAction(tr("Deseleziona"), m_pdfView, &PdfView::clearSelection)->setEnabled(selected);
+    menu.addAction(tr("Adatta alla larghezza"), m_pdfView, &PdfView::fitWidth);
+    menu.addAction(tr("Dimensione reale (100%)"), m_pdfView, &PdfView::actualSize);
+    menu.exec(globalPos);
 }
 
 void DocumentView::reloadImageAreas()
@@ -1039,6 +1293,10 @@ void DocumentView::onDocumentsChanged()
         updateImageInfo();
         return;
     }
+    if (m_isPdf) {
+        updatePdfInfo();
+        return;
+    }
     const QString text = m_editing ? rawText(m_edit) : m_project->documentText(m_docId);
     if (!m_editing && text != rawText(m_edit)) {
         // Changed outside the view (undo/redo of a text edit): show the stored text, keep the scroll.
@@ -1056,7 +1314,7 @@ void DocumentView::setEditing(bool editing)
     if (editing == m_editing)
         return;
     if (editing) {
-        if (!m_docId || m_isImage) {
+        if (!m_docId || m_isImage || m_isPdf) {
             m_editButton->setChecked(false);
             return;
         }
@@ -1174,7 +1432,7 @@ void DocumentView::buildFindBar()
 
 void DocumentView::showFindBar()
 {
-    if (!m_docId || m_isImage)
+    if (!m_docId || m_isImage || m_isPdf)
         return;
     // Like an editor: a one-line selection becomes the search term.
     const QString selected = selectedText();

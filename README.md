@@ -24,8 +24,9 @@ da remoto, già codificate, con variabili e memo.
 |---|---|
 | **Progetti** | Ogni progetto è un singolo file (`.tsra`, SQLite) salvato automaticamente a ogni modifica. Ci sono i progetti recenti e "Salva una copia come…". |
 | **Annulla / Ripeti** | `Ctrl+Z` / `Ctrl+Y` funzionano su ogni operazione della sessione (fino a 200 passi), anche su eliminazioni, importazioni e codifica automatica. |
-| **Documenti** | I documenti si organizzano in gruppi e si importano da TXT/MD, DOCX, ODT, RTF, PDF (con testo) e HTML. I **set di documenti** raccolgono documenti di gruppi diversi (trascinandoli su un set o dai documenti attivi) e si attivano con un clic. Si possono creare documenti incollando del testo e modificarne il testo: le codifiche si adattano da sole. |
+| **Documenti** | I documenti si organizzano in gruppi e si importano da TXT/MD, DOCX, ODT, RTF, PDF e HTML. I **set di documenti** raccolgono documenti di gruppi diversi (trascinandoli su un set o dai documenti attivi) e si attivano con un clic. Si possono creare documenti incollando del testo e modificarne il testo: le codifiche si adattano da sole. |
 | **Immagini** | PNG, JPG, GIF e BMP (e TIFF e WebP, se Qt ha i relativi plugin) si importano come documenti (`Ctrl+I`), salvati dentro il progetto; l'orientamento EXIF è applicato. Nel visualizzatore la rotella ingrandisce, il tasto centrale sposta l'immagine, «Adatta» e «100%» regolano lo zoom. Trascina un rettangolo per selezionare un'area e codificala come un testo (`Ctrl+E`, menu contestuale o trascinando un codice): le aree si colorano col codice e un clic su un'area mostra codici e commento. Nei segmenti recuperati l'area è una miniatura e nell'export HTML il ritaglio è incorporato come immagine. |
+| **PDF** | All'import di un PDF si sceglie «Come PDF (consigliato)» o «Solo testo». Come PDF le pagine si vedono com'erano (scorrimento continuo, Ctrl+rotella per lo zoom, «Larghezza» e «100%», casella «Pagina»); il file originale sta nel progetto. Trascinando si seleziona del testo, con Alt + trascinamento un rettangolo (figure, tabelle): la selezione si codifica come l'altro testo (Ctrl+E, menu contestuale, trascinando un codice) e diventa un'area con il testo associato. Le aree si colorano col codice, nel margine di ogni pagina ci sono le barre dei codici e un clic su un'area mostra codici e commento. Nei segmenti recuperati si vede il testo dell'area (o una miniatura se non c'è); la ricerca lessicale, le frequenze e i dizionari leggono il testo estratto. |
 | **Sondaggi** | «Importa dati di sondaggio (Excel/CSV)…» (menu Documenti) legge un questionario da `.xlsx` o `.csv`, una riga per rispondente. In un'anteprima ogni colonna si segna come ID rispondente, variabile (con tipo), risposta aperta o da ignorare: ogni rispondente diventa un documento con le risposte aperte, ciascuna dopo la sua domanda e codificata con un codice che ha il nome della domanda; le altre colonne diventano variabili del documento. Le risposte vuote si saltano; tutto l'import si annulla con un solo `Ctrl+Z`. |
 | **Collegamenti** | Un brano si collega a un altro brano, dello stesso documento o di un altro: seleziona il testo e scegli «Inizia collegamento» (`Ctrl+L`), poi seleziona la destinazione e scegli «Completa collegamento» (`Ctrl+Shift+L`). Il testo collegato è blu e sottolineato; `Ctrl+clic` apre l'altra estremità. La finestra «Collegamenti…» (menu Documenti) li elenca tutti con commento. Le estremità seguono le modifiche del testo. |
 | **Codici** | Sistema di codici gerarchico con colori, descrizioni e memo, riorganizzabile con il trascinamento e con le frequenze sempre visibili. |
@@ -54,7 +55,8 @@ da remoto, già codificate, con variabili e memo.
 | `Ctrl+Shift+F` | Ricerca lessicale su tutto il progetto |
 | `Ctrl+M` | Matrice codici × documenti |
 | `Ctrl+Shift+M` | Tutti i memo |
-| `Ctrl+rotella` | Zoom del testo |
+| `Ctrl+rotella` | Zoom del testo (e dei PDF) |
+| `Alt` + trascinamento | In un PDF: seleziona un rettangolo da codificare |
 
 ## Compilare dai sorgenti
 
@@ -92,6 +94,6 @@ I dettagli di architettura, le convenzioni e le insidie già incontrate sono in 
 
 ## Limiti attuali
 
-- Oltre ai testi codifica solo le immagini (aree): niente aree di PDF, né audio e video. Le immagini non vanno ancora nel QDPX.
+- Oltre ai testi si codificano le aree di immagini e PDF; niente audio e video. Immagini e PDF non vanno ancora nel QDPX. Nei PDF non c'è ancora la ricerca nel documento (Ctrl+F): si usa la ricerca lessicale del progetto, che porta alla pagina.
 - La cronologia di annullamento vale per la sessione e si azzera chiudendo il progetto.
 - Non ci sono il lavoro di gruppo né il confronto tra codificatori.

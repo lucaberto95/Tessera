@@ -11,8 +11,10 @@
 class CodingStripe;
 class DocTextEdit;
 class ImageView;
+class PdfView;
 class Project;
 class QMenu;
+class QSpinBox;
 class QCheckBox;
 class QLabel;
 class QLineEdit;
@@ -33,6 +35,10 @@ public:
     // (hasSelection, codeSelection and selectRange work on it), and links and text editing do not apply.
     bool isImage() const { return m_isImage; }
     ImageView *imageView() const { return m_imageView; }
+    // PDF documents show their pages in a PdfView. The selection is then selected text or a rectangle (Alt +
+    // drag) on a page; both are coded as an area with its text. Links, text editing and Ctrl+F do not apply.
+    bool isPdf() const { return m_isPdf; }
+    PdfView *pdfView() const { return m_pdfView; }
     void openDocument(qint64 id);
     void closeDocument();
 
@@ -105,6 +111,14 @@ private:
     void addCodeWithMenu(QMenu *menu, bool enabled);
     void addSegmentActions(QMenu *menu, const Segment &s);
     void setImageMode(bool image);
+    void setPdfMode(bool pdf);
+    void reloadPdfAreas();
+    void updatePdfInfo();
+    void onPdfAreaClicked(const QList<qint64> &ids);
+    void showPdfMenu(const QList<qint64> &ids, const QPoint &globalPos);
+    void onPdfCodeDropped(qint64 codeId, int page, const QPointF &pagePos);
+    qint64 codePdfArea(qint64 codeId, int page, const QRectF &rect, const QString &text);
+    void updateZoomLabel();
     void reloadImageAreas();
     void updateImageInfo();
     void onImageAreaClicked(const QList<qint64> &ids);
@@ -127,10 +141,13 @@ private:
     CodingStripe *m_stripe;
     QWidget *m_textBody = nullptr; // coding stripe + text, hidden for images
     ImageView *m_imageView;
+    PdfView *m_pdfView;
+    QSpinBox *m_pageSpin = nullptr;
     QToolButton *m_fitButton;
     QToolButton *m_actualButton;
     QLabel *m_zoomLabel;
     bool m_isImage = false;
+    bool m_isPdf = false;
 
     qint64 m_docId = 0;
     QList<Segment> m_segments;
