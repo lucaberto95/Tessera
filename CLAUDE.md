@@ -107,6 +107,32 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - `QZipReader/QZipWriter` sono header privati di QtCore (`Qt6::CorePrivate`): possono cambiare tra
   versioni di Qt.
 
+## Flusso di lavoro per le issue
+
+Ogni issue si sviluppa su un branch e arriva su `main` solo con una pull request; non si committa
+direttamente su `main`.
+
+1. Scegliere l'issue (`gh issue list`; di norma priorità alta e dimensione piccola) e leggerla con
+   `gh issue view <n>`: obiettivo, comportamento atteso, criteri di accettazione.
+2. Creare il branch da `main` aggiornato: `git switch -c feature/<nome-breve> main`
+   (`fix/…` per i bug, `docs/…` per la sola documentazione).
+3. Implementare, aggiungere o aggiornare i test (i criteri di accettazione della issue diventano test)
+   e aggiornare README/CLAUDE.md se cambiano scorciatoie o comportamenti.
+4. `build.cmd Release` (da PowerShell: `cmd /c ".\build.cmd Release"`), poi `tessera_tests` e
+   `tessera_ui_tests`: devono essere verdi. Un test che fallisce non si aggira, si capisce.
+5. Commit in inglese, con `Closes #<n>` nel corpo. Push del branch (`git push -u origin <branch>`).
+6. Aprire la PR contro `main` con `gh pr create --body-file <file>` (il corpo multilinea passato
+   inline si rompe in PowerShell). Il corpo inizia con `Closes #<n>` e riassume: cosa cambia, test
+   eseguiti, cosa resta da provare a mano. Poi `get_status`/`bind_pr` dei tool ccd_pr.
+7. **Non fare il merge e non chiudere la issue prima della prova manuale** nell'app vera
+   (`--example`); i test automatici non coprono aspetto, focus e scorciatoie reali. Dare all'utente
+   l'elenco delle cose da controllare. Il merge della PR chiude la issue da solo.
+8. Dopo il merge: `git switch main`, `git pull`, eliminare il branch.
+
+Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`;
+per riportare `main` allineato a `origin/main` senza perdere commit usare `git branch -f main origin/main`
+dopo aver spostato il lavoro su un branch.
+
 ## Rilasci
 
 1. Aggiornare `project(Tessera VERSION x.y.z)` in `CMakeLists.txt`.
