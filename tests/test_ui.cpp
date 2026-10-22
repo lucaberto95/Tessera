@@ -10,6 +10,9 @@
 #include "ui/SummaryGridDialog.h"
 #include "ui/SummaryTablesDialog.h"
 #include "ui/DocumentTree.h"
+#include "core/RichText.h"
+#include <QTextBlock>
+#include <QTextList>
 #include "ui/DocumentView.h"
 #include "core/Pdfs.h"
 #include "ui/ImageView.h"
@@ -290,6 +293,51 @@ private slots:
         QCOMPARE(p.segmentsForDocument(doc).size(), 2);
     }
 
+    void formattedDocumentView()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("formatted.tsra")));
+        const QString text = "Titolo\nUn testo forte qui\nvoce uno\nA\nB";
+        const qint64 doc = p.addDocument(p.groups().first().id, "Doc", text);
+        RichText::Formatting f;
+        f.blocks.append({0, 6, RichText::BlockKind::Heading, 1});
+        f.blocks.append({26, 34, RichText::BlockKind::Bullet, 0});
+        f.blocks.append({35, 36, RichText::BlockKind::TableCell, 2});
+        const int forte = int(text.indexOf("forte"));
+        f.spans.append({forte, forte + 5, RichText::Bold});
+        QVERIFY(p.setDocumentRichContent(doc, RichText::toJson(f)));
+        const qint64 code = p.addCode(0, "C", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, forte, forte + 5);
+
+        DocumentView view(&p);
+        view.resize(600, 400);
+        view.show();
+        view.openDocument(doc);
+        auto *edit = view.findChild<QTextEdit *>();
+        // Formatted, and still the same characters: positions of segments are unchanged.
+        QCOMPARE(edit->document()->toRawText().replace(QChar::ParagraphSeparator, '\n'), text);
+        QCOMPARE(edit->document()->findBlock(0).blockFormat().headingLevel(), 1);
+        QVERIFY(edit->document()->findBlock(26).textList());
+        QTextCursor c(edit->document());
+        c.setPosition(forte + 2);
+        QVERIFY(c.charFormat().fontWeight() >= QFont::Bold);
+        QCOMPARE(p.segment(seg).start, forte);
+        QCOMPARE(QString(edit->document()->toRawText()).replace(QChar::ParagraphSeparator, '\n').mid(p.segment(seg).start, p.segment(seg).length()), QString("forte"));
+
+        // Editing keeps the formatting attached to the text that moved.
+        view.setEditing(true);
+        QTextCursor ins(edit->document());
+        ins.setPosition(0);
+        ins.insertText("XX ");
+        QVERIFY(view.commitEdits());
+        QCOMPARE(p.documentText(doc).left(9), QString("XX Titolo"));
+        QCOMPARE(edit->document()->toRawText().replace(QChar::ParagraphSeparator, '\n'), p.documentText(doc));
+        const int moved = int(p.documentText(doc).indexOf("forte"));
+        QCOMPARE(p.segment(seg).start, moved);
+        QCOMPARE(edit->document()->findBlock(0).blockFormat().headingLevel(), 1);
+        c.setPosition(moved + 2);
+        QVERIFY(c.charFormat().fontWeight() >= QFont::Bold);
+    }
     void documentLinks()
     {
         Project p;

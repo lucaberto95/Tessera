@@ -1,4 +1,5 @@
 #include "core/Project.h"
+#include "core/RichText.h"
 
 #include <QBuffer>
 #include <QDir>
@@ -700,6 +701,10 @@ QList<Project::Migration> Project::builtInMigrations()
           QStringLiteral("CREATE TABLE summary_tables ("
                          " id INTEGER PRIMARY KEY, name TEXT NOT NULL, config_json TEXT NOT NULL DEFAULT '{}',"
                          " position INTEGER NOT NULL DEFAULT 0, uuid TEXT NOT NULL)")}},
+        {10,
+         {// Formatting of text documents (issue #32): character styles and paragraph kinds as ranges of the
+          // plain text (see RichText.h), which stays the base of every position.
+          QStringLiteral("ALTER TABLE documents ADD COLUMN rich_content TEXT NOT NULL DEFAULT ''")}},
     };
 }
 
@@ -992,6 +997,22 @@ QString Project::documentText(qint64 id) const
     return scalar(QStringLiteral("SELECT content FROM documents WHERE id = ?"), {id}).toString();
 }
 
+QString Project::documentRichContent(qint64 id) const
+{
+    return scalar(QStringLiteral("SELECT rich_content FROM documents WHERE id = ?"), {id}).toString();
+}
+
+bool Project::setDocumentRichContent(qint64 id, const QString &json)
+{
+    setUndoLabel(tr("Formattazione del documento"));
+    if (!document(id).id)
+        return fail(tr("Documento inesistente"));
+    if (!exec(QStringLiteral("UPDATE documents SET rich_content = ? WHERE id = ?"), {json, id}))
+        return false;
+    notify(&Project::documentsChanged);
+    return true;
+}
+
 qint64 Project::addDocument(qint64 groupId, const QString &name, const QString &text,
                             const QString &sourcePath, const QString &uuid)
 {
@@ -1124,8 +1145,24 @@ bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Seg
                                  const QList<DocumentLink> &links)
 {
     setUndoLabel(tr("Modifica testo"));
+    // The formatting follows the edit like segments do (it is only read when the document has any).
+    const QString oldRich = documentRichContent(id);
+    const QString oldText = oldRich.isEmpty() ? QString() : documentText(id);
     beginBatch();
     bool ok = exec(QStringLiteral("UPDATE documents SET content = ? WHERE id = ?"), {text, id});
+    if (ok && !oldRich.isEmpty() && oldText != text) {
+        int prefix = 0;
+        const int limit = int(qMin(oldText.size(), text.size()));
+        while (prefix < limit && oldText.at(prefix) == text.at(prefix))
+            ++prefix;
+        int suffix = 0;
+        while (suffix < limit - prefix && oldText.at(oldText.size() - 1 - suffix) == text.at(text.size() - 1 - suffix))
+            ++suffix;
+        RichText::Formatting f = RichText::fromJson(oldRich);
+        RichText::adjustForEdit(f, prefix, int(oldText.size()) - prefix - suffix, int(text.size()) - prefix - suffix);
+        RichText::clamp(f, int(text.size()));
+        ok = exec(QStringLiteral("UPDATE documents SET rich_content = ? WHERE id = ?"), {RichText::toJson(f), id});
+    }
     QSet<qint64> kept;
     for (const Segment &s : segments) {
         if (!ok)

@@ -8,6 +8,7 @@
 #include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
+#include "core/RichText.h"
 #include "core/Retrieval.h"
 #include "core/Stats.h"
 #include "core/Summaries.h"
@@ -30,6 +31,9 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QTextList>
 #include <QTest>
 #include <QUuid>
 #include <QtCore/private/qzipreader_p.h>
@@ -932,6 +936,246 @@ private slots:
         QCOMPARE(r.text, QString::fromUtf8("Caffè forte\nUnicode €uro"));
     }
 
+    // ---- formatted documents (issue #32)
+
+    static QString docxNs() { return QStringLiteral("xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\""); }
+
+    QString writeFormattedDocx()
+    {
+        const QByteArray doc =
+            "<?xml version=\"1.0\"?><w:document " + docxNs().toUtf8() + "><w:body>"
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>Titolo</w:t></w:r></w:p>"
+            "<w:p><w:pPr><w:tabs><w:tab w:val=\"left\" w:pos=\"720\"/></w:tabs><w:rPr><w:b/></w:rPr></w:pPr>"
+            "<w:r><w:t xml:space=\"preserve\">Testo </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>forte</w:t></w:r>"
+            "<w:r><w:rPr><w:i/><w:u w:val=\"single\"/></w:rPr><w:t xml:space=\"preserve\"> corsivo</w:t></w:r>"
+            "<w:r><w:rPr><w:b w:val=\"0\"/></w:rPr><w:t> fine</w:t></w:r></w:p>"
+            "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"1\"/></w:numPr></w:pPr><w:r><w:t>voce uno</w:t></w:r></w:p>"
+            "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"2\"/></w:numPr></w:pPr><w:r><w:t>numero</w:t></w:r></w:p>"
+            "<w:tbl><w:tr><w:trPr><w:tblHeader/></w:trPr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>"
+            "<w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr>"
+            "<w:tr><w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>2</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"
+            "<w:p><w:r><w:t>chiusura</w:t></w:r></w:p>"
+            "</w:body></w:document>";
+        const QByteArray styles =
+            "<?xml version=\"1.0\"?><w:styles " + docxNs().toUtf8() + ">"
+            "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/></w:style></w:styles>";
+        const QByteArray numbering =
+            "<?xml version=\"1.0\"?><w:numbering " + docxNs().toUtf8() + ">"
+            "<w:abstractNum w:abstractNumId=\"0\"><w:lvl w:ilvl=\"0\"><w:numFmt w:val=\"bullet\"/></w:lvl></w:abstractNum>"
+            "<w:abstractNum w:abstractNumId=\"1\"><w:lvl w:ilvl=\"0\"><w:numFmt w:val=\"decimal\"/></w:lvl></w:abstractNum>"
+            "<w:num w:numId=\"1\"><w:abstractNumId w:val=\"0\"/></w:num>"
+            "<w:num w:numId=\"2\"><w:abstractNumId w:val=\"1\"/></w:num></w:numbering>";
+        {
+            QZipWriter zip(path("fmt.docx"));
+            zip.addFile("word/document.xml", doc);
+            zip.addFile("word/styles.xml", styles);
+            zip.addFile("word/numbering.xml", numbering);
+        }
+        return path("fmt.docx");
+    }
+
+    static QString rawText(const QTextDocument &d)
+    {
+        QString t = d.toRawText();
+        t.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
+        return t;
+    }
+
+    static bool hasStyle(const RichText::Formatting &f, int from, int to, int style)
+    {
+        for (const RichText::Span &s : f.spans)
+            if (s.start == from && s.end == to && s.style == style)
+                return true;
+        return false;
+    }
+
+    static bool hasBlock(const RichText::Formatting &f, int from, int to, RichText::BlockKind kind, int level)
+    {
+        for (const RichText::Block &b : f.blocks)
+            if (b.start == from && b.end == to && b.kind == kind && b.level == level)
+                return true;
+        return false;
+    }
+
+    void importDocxKeepsFormatting()
+    {
+        const auto r = Importers::importFile(writeFormattedDocx());
+        QVERIFY2(r.ok, qPrintable(r.error));
+        // The tab stop in the paragraph properties is not text.
+        QCOMPARE(r.text, QString("Titolo\nTesto forte corsivo fine\nvoce uno\nnumero\nA\nB\n1\n2\nchiusura"));
+        QVERIFY(!r.richContent.isEmpty());
+        const RichText::Formatting f = RichText::fromJson(r.richContent);
+        using K = RichText::BlockKind;
+        QVERIFY(hasBlock(f, 0, 6, K::Heading, 1));
+        QVERIFY(hasBlock(f, 32, 40, K::Bullet, 0));
+        QVERIFY(hasBlock(f, 41, 47, K::Numbered, 0));
+        QVERIFY(hasBlock(f, 48, 49, K::TableCell, 2)); // header row
+        QVERIFY(hasBlock(f, 50, 51, K::TableCell, 2));
+        QVERIFY(hasBlock(f, 52, 53, K::TableCell, 1));
+        QVERIFY(hasBlock(f, 54, 55, K::TableCell, 1));
+        QCOMPARE(f.blocks.size(), 7);
+        const int forte = int(r.text.indexOf("forte"));
+        QVERIFY(hasStyle(f, forte, forte + 5, RichText::Bold));
+        QVERIFY(hasStyle(f, forte + 5, forte + 13, RichText::Italic | RichText::Underline));
+        QCOMPARE(f.spans.size(), 2);
+    }
+
+    void formattingKeepsPositions()
+    {
+        const auto r = Importers::importFile(writeFormattedDocx());
+        QVERIFY(r.ok);
+        QTextDocument shown;
+        shown.setPlainText(r.text);
+        RichText::apply(&shown, RichText::fromJson(r.richContent));
+        // The core constraint: formatting never changes the text, so positions mean the same thing.
+        QCOMPARE(rawText(shown), r.text);
+        QCOMPARE(int(shown.characterCount()) - 1, int(r.text.size()));
+        QCOMPARE(shown.blockCount(), 9);
+        QCOMPARE(shown.findBlock(0).blockFormat().headingLevel(), 1);
+        {
+            QTextCursor h(&shown);
+            h.setPosition(2);
+            QVERIFY(h.charFormat().fontWeight() >= QFont::Bold);
+        }
+        QVERIFY(shown.findBlock(32).textList());
+        QCOMPARE(shown.findBlock(32).textList()->format().style(), QTextListFormat::ListDisc);
+        QCOMPARE(shown.findBlock(41).textList()->format().style(), QTextListFormat::ListDecimal);
+        QCOMPARE(shown.findBlock(48).blockFormat().background().color().alpha(), 90); // table header
+        const int forte = int(r.text.indexOf("forte"));
+        QTextCursor c(&shown);
+        c.setPosition(forte + 1);
+        QVERIFY(c.charFormat().fontWeight() >= QFont::Bold);
+        c.setPosition(forte + 8);
+        QVERIFY(c.charFormat().fontItalic());
+
+        // Coding and retrieval work on the plain text: same segments with or without formatting.
+        Project p;
+        QVERIFY(p.create(path("fmtpos.tsra")));
+        const qint64 plainDoc = p.addDocument(p.groups().first().id, "plain", r.text);
+        const qint64 richDoc = p.addDocument(p.groups().first().id, "rich", r.text);
+        QVERIFY(p.setDocumentRichContent(richDoc, r.richContent));
+        const qint64 code = p.addCode(0, "c", Qt::red);
+        for (const qint64 d : {plainDoc, richDoc})
+            QVERIFY(p.addSegment(d, code, forte, forte + 13, 0, "") > 0);
+        QCOMPARE(p.documentText(richDoc), p.documentText(plainDoc));
+        const auto sp = p.segmentsForDocument(plainDoc), sr = p.segmentsForDocument(richDoc);
+        QCOMPARE(sr.size(), 1);
+        QCOMPARE(sr.first().start, sp.first().start);
+        QCOMPARE(sr.first().end, sp.first().end);
+        QTextDocument again;
+        again.setPlainText(p.documentText(richDoc));
+        RichText::apply(&again, RichText::fromJson(p.documentRichContent(richDoc)));
+        QTextCursor sel(&again);
+        sel.setPosition(sr.first().start);
+        sel.setPosition(sr.first().end, QTextCursor::KeepAnchor);
+        QCOMPARE(sel.selectedText(), r.text.mid(forte, 13));
+    }
+
+    void formattingFollowsTextEdit()
+    {
+        Project p;
+        QVERIFY(p.create(path("fmtedit.tsra")));
+        const qint64 d = p.addDocument(p.groups().first().id, "d", "Titolo\nuno due tre");
+        RichText::Formatting f;
+        f.blocks.append({0, 6, RichText::BlockKind::Heading, 1});
+        f.spans.append({11, 14, RichText::Bold}); // "due"
+        QVERIFY(p.setDocumentRichContent(d, RichText::toJson(f)));
+        QVERIFY(p.updateDocumentText(d, "Il Titolo\nuno due tre", {}, {}));
+        const RichText::Formatting g = RichText::fromJson(p.documentRichContent(d));
+        QVERIFY(hasBlock(g, 0, 9, RichText::BlockKind::Heading, 1));
+        const QString text = p.documentText(d);
+        QVERIFY2(hasBlock(g, 0, 9, RichText::BlockKind::Heading, 1), qPrintable(RichText::toJson(g)));
+        const int due = int(text.indexOf("due"));
+        QVERIFY(hasStyle(g, due, due + 3, RichText::Bold));
+        // Undo restores text and formatting together.
+        QVERIFY(p.undo());
+        QCOMPARE(p.documentText(d), QString("Titolo\nuno due tre"));
+        QVERIFY2(hasBlock(RichText::fromJson(p.documentRichContent(d)), 0, 6, RichText::BlockKind::Heading, 1),
+                 qPrintable(p.documentRichContent(d)));
+    }
+
+    void importRtfAndHtmlKeepFormatting()
+    {
+        writeFile("f.rtf", "{\\rtf1\\ansi Normale \\b forte\\b0  \\i obliquo\\i0\\par "
+                           "\\pard\\intbl A\\cell B\\cell\\row \\pard dopo\\par}");
+        auto r = Importers::importFile(path("f.rtf"));
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.text, QString("Normale forte obliquo\nA\tB\t\ndopo"));
+        RichText::Formatting f = RichText::fromJson(r.richContent);
+        QVERIFY(hasStyle(f, 8, 13, RichText::Bold));
+        QVERIFY(hasStyle(f, 14, 21, RichText::Italic));
+        QVERIFY(hasBlock(f, 22, 26, RichText::BlockKind::TableCell, 0));
+
+        writeFile("f.html", "<html><body><h2>Titolo</h2><p>Un <b>grassetto</b> e <i>corsivo</i>.</p>"
+                            "<ul><li>uno</li><li>due</li></ul><ol><li>primo</li></ol>"
+                            "<table border=1><tr><th>X</th><th>Y</th></tr><tr><td>1</td><td>2</td></tr></table></body></html>");
+        r = Importers::importFile(path("f.html"));
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QVERIFY(!r.richContent.isEmpty());
+        f = RichText::fromJson(r.richContent);
+        const int g = int(r.text.indexOf("grassetto"));
+        QVERIFY(hasStyle(f, g, g + 9, RichText::Bold));
+        QVERIFY(hasBlock(f, 0, 6, RichText::BlockKind::Heading, 2));
+        const int uno = int(r.text.indexOf("uno"));
+        QVERIFY(hasBlock(f, uno, uno + 3, RichText::BlockKind::Bullet, 0));
+        const int primo = int(r.text.indexOf("primo"));
+        QVERIFY(hasBlock(f, primo, primo + 5, RichText::BlockKind::Numbered, 0));
+        const int one = int(r.text.indexOf("\n1\n")) + 1;
+        QVERIFY(hasBlock(f, one, one + 1, RichText::BlockKind::TableCell, 1));
+        // Same text as before the formatting was kept.
+        QTextDocument shown;
+        shown.setPlainText(r.text);
+        RichText::apply(&shown, f);
+        QCOMPARE(rawText(shown), r.text);
+    }
+
+    void importOdtKeepsFormatting()
+    {
+        const QByteArray content =
+            "<?xml version=\"1.0\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+            "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\" "
+            "xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\" "
+            "xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\" "
+            "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\">"
+            "<office:automatic-styles><style:style style:name=\"T1\" style:family=\"text\">"
+            "<style:text-properties fo:font-weight=\"bold\"/></style:style>"
+            "<text:list-style style:name=\"L1\"><text:list-level-style-number text:level=\"1\"/></text:list-style>"
+            "</office:automatic-styles><office:body><office:text>"
+            "<text:h text:outline-level=\"2\">Capo</text:h>"
+            "<text:p>Un <text:span text:style-name=\"T1\">grassetto</text:span> qui</text:p>"
+            "<text:list text:style-name=\"L1\"><text:list-item><text:p>primo</text:p></text:list-item></text:list>"
+            "<table:table><table:table-row><table:table-cell><text:p>c1</text:p></table:table-cell></table:table-row></table:table>"
+            "</office:text></office:body></office:document-content>";
+        {
+            QZipWriter zip(path("fmt.odt"));
+            zip.addFile("content.xml", content);
+        }
+        const auto r = Importers::importFile(path("fmt.odt"));
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.text, QString("Capo\nUn grassetto qui\nprimo\nc1"));
+        const RichText::Formatting f = RichText::fromJson(r.richContent);
+        QVERIFY(hasBlock(f, 0, 4, RichText::BlockKind::Heading, 2));
+        QVERIFY(hasStyle(f, 8, 17, RichText::Bold));
+        QVERIFY(hasBlock(f, 22, 27, RichText::BlockKind::Numbered, 0));
+        QVERIFY(hasBlock(f, 28, 30, RichText::BlockKind::TableCell, 0));
+    }
+
+    void mergeCopiesFormatting()
+    {
+        Project a, b;
+        QVERIFY(a.create(path("fa.tsra")));
+        QVERIFY(b.create(path("fb.tsra")));
+        const qint64 d = b.addDocument(b.groups().first().id, "d", "Titolo\ntesto");
+        RichText::Formatting f;
+        f.blocks.append({0, 6, RichText::BlockKind::Heading, 1});
+        QVERIFY(b.setDocumentRichContent(d, RichText::toJson(f)));
+        b.close();
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(path("fb.tsra"), &error), qPrintable(error));
+        QVERIFY(Merge::apply(a, src, {}).ok);
+        QCOMPARE(RichText::fromJson(a.documentRichContent(a.documents().first().id)).blocks.size(), 1);
+    }
     void csvRoundTrip()
     {
         Exporters::Table t{{"a", "b;c"}, {"x \"y\"", "riga1\nriga2"}};
@@ -3412,8 +3656,8 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 9);
-        QCOMPARE(fileVersion(file), 9);
+        QCOMPARE(p.schemaVersion(), 10);
+        QCOMPARE(fileVersion(file), 10);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
@@ -3565,7 +3809,7 @@ private slots:
         QCOMPARE(fileVersion(file), 7);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 9);
+        QCOMPARE(fileVersion(file), 10);
         const qint64 doc = p.documents().first().id;
         const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
         QVERIFY(a > 0);
@@ -3750,7 +3994,7 @@ private slots:
         QCOMPARE(fileVersion(file), 8);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 9);
+        QCOMPARE(fileVersion(file), 10);
         const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
         QVERIFY(p.setSummary(doc, p.codes().first().id, "ok"));
         QVERIFY(p.addSummaryTable("T", "{}") > 0);

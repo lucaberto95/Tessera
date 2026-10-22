@@ -740,6 +740,8 @@ void MainWindow::importDocuments(qint64 groupId)
             continue;
         }
         lastId = m_project->addDocument(groupId, QFileInfo(files[i]).completeBaseName(), r.text, files[i]);
+        if (lastId && !r.richContent.isEmpty())
+            m_project->setDocumentRichContent(lastId, r.richContent);
     }
     progress.setValue(int(files.size()));
     m_project->commitBatch();

@@ -51,6 +51,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
   Model.h        struct valore: DocumentGroup, DocumentSet, Document, Code, Segment, DocumentLink, Memo, Variable,
                  Dictionary, DictCategory, DictEntry
   Project        unica fonte di verità: file SQLite .tsra, CRUD, segnali, batch, undo/redo
+  RichText       formattazione dei documenti di testo (#32): intervalli di stile e tipi di paragrafo su indici UTF-16, `Builder` per gli importer, `apply()` su un `QTextDocument`
   Importers      TXT/MD, DOCX, ODT (QZipReader privato + XML), RTF (parser proprio), PDF (QtPdf), HTML
   Retrieval      recupero complesso dei segmenti su segmenti in memoria
   Cooccurrence   matrice codici × codici (sovrapposizione / vicinanza / stesso documento), Jaccard, layout force-directed
@@ -135,6 +136,19 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   (`isPdf()`, come `isImage()`): `selectRange(start,end,0)` con un offset del testo estratto porta alla pagina (hit della
   ricerca). Ctrl+F nel documento, collegamenti e modifica non valgono per i PDF. QPdfDocument: `load(QIODevice*)` è `void`
   (guardare `status()`), `getSelection` vuole che il punto di partenza sia su un glifo.
+- **Formattazione** (`documents.rich_content`, migrazione v10, JSON di `RichText::Formatting`). Il testo semplice
+  resta l'unica base delle posizioni: la formattazione è un insieme di intervalli [start,end) su quel testo (span
+  grassetto/corsivo/sottolineato/barrato; blocchi titolo, elenco puntato/numerato, riga di tabella) e
+  `RichText::apply()` non inserisce né toglie caratteri, quindi `toRawText()` del documento mostrato è identico al testo
+  salvato (test `formattingKeepsPositions`). Le tabelle NON diventano `QTextTable` (aggiungerebbe caratteri
+  speciali): le celle restano righe del testo, mostrate come righe sfumate (a bande, intestazione più scura);
+  gli elenchi usano `QTextList` (nessun carattere nel testo). Gli importer DOCX/ODT/RTF/HTML riempiono un
+  `RichText::Builder` (stile corrente + `endParagraph(kind, level)`); `successRich()` scarta la formattazione se la
+  normalizzazione ha cambiato il testo. MD e PDF restano testo semplice. `Project::updateDocumentText` adatta gli
+  intervalli alla modifica (prefisso/suffisso comune, come i segmenti) e l'annulla ripristina testo e formattazione
+  insieme; `setDocumentRichContent` deve fare `notify` (chiude il passo di undo). L'unione di progetti copia la
+  formattazione; l'export QDPX no (solo testo). In modifica del testo la formattazione mostrata non cambia fino al
+  salvataggio, poi viene ricaricata.
 - **Set di documenti** (`document_sets`, v2): riferimenti a documenti di qualsiasi gruppo. Nel `DocumentTree`
   lo stesso documento compare più volte: l'attivazione è per documento (`syncDocumentCheckBoxes`);
   `activeDocumentIds()` legge solo i gruppi.
@@ -252,6 +266,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
 #23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
+**#32** documenti con formattazione (titoli, grassetto/corsivo/sottolineato/barrato, elenchi, tabelle come righe a bande da DOCX, ODT, RTF e HTML; logica in `src/core/RichText.*`; non incluso: immagini incorporate, formattazione in MD/PDF e nell'export QDPX, editor rich text: l'editing resta sul testo semplice).
 Aggiornare questo elenco quando una issue viene chiusa.
 
 ## Rilasci

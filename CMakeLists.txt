@@ -21,6 +21,7 @@ qt_add_library(tessera_core STATIC
     src/core/Exporters.h src/core/Exporters.cpp
     src/core/Qdpx.h src/core/Qdpx.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
+    src/core/RichText.h src/core/RichText.cpp
     src/core/Retrieval.h src/core/Retrieval.cpp
     src/core/Agreement.h src/core/Agreement.cpp
     src/core/Cooccurrence.h src/core/Cooccurrence.cpp

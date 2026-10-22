@@ -101,7 +101,8 @@ private:
     std::pair<int, int> trimmedSelection() const; // selection without surrounding whitespace
     void reloadLinks();
     void reloadSegments();
-    void setDisplayedText(const QString &text);
+    void setDisplayedText(const QString &text, const QString &rich);
+    QString m_richShown; // formatting (JSON) applied to the displayed text
     void refreshHighlights();
     void showTextMenu(const QPoint &globalPos, int position);
     void onTextChangedWhileEditing();

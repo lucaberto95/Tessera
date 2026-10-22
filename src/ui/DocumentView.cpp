@@ -29,6 +29,7 @@
 #include <QTextEdit>
 #include <QToolButton>
 #include <QToolTip>
+#include "core/RichText.h"
 #include <QVBoxLayout>
 #include <QRegularExpression>
 
@@ -400,7 +401,7 @@ void DocumentView::openDocument(qint64 id)
         m_pageSpin->setRange(1, std::max(1, m_pdfView->pageCount()));
         m_pageSpin->setValue(1);
     } else {
-        setDisplayedText(m_project->documentText(id));
+        setDisplayedText(m_project->documentText(id), m_project->documentRichContent(id));
         m_edit->moveCursor(QTextCursor::Start);
         m_links = m_project->linksForDocument(id);
     }
@@ -410,7 +411,7 @@ void DocumentView::openDocument(qint64 id)
     emit selectionChanged();
 }
 
-void DocumentView::setDisplayedText(const QString &text)
+void DocumentView::setDisplayedText(const QString &text, const QString &rich)
 {
     m_edit->setPlainText(text);
     // Comfortable reading line height; not part of the undo history.
@@ -420,6 +421,11 @@ void DocumentView::setDisplayedText(const QString &text)
     fmt.setLineHeight(135, QTextBlockFormat::ProportionalHeight);
     fmt.setBottomMargin(4);
     all.mergeBlockFormat(fmt);
+    // Titles, bold, lists and tables go on top of the plain text; its characters do not change, so every
+    // position (segments, links) keeps its meaning.
+    m_richShown = rich;
+    if (!rich.isEmpty())
+        RichText::apply(m_edit->document(), RichText::fromJson(rich));
     m_edit->document()->clearUndoRedoStacks();
     updateFindMatches();
 }
@@ -1298,10 +1304,11 @@ void DocumentView::onDocumentsChanged()
         return;
     }
     const QString text = m_editing ? rawText(m_edit) : m_project->documentText(m_docId);
-    if (!m_editing && text != rawText(m_edit)) {
+    const QString rich = m_editing ? m_richShown : m_project->documentRichContent(m_docId);
+    if (!m_editing && (text != rawText(m_edit) || rich != m_richShown)) {
         // Changed outside the view (undo/redo of a text edit): show the stored text, keep the scroll.
         const int scroll = m_edit->verticalScrollBar()->value();
-        setDisplayedText(text);
+        setDisplayedText(text, rich);
         m_edit->verticalScrollBar()->setValue(scroll);
         reloadSegments();
     }

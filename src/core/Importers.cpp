@@ -1,9 +1,12 @@
 #include "core/Importers.h"
 #include "core/Images.h"
+#include "core/RichText.h"
 #include "core/TextUtils.h"
 
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
+#include <QRegularExpression>
 #include <QSet>
 #include <cctype>
 #include <QPdfDocument>
@@ -29,6 +32,19 @@ Result success(const QString &text)
     // Collapse trailing whitespace lines left by converters.
     while (r.text.endsWith(QLatin1Char('\n')) || r.text.endsWith(QLatin1Char(' ')))
         r.text.chop(1);
+    return r;
+}
+
+// Text and formatting collected by a Builder. The formatting is kept only if the text did not change
+// in normalization (it would shift the ranges) and is cut at the trimmed end.
+Result successRich(const RichText::Builder &b)
+{
+    Result r = success(b.text);
+    if (r.text != b.text.left(r.text.size()))
+        return r;
+    RichText::Formatting f = b.formatting();
+    RichText::clamp(f, int(r.text.size()));
+    r.richContent = RichText::toJson(f);
     return r;
 }
 
@@ -117,16 +133,107 @@ Result importFile(const QString &path)
     return success(decodeText(data));
 }
 
+const QString kWordNamespace = QStringLiteral("http://schemas.openxmlformats.org/wordprocessingml/2006/main");
+
+struct DocxStyle {
+    int headingLevel = 0;
+    RichText::BlockKind list = RichText::BlockKind::Paragraph;
+};
+
+// styleId -> heading level / list kind, from the style names Word uses ("heading 2", "List Bullet").
+QHash<QString, DocxStyle> readDocxStyles(const QByteArray &xml)
+{
+    QHash<QString, DocxStyle> styles;
+    static const QRegularExpression heading(QStringLiteral("^(?:heading|titolo)\\s*(\\d)$"),
+                                            QRegularExpression::CaseInsensitiveOption);
+    QXmlStreamReader r(xml);
+    QString id;
+    while (!r.atEnd()) {
+        r.readNext();
+        if (!r.isStartElement())
+            continue;
+        if (r.name() == QLatin1String("style")) {
+            id = r.attributes().value(kWordNamespace, QLatin1String("styleId")).toString();
+        } else if (r.name() == QLatin1String("name") && !id.isEmpty()) {
+            const QString name = r.attributes().value(kWordNamespace, QLatin1String("val")).toString().trimmed();
+            DocxStyle s;
+            const QRegularExpressionMatch m = heading.match(name);
+            if (m.hasMatch())
+                s.headingLevel = qBound(1, m.captured(1).toInt(), 6);
+            else if (name.compare(QLatin1String("title"), Qt::CaseInsensitive) == 0)
+                s.headingLevel = 1;
+            else if (name.startsWith(QLatin1String("list bullet"), Qt::CaseInsensitive))
+                s.list = RichText::BlockKind::Bullet;
+            else if (name.startsWith(QLatin1String("list number"), Qt::CaseInsensitive))
+                s.list = RichText::BlockKind::Numbered;
+            if (s.headingLevel || s.list != RichText::BlockKind::Paragraph)
+                styles.insert(id, s);
+        }
+    }
+    return styles;
+}
+
+// numId -> (ilvl -> is a bullet list), from numbering.xml.
+QHash<int, QHash<int, bool>> readDocxNumbering(const QByteArray &xml)
+{
+    QHash<int, QHash<int, bool>> abstracts, nums;
+    QHash<int, int> numToAbstract;
+    QXmlStreamReader r(xml);
+    int abstractId = -1, level = 0, numId = -1;
+    while (!r.atEnd()) {
+        r.readNext();
+        if (!r.isStartElement())
+            continue;
+        const auto val = [&] { return r.attributes().value(kWordNamespace, QLatin1String("val")).toString(); };
+        const auto name = r.name();
+        if (name == QLatin1String("abstractNum")) {
+            abstractId = r.attributes().value(kWordNamespace, QLatin1String("abstractNumId")).toInt();
+        } else if (name == QLatin1String("lvl")) {
+            level = r.attributes().value(kWordNamespace, QLatin1String("ilvl")).toInt();
+        } else if (name == QLatin1String("numFmt") && abstractId >= 0) {
+            abstracts[abstractId].insert(level, val() == QLatin1String("bullet"));
+        } else if (name == QLatin1String("num")) {
+            numId = r.attributes().value(kWordNamespace, QLatin1String("numId")).toInt();
+            abstractId = -1;
+        } else if (name == QLatin1String("abstractNumId") && numId >= 0) {
+            numToAbstract.insert(numId, val().toInt());
+        }
+    }
+    for (auto it = numToAbstract.cbegin(); it != numToAbstract.cend(); ++it)
+        nums.insert(it.key(), abstracts.value(it.value()));
+    return nums;
+}
+
 Result importDocx(const QString &path)
 {
     QString error;
     const QByteArray xml = zipEntry(path, QStringLiteral("word/document.xml"), &error);
     if (xml.isEmpty())
         return failure(error);
+    QString ignored;
+    const QHash<QString, DocxStyle> styles = readDocxStyles(zipEntry(path, QStringLiteral("word/styles.xml"), &ignored));
+    const QHash<int, QHash<int, bool>> numbering =
+        readDocxNumbering(zipEntry(path, QStringLiteral("word/numbering.xml"), &ignored));
 
+    using RichText::BlockKind;
     QXmlStreamReader r(xml);
-    QString out;
-    bool inBody = false;
+    RichText::Builder b;
+    bool inBody = false, inPPr = false, inRPr = false, headerRow = false;
+    int runStyle = 0, tableDepth = 0, rowIndex = 0;
+    QString paragraphStyle;
+    int numId = 0, ilvl = 0;
+    // w:val="0" / "false" / "none" switch a property off.
+    const auto enabled = [&] {
+        const QStringView v = r.attributes().value(kWordNamespace, QLatin1String("val"));
+        return !(v == QLatin1String("0") || v == QLatin1String("false") || v == QLatin1String("off")
+                 || v == QLatin1String("none"));
+    };
+    const auto toggle = [&](int flag) {
+        if (enabled())
+            runStyle |= flag;
+        else
+            runStyle &= ~flag;
+    };
     while (!r.atEnd()) {
         r.readNext();
         if (r.isStartElement()) {
@@ -135,23 +242,134 @@ Result importDocx(const QString &path)
                 inBody = true;
             else if (!inBody)
                 continue;
-            else if (name == QLatin1String("t"))
-                out += r.readElementText();
-            else if (name == QLatin1String("tab"))
-                out += QLatin1Char('\t');
-            else if (name == QLatin1String("br") || name == QLatin1String("cr"))
-                out += QLatin1Char('\n');
-            else if (name == QLatin1String("noBreakHyphen"))
-                out += QChar(0x2011);
-            else if (name == QLatin1String("delText") || name == QLatin1String("instrText"))
+            else if (name == QLatin1String("p")) {
+                paragraphStyle.clear();
+                numId = 0;
+                ilvl = 0;
+            } else if (name == QLatin1String("pPr"))
+                inPPr = true;
+            else if (name == QLatin1String("pStyle"))
+                paragraphStyle = r.attributes().value(kWordNamespace, QLatin1String("val")).toString();
+            else if (name == QLatin1String("numId") && inPPr)
+                numId = r.attributes().value(kWordNamespace, QLatin1String("val")).toInt();
+            else if (name == QLatin1String("ilvl") && inPPr)
+                ilvl = r.attributes().value(kWordNamespace, QLatin1String("val")).toInt();
+            else if (name == QLatin1String("r"))
+                runStyle = 0;
+            else if (name == QLatin1String("rPr"))
+                inRPr = true;
+            else if (inRPr && !inPPr && name == QLatin1String("b"))
+                toggle(RichText::Bold);
+            else if (inRPr && !inPPr && name == QLatin1String("i"))
+                toggle(RichText::Italic);
+            else if (inRPr && !inPPr && name == QLatin1String("u"))
+                toggle(RichText::Underline);
+            else if (inRPr && !inPPr && (name == QLatin1String("strike") || name == QLatin1String("dstrike")))
+                toggle(RichText::Strike);
+            else if (name == QLatin1String("tbl")) {
+                if (tableDepth++ == 0)
+                    rowIndex = 0;
+            } else if (name == QLatin1String("tr"))
+                headerRow = false;
+            else if (name == QLatin1String("tblHeader"))
+                headerRow = true;
+            else if (name == QLatin1String("t")) {
+                b.style = runStyle;
+                b.add(r.readElementText());
+            } else if (name == QLatin1String("tab") && !inPPr) { // inside w:pPr it is a tab stop
+                b.style = 0;
+                b.add(QStringLiteral("\t"));
+            } else if (name == QLatin1String("br") || name == QLatin1String("cr")) {
+                b.style = 0;
+                b.add(QStringLiteral("\n"));
+            } else if (name == QLatin1String("noBreakHyphen")) {
+                b.style = runStyle;
+                b.add(QString(QChar(0x2011)));
+            } else if (name == QLatin1String("delText") || name == QLatin1String("instrText"))
                 r.skipCurrentElement();
-        } else if (r.isEndElement() && inBody && r.name() == QLatin1String("p")) {
-            out += QLatin1Char('\n');
+        } else if (r.isEndElement() && inBody) {
+            const auto name = r.name();
+            if (name == QLatin1String("pPr"))
+                inPPr = false;
+            else if (name == QLatin1String("rPr"))
+                inRPr = false;
+            else if (name == QLatin1String("tr"))
+                ++rowIndex;
+            else if (name == QLatin1String("tbl"))
+                tableDepth = qMax(0, tableDepth - 1);
+            else if (name == QLatin1String("p")) {
+                const DocxStyle style = styles.value(paragraphStyle);
+                BlockKind kind = BlockKind::Paragraph;
+                int level = 0;
+                if (style.headingLevel) {
+                    kind = BlockKind::Heading;
+                    level = style.headingLevel;
+                } else if (tableDepth > 0) {
+                    kind = BlockKind::TableCell;
+                    level = headerRow ? 2 : rowIndex % 2;
+                } else if (numId > 0) {
+                    kind = numbering.value(numId).value(ilvl, true) ? BlockKind::Bullet : BlockKind::Numbered;
+                    level = ilvl;
+                } else if (style.list != BlockKind::Paragraph) {
+                    kind = style.list;
+                }
+                b.endParagraph(kind, level);
+            }
         }
     }
     if (r.hasError())
         return failure(QObject::tr("Errore nel leggere il DOCX: %1").arg(r.errorString()));
-    return success(out);
+    return successRich(b);
+}
+
+// ODF automatic and named styles: character properties by style name, and the kind of each level of
+// the list styles (true = bullet).
+struct OdfStyles {
+    QHash<QString, int> text;
+    QHash<QString, QHash<int, bool>> listBullet;
+};
+
+void readOdfStyles(const QByteArray &xml, OdfStyles *out)
+{
+    QXmlStreamReader r(xml);
+    QString style, list;
+    const auto flag = [&](const char *attr) {
+        const QStringView v = r.attributes().value(QLatin1String(attr));
+        return !v.isEmpty() && v != QLatin1String("none");
+    };
+    while (!r.atEnd()) {
+        r.readNext();
+        if (r.isStartElement()) {
+            const auto name = r.name();
+            if (name == QLatin1String("style"))
+                style = r.attributes().value(QLatin1String("style:name")).toString();
+            else if (name == QLatin1String("list-style"))
+                list = r.attributes().value(QLatin1String("style:name")).toString();
+            else if (name == QLatin1String("text-properties") && !style.isEmpty()) {
+                int s = 0;
+                if (r.attributes().value(QLatin1String("fo:font-weight")) == QLatin1String("bold"))
+                    s |= RichText::Bold;
+                const QStringView fs = r.attributes().value(QLatin1String("fo:font-style"));
+                if (fs == QLatin1String("italic") || fs == QLatin1String("oblique"))
+                    s |= RichText::Italic;
+                if (flag("style:text-underline-style"))
+                    s |= RichText::Underline;
+                if (flag("style:text-line-through-style"))
+                    s |= RichText::Strike;
+                if (s)
+                    out->text.insert(style, s);
+            } else if ((name == QLatin1String("list-level-style-bullet") || name == QLatin1String("list-level-style-number"))
+                       && !list.isEmpty()) {
+                out->listBullet[list].insert(r.attributes().value(QLatin1String("text:level")).toInt(),
+                                             name == QLatin1String("list-level-style-bullet"));
+            }
+        } else if (r.isEndElement()) {
+            if (r.name() == QLatin1String("style"))
+                style.clear();
+            else if (r.name() == QLatin1String("list-style"))
+                list.clear();
+        }
+    }
 }
 
 Result importOdt(const QString &path)
@@ -160,42 +378,90 @@ Result importOdt(const QString &path)
     const QByteArray xml = zipEntry(path, QStringLiteral("content.xml"), &error);
     if (xml.isEmpty())
         return failure(error);
+    OdfStyles styles;
+    QString ignored;
+    readOdfStyles(zipEntry(path, QStringLiteral("styles.xml"), &ignored), &styles);
+    readOdfStyles(xml, &styles);
 
+    using RichText::BlockKind;
     QXmlStreamReader r(xml);
-    QString out;
-    int paragraphDepth = 0;
+    RichText::Builder b;
+    int paragraphDepth = 0, headingLevel = 0, tableDepth = 0, rowIndex = 0, headerRows = 0;
+    QList<int> spanStack;
+    QStringList listStack;
     while (!r.atEnd()) {
         r.readNext();
         if (r.isStartElement()) {
             const auto name = r.name();
-            if (name == QLatin1String("p") || name == QLatin1String("h"))
-                ++paragraphDepth;
+            if (name == QLatin1String("p") || name == QLatin1String("h")) {
+                if (++paragraphDepth == 1) {
+                    headingLevel = name == QLatin1String("h")
+                        ? qBound(1, r.attributes().value(QLatin1String("text:outline-level")).toInt(), 6) : 0;
+                    b.style = styles.text.value(r.attributes().value(QLatin1String("text:style-name")).toString());
+                    spanStack.clear();
+                }
+            } else if (name == QLatin1String("span") && paragraphDepth > 0) {
+                spanStack.append(b.style);
+                b.style |= styles.text.value(r.attributes().value(QLatin1String("text:style-name")).toString());
+            } else if (name == QLatin1String("list")) {
+                const QString s = r.attributes().value(QLatin1String("text:style-name")).toString();
+                listStack.append(s.isEmpty() && !listStack.isEmpty() ? listStack.last() : s);
+            } else if (name == QLatin1String("table")) {
+                if (tableDepth++ == 0)
+                    rowIndex = 0;
+            } else if (name == QLatin1String("table-header-rows"))
+                ++headerRows;
             else if (name == QLatin1String("s")) { // text:c spaces, bounded: c="2000000000" would exhaust memory
                 const int count = r.attributes().value(kOdfTextNamespace, QLatin1String("c")).toInt();
-                out += QString(qBound(1, count, 1000), QLatin1Char(' '));
+                b.add(QString(qBound(1, count, 1000), QLatin1Char(' ')));
             }
             else if (name == QLatin1String("tab"))
-                out += QLatin1Char('\t');
+                b.add(QStringLiteral("\t"));
             else if (name == QLatin1String("line-break"))
-                out += QLatin1Char('\n');
+                b.add(QStringLiteral("\n"));
             else if (name == QLatin1String("note") || name == QLatin1String("annotation"))
                 r.skipCurrentElement();
         } else if (r.isEndElement()) {
             const auto name = r.name();
             if ((name == QLatin1String("p") || name == QLatin1String("h")) && paragraphDepth > 0) {
                 --paragraphDepth;
-                if (paragraphDepth == 0)
-                    out += QLatin1Char('\n');
+                if (paragraphDepth == 0) {
+                    BlockKind kind = BlockKind::Paragraph;
+                    int level = 0;
+                    if (headingLevel) {
+                        kind = BlockKind::Heading;
+                        level = headingLevel;
+                    } else if (tableDepth > 0) {
+                        kind = BlockKind::TableCell;
+                        level = headerRows > 0 ? 2 : rowIndex % 2;
+                    } else if (!listStack.isEmpty()) {
+                        const int depth = int(listStack.size());
+                        kind = styles.listBullet.value(listStack.last()).value(depth, true) ? BlockKind::Bullet
+                                                                                           : BlockKind::Numbered;
+                        level = depth - 1;
+                    }
+                    b.endParagraph(kind, level);
+                    b.style = 0;
+                }
+            } else if (name == QLatin1String("span") && !spanStack.isEmpty()) {
+                b.style = spanStack.takeLast();
+            } else if (name == QLatin1String("list") && !listStack.isEmpty()) {
+                listStack.removeLast();
+            } else if (name == QLatin1String("table-row")) {
+                ++rowIndex;
+            } else if (name == QLatin1String("table-header-rows")) {
+                headerRows = qMax(0, headerRows - 1);
+            } else if (name == QLatin1String("table")) {
+                tableDepth = qMax(0, tableDepth - 1);
             }
         } else if (r.isCharacters() && paragraphDepth > 0) {
-            out += r.text();
+            b.add(r.text().toString());
         }
     }
     if (r.hasError())
         return failure(QObject::tr("Errore nel leggere l'ODT: %1").arg(r.errorString()));
-    return success(out);
+    return successRich(b);
 }
-
 Result importPdf(const QString &path)
 {
     QPdfDocument pdf;
@@ -218,7 +484,16 @@ Result importHtml(const QString &path)
         return failure(error);
     QTextDocument doc;
     doc.setHtml(decodeText(data));
-    return success(doc.toPlainText());
+    // Formatting is read from the parsed document; the text must be exactly what toPlainText() gives.
+    QString plain;
+    const RichText::Formatting f = RichText::fromDocument(doc, &plain);
+    Result r = success(doc.toPlainText());
+    if (!plain.isEmpty() && r.text == plain.left(r.text.size())) {
+        RichText::Formatting cut = f;
+        RichText::clamp(cut, int(r.text.size()));
+        r.richContent = RichText::toJson(cut);
+    }
+    return r;
 }
 
 Result importRtf(const QString &path)
@@ -239,24 +514,45 @@ Result importRtf(const QString &path)
     struct State {
         bool skip = false;
         int uc = 1;
+        int style = 0;
     };
     QList<State> stack{State{}};
-    QString out;
+    RichText::Builder b;
+    bool inTable = false;
+    int rowIndex = 0;
     QByteArray pendingBytes; // \'hh sequences decoded together (multi-byte code pages)
     int skipChars = 0;
     QStringDecoder legacy(QStringDecoder::System);
 
     auto flushBytes = [&] {
         if (!pendingBytes.isEmpty()) {
-            if (!stack.last().skip)
-                out += legacy.decode(pendingBytes);
+            if (!stack.last().skip) {
+                b.style = stack.last().style;
+                b.add(legacy.decode(pendingBytes));
+            }
             pendingBytes.clear();
         }
     };
     auto emitText = [&](const QString &s) {
         flushBytes();
-        if (!stack.last().skip)
-            out += s;
+        if (!stack.last().skip) {
+            b.style = stack.last().style;
+            b.add(s);
+        }
+    };
+    // End of a paragraph or table row; rows are shaded lines, banded by row.
+    auto endParagraph = [&](bool row) {
+        flushBytes();
+        if (stack.last().skip)
+            return;
+        b.style = 0;
+        if (inTable || row) {
+            b.endParagraph(RichText::BlockKind::TableCell, rowIndex % 2);
+            if (row)
+                ++rowIndex;
+        } else {
+            b.endParagraph();
+        }
     };
 
     const qsizetype n = data.size();
@@ -321,9 +617,25 @@ Result importRtf(const QString &path)
                     flushBytes();
                     stack.last().skip = true;
                 } else if (word == "par" || word == "line" || word == "sect" || word == "page") {
-                    emitText(QStringLiteral("\n"));
+                    endParagraph(false);
                 } else if (word == "row") {
-                    emitText(QStringLiteral("\n"));
+                    endParagraph(true);
+                    inTable = false;
+                } else if (word == "intbl") {
+                    inTable = true;
+                } else if (word == "pard") {
+                    inTable = false;
+                } else if (word == "b" || word == "i" || word == "strike") {
+                    const int flag = word == "b" ? RichText::Bold : (word == "i" ? RichText::Italic : RichText::Strike);
+                    flushBytes();
+                    stack.last().style = param == 0 && hasParam ? (stack.last().style & ~flag) : (stack.last().style | flag);
+                } else if (word == "ul" || word == "ulnone" || word == "uld" || word == "uldb" || word == "ulw") {
+                    flushBytes();
+                    stack.last().style = (word == "ulnone" || (hasParam && param == 0))
+                        ? (stack.last().style & ~RichText::Underline) : (stack.last().style | RichText::Underline);
+                } else if (word == "plain") {
+                    flushBytes();
+                    stack.last().style = 0;
                 } else if (word == "cell") {
                     emitText(QStringLiteral("\t"));
                 } else if (word == "tab") {
@@ -366,7 +678,7 @@ Result importRtf(const QString &path)
         }
     }
     flushBytes();
-    return success(out);
+    return successRich(b);
 }
 
 } // namespace Importers

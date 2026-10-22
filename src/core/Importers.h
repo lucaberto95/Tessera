@@ -10,6 +10,8 @@ struct Result {
     bool ok = false;
     QString text;
     QString error;
+    // Formatting (JSON, see RichText.h) of `text`; empty when the file had none worth keeping.
+    QString richContent;
 };
 
 QStringList supportedSuffixes();

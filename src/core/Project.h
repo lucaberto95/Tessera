@@ -79,6 +79,9 @@ public:
     QList<Document> documentsInGroup(qint64 groupId) const;
     Document document(qint64 id) const;
     QString documentText(qint64 id) const;
+    // Formatting of a text document (JSON, see RichText.h); empty = plain. Ranges refer to documentText().
+    QString documentRichContent(qint64 id) const;
+    bool setDocumentRichContent(qint64 id, const QString &json);
     qint64 addDocument(qint64 groupId, const QString &name, const QString &text,
                        const QString &sourcePath = {}, const QString &uuid = {});
     // Document with no text (pdf, image, audio, video): its segments are areas or time ranges. The

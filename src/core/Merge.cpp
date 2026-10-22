@@ -216,6 +216,8 @@ qint64 Merger::createDocument(const Document &od, const QString &uuid, const QSt
     switch (od.kind) {
     case DocumentKind::Text:
         id = t.addDocument(group, name, text, od.sourcePath, uuid);
+        if (id && !s.documentRichContent(od.id).isEmpty())
+            t.setDocumentRichContent(id, s.documentRichContent(od.id));
         break;
     case DocumentKind::Image:
         id = t.addImageDocument(group, name, data, od.sourcePath, uuid);
