@@ -2,13 +2,17 @@
 #include "core/Project.h"
 #include "core/TextUtils.h"
 
+#include <QDate>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <QStringDecoder>
 
+#include <algorithm>
 #include <functional>
 
 namespace Exporters {
@@ -268,67 +272,337 @@ Table variablesTable(const Project &project)
     return rows;
 }
 
-bool importVariablesCsv(Project &project, const QString &path, QString *report, QString *error)
+namespace {
+
+// "1.234,5", "1,234.5", "12,5", "12.5"; a separator is a thousands one only when followed by
+// groups of exactly three digits, or when the other separator comes later.
+bool parseDecimal(QString s, double *out)
 {
-    const Table rows = readCsv(path, error);
-    if (rows.size() < 2) {
+    s.remove(QLatin1Char(' ')).remove(QChar(0x00A0));
+    static const QRegularExpression shape(QStringLiteral("^[+-]?\\d[\\d.,]*$"));
+    if (!shape.match(s).hasMatch())
+        return false;
+    const qsizetype dots = s.count(QLatin1Char('.'));
+    const qsizetype commas = s.count(QLatin1Char(','));
+    QChar decimalSep, groupSep; // null when absent
+    if (dots && commas) {
+        const bool dotLast = s.lastIndexOf(QLatin1Char('.')) > s.lastIndexOf(QLatin1Char(','));
+        decimalSep = QLatin1Char(dotLast ? '.' : ',');
+        groupSep = QLatin1Char(dotLast ? ',' : '.');
+    } else if (dots || commas) {
+        const QChar sep = QLatin1Char(dots ? '.' : ',');
+        if (std::max(dots, commas) == 1)
+            decimalSep = sep;
+        else
+            groupSep = sep;
+    }
+    QString integerPart = s;
+    QString fraction;
+    if (!decimalSep.isNull()) {
+        if (s.count(decimalSep) != 1)
+            return false;
+        const qsizetype pos = s.indexOf(decimalSep);
+        integerPart = s.left(pos);
+        fraction = s.mid(pos + 1);
+        static const QRegularExpression digitsOnly(QStringLiteral("^\\d+$"));
+        if (!digitsOnly.match(fraction).hasMatch())
+            return false;
+    }
+    if (!groupSep.isNull()) {
+        const QRegularExpression grouped(QStringLiteral("^[+-]?\\d{1,3}(\\%1\\d{3})+$").arg(groupSep));
+        if (!grouped.match(integerPart).hasMatch())
+            return false;
+        integerPart.remove(groupSep);
+    }
+    QString digits = integerPart;
+    if (!fraction.isEmpty())
+        digits += QLatin1Char('.') + fraction;
+    bool ok = false;
+    const double d = digits.toDouble(&ok);
+    if (ok)
+        *out = d;
+    return ok;
+}
+
+QDate parseDate(const QString &v, bool lenient)
+{
+    QDate d = QDate::fromString(v, Qt::ISODate);
+    QStringList formats{QStringLiteral("dd/MM/yyyy"), QStringLiteral("d/M/yyyy")};
+    if (lenient)
+        formats << QStringLiteral("dd.MM.yyyy") << QStringLiteral("dd-MM-yyyy") << QStringLiteral("d/M/yy");
+    for (const QString &fmt : std::as_const(formats)) {
+        if (d.isValid())
+            break;
+        d = QDate::fromString(v, fmt);
+    }
+    return d;
+}
+
+// Boolean words recognised when guessing a column's type ("x" is accepted when typing, not guessed).
+bool booleanWord(const QString &lower, bool *value)
+{
+    static const QStringList yes{QStringLiteral("1"), QStringLiteral("sì"), QStringLiteral("si"),
+                                 QStringLiteral("yes"), QStringLiteral("true"), QStringLiteral("vero")};
+    static const QStringList no{QStringLiteral("0"), QStringLiteral("no"), QStringLiteral("false"),
+                                QStringLiteral("falso")};
+    if (yes.contains(lower)) {
+        *value = true;
+        return true;
+    }
+    if (no.contains(lower)) {
+        *value = false;
+        return true;
+    }
+    return false;
+}
+
+bool isSkippedColumn(const QString &name)
+{
+    const QString lower = name.toLower();
+    return name.isEmpty() || lower == QLatin1String("gruppo") || lower == QLatin1String("group");
+}
+
+struct CsvLayout {
+    Table rows;
+    int docColumn = 0;
+};
+
+bool loadCsvLayout(const QString &path, CsvLayout *layout, QString *error)
+{
+    layout->rows = readCsv(path, error);
+    if (layout->rows.size() < 2) {
         if (error->isEmpty())
             *error = QObject::tr("Il file non contiene righe di dati");
         return false;
     }
-    const QStringList header = rows.first();
-    int docColumn = 0;
+    const QStringList &header = layout->rows.first();
     for (int i = 0; i < header.size(); ++i) {
         const QString h = header[i].trimmed().toLower();
         if (h == QLatin1String("documento") || h == QLatin1String("document") || h == QLatin1String("nome documento")) {
-            docColumn = i;
+            layout->docColumn = i;
             break;
         }
     }
+    return true;
+}
+
+QStringList columnValues(const Table &rows, int column)
+{
+    QStringList values;
+    for (qsizetype r = 1; r < rows.size(); ++r) {
+        if (column < rows[r].size() && !rows[r][column].trimmed().isEmpty())
+            values << rows[r][column].trimmed();
+    }
+    return values;
+}
+
+} // namespace
+
+bool normalizeVariableValue(VariableType type, const QString &input, QString *out)
+{
+    const QString v = input.trimmed();
+    out->clear();
+    if (v.isEmpty())
+        return true;
+    switch (type) {
+    case VariableType::Text:
+        *out = v;
+        return true;
+    case VariableType::Integer: {
+        static const QRegularExpression integer(QStringLiteral("^[+-]?\\d+$"));
+        bool ok = false;
+        const qlonglong n = integer.match(v).hasMatch() ? v.toLongLong(&ok) : 0;
+        if (ok)
+            *out = QString::number(n);
+        return ok;
+    }
+    case VariableType::Decimal: {
+        double d = 0;
+        if (!parseDecimal(v, &d))
+            return false;
+        *out = QString::number(d, 'g', 15);
+        return true;
+    }
+    case VariableType::Boolean: {
+        const QString l = v.toLower();
+        bool b = false;
+        if (booleanWord(l, &b) || l == QLatin1String("x")) {
+            *out = (b || l == QLatin1String("x")) ? QStringLiteral("1") : QStringLiteral("0");
+            return true;
+        }
+        return false;
+    }
+    case VariableType::Date: {
+        const QDate d = parseDate(v, true);
+        if (!d.isValid())
+            return false;
+        *out = d.toString(Qt::ISODate);
+        return true;
+    }
+    }
+    return false;
+}
+
+VariableType inferVariableType(const QStringList &values)
+{
+    QStringList filled;
+    for (const QString &s : values) {
+        if (!s.trimmed().isEmpty())
+            filled << s.trimmed();
+    }
+    if (filled.isEmpty())
+        return VariableType::Text;
+
+    const auto all = [&filled](const auto &pred) {
+        return std::all_of(filled.cbegin(), filled.cend(), pred);
+    };
+
+    // Boolean: at most two distinct values; a bare 0/1 column needs both to not be taken for integers.
+    QSet<QString> distinct;
+    bool booleanOk = true;
+    bool onlyDigits = true;
+    for (const QString &s : std::as_const(filled)) {
+        const QString l = s.toLower();
+        bool b = false;
+        if (!booleanWord(l, &b)) {
+            booleanOk = false;
+            break;
+        }
+        distinct.insert(l);
+        onlyDigits = onlyDigits && (l == QLatin1String("0") || l == QLatin1String("1"));
+    }
+    if (booleanOk && distinct.size() <= 2 && (!onlyDigits || distinct.size() == 2))
+        return VariableType::Boolean;
+
+    QString tmp;
+    if (all([&tmp](const QString &s) { return normalizeVariableValue(VariableType::Integer, s, &tmp); }))
+        return VariableType::Integer;
+    if (all([&tmp](const QString &s) { return normalizeVariableValue(VariableType::Decimal, s, &tmp); }))
+        return VariableType::Decimal;
+    if (all([](const QString &s) { return parseDate(s, false).isValid(); }))
+        return VariableType::Date;
+    return VariableType::Text;
+}
+
+bool previewVariablesCsv(const Project &project, const QString &path, CsvVariablesPreview *preview, QString *error)
+{
+    CsvLayout layout;
+    if (!loadCsvLayout(path, &layout, error))
+        return false;
+    const Table &rows = layout.rows;
+    const QStringList &header = rows.first();
+
+    QHash<QString, Variable> varsByName;
+    for (const Variable &v : project.variables())
+        varsByName.insert(v.name, v);
+
+    *preview = {};
+    for (int i = 0; i < header.size(); ++i) {
+        const QString name = header[i].trimmed();
+        if (i == layout.docColumn || isSkippedColumn(name))
+            continue;
+        CsvVariableColumn col;
+        col.name = name;
+        const QStringList values = columnValues(rows, i);
+        const auto existing = varsByName.constFind(name);
+        if (existing != varsByName.cend()) {
+            col.existing = true;
+            col.type = existing->type;
+            QString tmp;
+            for (const QString &s : values) {
+                if (!normalizeVariableValue(col.type, s, &tmp))
+                    ++col.invalidCount;
+            }
+        } else {
+            col.type = inferVariableType(values);
+        }
+        col.samples = values.mid(0, 3);
+        preview->columns << col;
+    }
+
+    QSet<QString> docNames;
+    for (const Document &d : project.documents())
+        docNames.insert(d.name);
+    for (qsizetype r = 1; r < rows.size(); ++r) {
+        const QStringList &row = rows[r];
+        if (row.size() <= layout.docColumn || row[layout.docColumn].trimmed().isEmpty())
+            continue;
+        const QString name = row[layout.docColumn].trimmed();
+        if (docNames.contains(name))
+            ++preview->matchedRows;
+        else
+            preview->unmatchedDocuments << name;
+    }
+    preview->sampleRows = rows.mid(0, 6);
+    return true;
+}
+
+bool importVariablesCsv(Project &project, const QString &path, QString *report, QString *error,
+                        const QHash<QString, VariableType> &types)
+{
+    CsvLayout layout;
+    if (!loadCsvLayout(path, &layout, error))
+        return false;
+    const Table &rows = layout.rows;
+    const QStringList &header = rows.first();
+
     QHash<QString, qint64> docsByName;
     for (const Document &d : project.documents()) {
         if (!docsByName.contains(d.name))
             docsByName.insert(d.name, d.id);
     }
-    QHash<QString, qint64> varsByName;
+    QHash<QString, Variable> varsByName;
     for (const Variable &v : project.variables())
-        varsByName.insert(v.name, v.id);
+        varsByName.insert(v.name, v);
 
     project.setUndoLabel(QObject::tr("Importa variabili"));
     project.beginBatch();
-    QHash<int, qint64> columnVar;
+    QHash<int, Variable> columnVar;
     for (int i = 0; i < header.size(); ++i) {
         const QString name = header[i].trimmed();
-        const QString lower = name.toLower();
-        if (i == docColumn || name.isEmpty() || lower == QLatin1String("gruppo") || lower == QLatin1String("group"))
+        if (i == layout.docColumn || isSkippedColumn(name))
             continue;
-        qint64 id = varsByName.value(name);
-        if (!id)
-            id = project.addVariable(name, VariableType::Text);
-        if (id)
-            columnVar.insert(i, id);
+        Variable var = varsByName.value(name);
+        if (!var.id) {
+            var.name = name;
+            var.type = types.contains(name) ? types.value(name) : inferVariableType(columnValues(rows, i));
+            var.id = project.addVariable(name, var.type);
+        }
+        if (var.id)
+            columnVar.insert(i, var);
     }
     int matched = 0;
     QStringList missing;
+    QStringList invalid;
     for (qsizetype r = 1; r < rows.size(); ++r) {
         const QStringList &row = rows[r];
-        if (row.size() <= docColumn || row[docColumn].trimmed().isEmpty())
+        if (row.size() <= layout.docColumn || row[layout.docColumn].trimmed().isEmpty())
             continue;
-        const qint64 docId = docsByName.value(row[docColumn].trimmed());
+        const QString docName = row[layout.docColumn].trimmed();
+        const qint64 docId = docsByName.value(docName);
         if (!docId) {
-            missing << row[docColumn].trimmed();
+            missing << docName;
             continue;
         }
         ++matched;
         for (auto it = columnVar.cbegin(); it != columnVar.cend(); ++it) {
-            if (it.key() < row.size())
-                project.setVariableValue(docId, it.value(), row[it.key()].trimmed());
+            if (it.key() >= row.size())
+                continue;
+            QString value;
+            if (!normalizeVariableValue(it->type, row[it.key()], &value)) {
+                invalid << QObject::tr("%1 / %2: \"%3\"").arg(docName, it->name, row[it.key()].trimmed());
+                continue;
+            }
+            project.setVariableValue(docId, it->id, value);
         }
     }
     project.commitBatch();
     *report = QObject::tr("%1 documenti aggiornati, %2 variabili.").arg(matched).arg(columnVar.size());
     if (!missing.isEmpty())
         *report += QLatin1Char('\n') + QObject::tr("Documenti non trovati: %1").arg(missing.join(QStringLiteral(", ")));
+    if (!invalid.isEmpty())
+        *report += QLatin1Char('\n') + QObject::tr("Valori non compatibili con il tipo (ignorati): %1")
+                                           .arg(invalid.join(QStringLiteral("; ")));
     return true;
 }
 
