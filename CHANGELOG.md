@@ -2,6 +2,15 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.23.0] - 2026-10-22 — Documenti con formattazione (#32)
+Commit `86ffd70`
+
+- DOCX, ODT, RTF e HTML conservano la formattazione principale: titoli (stili "Titolo/Heading", `text:h`, `<h1>`..), grassetto, corsivo, sottolineato, barrato, elenchi puntati e numerati e tabelle (righe a bande, intestazione evidenziata). `DocumentView` la mostra sopra il testo semplice.
+- Vincolo rispettato: il testo semplice resta la base delle posizioni; la formattazione sta in `documents.rich_content` (schema v10, migrazione con backup) come intervalli, senza inserire caratteri nel testo, quindi segmenti, collegamenti e recupero sono identici alla versione solo testo. Le tabelle restano righe del testo (non `QTextTable`).
+- La modifica del testo funziona anche sui documenti formattati: gli intervalli seguono la modifica; annulla ripristina testo e formattazione insieme. L'unione di progetti copia la formattazione.
+- Corretto: i tab stop dei paragrafi DOCX (`w:tabs/w:tab`) non producono più una tabulazione nel testo.
+- Non incluso: immagini incorporate, formattazione per MD/PDF, formattazione nell'export QDPX, editor rich text.
+
 ## [0.22.0] - 2026-10-22 — Accordo tra codificatori (#23)
 Commit `0132262`
 
