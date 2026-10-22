@@ -2,6 +2,18 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.14.0] - 2026-10-22 — Dizionari e codifica automatica con dizionario (#19)
+Commit `5407a87`
+
+- Nuova finestra «Dizionari e analisi del contenuto…» (menu Analisi). Un dizionario ha categorie e sottocategorie, ognuna con parole o espressioni di più parole; `*` fa da jolly dentro la parola (`lavor*` trova «lavoro», «lavoratori», «lavorare»).
+- Il confronto è per parole e non distingue maiuscole e minuscole (salvo l'opzione): le espressioni ignorano punteggiatura e a capo tra le parole, e a ogni punto del testo vince la voce più lunga, senza contare due volte la stessa parola. Una categoria conta anche le voci delle sue sottocategorie.
+- Le voci si aggiungono a mano (anche più voci separate da virgole), si importano da Excel/CSV (colonne Categoria e Voce, con le sottocategorie scritte come «Tema > Sottotema») o da un elenco di parole in un file di testo, e il dizionario si esporta in Excel o CSV.
+- Scheda «Analisi»: tabella documenti × categorie con il numero di parole, i conteggi o la percentuale sulle parole del documento, il totale e, a scelta, le variabili dei documenti; tutti i documenti o solo quelli attivi; esportazione in Excel, CSV o HTML; doppio clic su una riga per aprire il documento.
+- «Codifica automatica…»: per ogni categoria si sceglie un codice esistente o se ne crea uno con il suo nome (sotto un codice col nome del dizionario, con la stessa struttura delle categorie) e si codifica la parola, la frase o il paragrafo; tutta la codifica è un solo passo di annulla.
+- «Salva come variabili»: i conteggi delle categorie selezionate (o di tutte) diventano variabili intere dei documenti.
+- Nuove tabelle `dictionaries`, `dict_categories` e `dict_entries` (migrazione dello schema alla versione 5, con copia di sicurezza del file all'apertura). Il progetto di esempio contiene un piccolo dizionario.
+- Non incluso: aggiungere parole dalla tabella delle frequenze (dipende dalla issue #18, ancora aperta) e le regole di disambiguazione; i dizionari non fanno parte dell'export QDPX.
+
 ## [0.13.0] - 2026-10-22 — Export Excel nativo (.xlsx) (#44)
 Commit `7575a73`
 
