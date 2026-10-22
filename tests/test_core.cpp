@@ -4,6 +4,7 @@
 #include "core/Project.h"
 #include "core/Qdpx.h"
 #include "core/Retrieval.h"
+#include "core/Stats.h"
 #include "core/TextUtils.h"
 #include "core/VariableFilter.h"
 
@@ -801,6 +802,125 @@ private slots:
         const auto dist = [&a](int i, int j) { return QLineF(a[i], a[j]).length(); };
         QVERIFY(dist(0, 1) < dist(0, 2));
         QVERIFY(dist(0, 1) < dist(1, 2));
+    }
+
+    void statsDescribe()
+    {
+        using VT = VariableType;
+        // Empty and invalid values are counted apart and left out of the figures.
+        const auto n = Stats::describe(VT::Integer, {"10", "20", "", "abc", "40", "20"});
+        QCOMPARE(n.total, 6);
+        QCOMPARE(n.valid, 4);
+        QCOMPARE(n.empty, 1);
+        QCOMPARE(n.invalid, 1);
+        QVERIFY(n.numeric);
+        QCOMPARE(n.mean, 22.5);
+        QCOMPARE(n.median, 20.0);
+        QCOMPARE(n.min, 10.0);
+        QCOMPARE(n.max, 40.0);
+        QVERIFY(qAbs(n.stdDev - 12.5831) < 1e-3); // sample standard deviation
+        QCOMPARE(n.frequencies.first().value, QString("20"));
+        QCOMPARE(n.frequencies.first().count, 2);
+        QCOMPARE(n.frequencies.first().percent, 50.0);
+
+        QCOMPARE(Stats::describe(VT::Integer, {"1", "2", "3", "4"}).median, 2.5);
+        QCOMPARE(Stats::describe(VT::Integer, {"7"}).stdDev, 0.0);
+        QCOMPARE(Stats::describe(VT::Integer, {"", "x"}).valid, 0);
+
+        const auto t = Stats::describe(VT::Text, {"F", "M", "F", "", "F"});
+        QVERIFY(!t.numeric);
+        QCOMPARE(t.valid, 4);
+        QCOMPARE(t.frequencies.size(), 2);
+        QCOMPARE(t.frequencies[0].value, QString("F"));
+        QCOMPARE(t.frequencies[0].percent, 75.0);
+
+        const auto b = Stats::describe(VT::Boolean, {"1", "0", "1"});
+        QCOMPARE(b.frequencies.first().value, QString("1"));
+        QCOMPARE(b.frequencies.first().count, 2);
+    }
+
+    void statsCrosstab()
+    {
+        QTemporaryDir dir;
+        Project p;
+        QVERIFY(p.create(dir.filePath("stats.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "D1", QString(50, 'x'));
+        const qint64 d2 = p.addDocument(g, "D2", QString(50, 'x'));
+        const qint64 d3 = p.addDocument(g, "D3", QString(50, 'x'));
+        const qint64 d4 = p.addDocument(g, "D4", QString(50, 'x'));
+        const qint64 sex = p.addVariable("Sesso", VariableType::Text);
+        const qint64 age = p.addVariable("Eta", VariableType::Integer);
+        p.setVariableValue(d1, sex, "F");
+        p.setVariableValue(d2, sex, "M");
+        p.setVariableValue(d3, sex, "F");
+        // d4 has no value
+        p.setVariableValue(d1, age, "20");
+        p.setVariableValue(d2, age, "40");
+        p.setVariableValue(d3, age, "60");
+        p.setVariableValue(d4, age, "oops");
+
+        const qint64 stress = p.addCode(0, "Stress", Qt::red);
+        const qint64 other = p.addCode(0, "Altro", Qt::blue);
+        p.addSegment(d1, stress, 0, 5);
+        p.addSegment(d1, stress, 10, 15);
+        p.addSegment(d2, stress, 0, 5);
+        p.addSegment(d3, other, 0, 5);
+        p.addSegment(d4, stress, 0, 5);
+
+        auto groups = Stats::groupsByVariable(p, sex);
+        QCOMPARE(groups.size(), 3); // F, M, (vuoto)
+        QCOMPARE(groups[0].label, QString("F"));
+        QCOMPARE(groups[0].documents, (QList<qint64>{d1, d3}));
+        QCOMPARE(groups[1].documents, (QList<qint64>{d2}));
+        QCOMPARE(groups[2].documents, (QList<qint64>{d4}));
+
+        const QList<qint64> codes{stress, other};
+        const auto segs = p.allSegments();
+        auto t = Stats::crosstab(codes, groups, segs, Stats::Measure::Segments);
+        QCOMPARE(t.count(0, 0), 2); // Stress in F: two segments in d1
+        QCOMPARE(t.count(0, 1), 1);
+        QCOMPARE(t.count(0, 2), 1);
+        QCOMPARE(t.count(1, 0), 1);
+        QCOMPARE(t.totalDocuments, (QList<int>{2, 1, 1}));
+        QCOMPARE(t.rowTotal(0), 4);
+        QCOMPARE(t.percent(0, 0, Stats::Percent::OfColumn), 100.0 * 2 / 3); // column total = 3 segments
+        QCOMPARE(t.percent(0, 0, Stats::Percent::OfRow), 50.0);
+
+        t = Stats::crosstab(codes, groups, segs, Stats::Measure::Documents);
+        QCOMPARE(t.count(0, 0), 1); // only d1 has Stress among F's documents
+        QCOMPARE(t.percent(0, 0, Stats::Percent::OfColumn), 50.0); // 1 of 2 documents
+        QCOMPARE(t.count(1, 0), 1);
+
+        // Numeric classes: 20, 40, 60 in two classes of width 20 ([20,40) and [40,60]); invalid has its own group.
+        groups = Stats::groupsByVariable(p, age, {}, 2);
+        QCOMPARE(groups.size(), 3);
+        QCOMPARE(groups[0].documents, (QList<qint64>{d1})); // [20, 40)
+        QCOMPARE(groups[1].documents, (QList<qint64>{d2, d3})); // [40, 60]: the maximum is in the last class
+        QCOMPARE(groups[2].label, QString("(non valido)"));
+        QCOMPARE(groups[2].documents, (QList<qint64>{d4}));
+
+        // Restricted to some documents, and the group-based columns.
+        QCOMPARE(Stats::groupsByVariable(p, sex, {d1, d2}).size(), 2);
+        QCOMPARE(Stats::describe(p, age, {d1, d2}).mean, 30.0);
+        QCOMPARE(Stats::groupsByDocumentGroups(p).first().documents.size(), 4);
+        const qint64 set = p.addDocumentSet("S", {d1, d2});
+        Q_UNUSED(set);
+        QCOMPARE(Stats::groupsByDocumentSets(p).first().documents, (QList<qint64>{d1, d2}));
+
+        // Codes become integer variables, in one undo step; a repeated name gets a suffix.
+        const int before = int(p.variables().size());
+        const auto ids = Stats::codesToVariables(p, {stress}, Stats::Measure::Segments);
+        QCOMPARE(ids.size(), 1);
+        QCOMPARE(p.variables().size(), before + 1);
+        QCOMPARE(p.variableValue(d1, ids[0]), QString("2"));
+        QCOMPARE(p.variableValue(d3, ids[0]), QString("0"));
+        const auto again = Stats::codesToVariables(p, {stress, other}, Stats::Measure::Documents);
+        QCOMPARE(again.size(), 2);
+        QCOMPARE(p.variableValue(d1, again[0]), QString("1"));
+        QVERIFY(p.variables().last().name != p.variables().at(p.variables().size() - 2).name);
+        QVERIFY(p.undo());
+        QCOMPARE(p.variables().size(), before + 1);
     }
 
     void variableTypeInference()

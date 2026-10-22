@@ -21,6 +21,7 @@ qt_add_library(tessera_core STATIC
     src/core/TextUtils.h src/core/TextUtils.cpp
     src/core/Retrieval.h src/core/Retrieval.cpp
     src/core/Cooccurrence.h src/core/Cooccurrence.cpp
+    src/core/Stats.h src/core/Stats.cpp
     src/core/VariableFilter.h src/core/VariableFilter.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
 )
@@ -47,6 +48,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/MatrixDialog.h src/ui/MatrixDialog.cpp
     src/ui/RetrievalDialog.h src/ui/RetrievalDialog.cpp
     src/ui/CooccurrenceDialog.h src/ui/CooccurrenceDialog.cpp
+    src/ui/StatsDialog.h src/ui/StatsDialog.cpp
     src/ui/VariableFilterDialog.h src/ui/VariableFilterDialog.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
 )

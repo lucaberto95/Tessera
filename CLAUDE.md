@@ -64,6 +64,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata 
   Importers      TXT/MD, DOCX, ODT (QZipReader privato + XML), RTF (parser proprio), PDF (QtPdf), HTML
   Retrieval      recupero complesso dei segmenti (intersezione, sovrapposizione, vicinanza...) su segmenti in memoria
   Cooccurrence   matrice codici × codici (sovrapposizione / vicinanza / stesso documento), Jaccard e layout force-directed
+  Stats          statistiche descrittive delle variabili, gruppi di documenti, tabelle incrociate codici × gruppi, codici -> variabili
   VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
   Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
@@ -77,6 +78,7 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
                  `setRetrieval(Query)` per il recupero complesso, `setPassages(...)` per passaggi già calcolati
   CooccurrenceDialog  matrice + mappa (QGraphicsScene, export PNG e SVG con Qt6::Svg); il doppio clic su una cella
                  emette `passagesRequested` verso il SegmentsPanel
+  StatsDialog    schede Variabili (frequenze, media, mediana...) e Tabella incrociata (colonne = variabile, gruppi o set)
   MemoDialog, MemoManager, VariablesDialog, SearchDialog, MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
@@ -182,6 +184,8 @@ variabili…", logica in `src/core/VariableFilter.*`; un valore vuoto o non vali
 **#13** co-occorrenze dei codici (menu Analisi ▸ "Co-occorrenze dei codici…", logica in
 `src/core/Cooccurrence.*`; diagonale = frequenze; il Jaccard è `min(coinvolti) / (fa + fb - min)`, esatto per
 "stesso documento").
+**#21** (parziale, issue ancora aperta) statistiche e tabelle incrociate (menu Analisi ▸ "Statistiche e tabelle incrociate…",
+logica in `src/core/Stats.*`); mancano grafici, chi-quadrato con p-value e classi per date.
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.

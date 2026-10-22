@@ -4,6 +4,7 @@
 #include "core/Project.h"
 #include "ui/CodeTree.h"
 #include "ui/CooccurrenceDialog.h"
+#include "ui/StatsDialog.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
 #include "ui/MainWindow.h"
@@ -367,6 +368,42 @@ private slots:
         panel.clearRetrieval();
         QVERIFY(!panel.hasRetrieval());
         QCOMPARE(panel.segments().size(), 2);
+    }
+
+    void statsDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("stats.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "D1", QString(40, 'x'));
+        const qint64 d2 = p.addDocument(g, "D2", QString(40, 'x'));
+        const qint64 sex = p.addVariable("Sesso", VariableType::Text);
+        p.setVariableValue(d1, sex, "F");
+        p.setVariableValue(d2, sex, "M");
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        p.addSegment(d1, a, 0, 10);
+        p.addSegment(d1, a, 20, 30);
+        p.addSegment(d2, a, 0, 10);
+
+        StatsDialog dlg(&p, {}, {});
+        dlg.show();
+        dlg.selectVariable(sex);
+        QCOMPARE(dlg.variableStats().valid, 2);
+        QCOMPARE(dlg.variableStats().frequencies.size(), 2);
+
+        dlg.setColumns(StatsDialog::Columns::Variable, sex);
+        QCOMPARE(dlg.crosstab().columns.size(), 2);
+        QCOMPARE(dlg.crosstab().count(0, 0), 2);
+        QCOMPARE(dlg.crosstab().count(0, 1), 1);
+        dlg.setMeasure(Stats::Measure::Documents);
+        QCOMPARE(dlg.crosstab().count(0, 0), 1);
+        dlg.setPercent(Stats::Percent::OfColumn);
+        shot(&dlg, "stats");
+        auto *table = dlg.findChild<QTableWidget *>("crosstabTable");
+        QVERIFY(table);
+        QCOMPARE(table->item(0, 1)->text(), QString("100.0 %"));
+        QCOMPARE(table->item(1, 0)->text(), QString("Totale documenti"));
+        QCOMPARE(table->item(1, 1)->text(), QString("1"));
     }
 
     void cooccurrenceDialog()
