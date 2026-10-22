@@ -242,6 +242,8 @@ void CodeTree::contextMenuEvent(QContextMenuEvent *event)
 
     QMenu menu(this);
     menu.addAction(tr("Nuovo codice…"), this, [this] { newCode(0); });
+    if (!id)
+        menu.addAction(tr("Raggruppa i codici di primo livello con l'AI…"), this, [this] { emit aiGroupRequested(0); });
     if (id) {
         menu.addAction(tr("Nuovo sottocodice…"), this, [this, id] { newCode(id); });
         menu.addSeparator();
@@ -249,7 +251,11 @@ void CodeTree::contextMenuEvent(QContextMenuEvent *event)
         menu.addAction(tr("Colore…"), this, [this, id] { changeColor(id); });
         menu.addAction(tr("Descrizione…"), this, [this, id] { editDescription(id); });
         menu.addAction(Ui::memoIcon(), tr("Memo…"), this, [this, id] { editMemo(id); });
-        menu.addAction(tr("Riassumi i segmenti con l'AI…"), this, [this, id] { emit aiSummaryRequested(id); });
+        QMenu *ai = menu.addMenu(tr("AI"));
+        ai->addAction(tr("Riassumi i segmenti…"), this, [this, id] { emit aiSummaryRequested(id); });
+        ai->addAction(tr("Suggerisci sottocodici…"), this, [this, id] { emit aiSubcodesRequested(id); });
+        QAction *group = ai->addAction(tr("Raggruppa i sottocodici…"), this, [this, id] { emit aiGroupRequested(id); });
+        group->setEnabled(!m_project->codeDescendants(id).isEmpty());
         menu.addSeparator();
         menu.addAction(tr("Attiva solo questo codice"), this, [this, id] {
             m_active = {id};

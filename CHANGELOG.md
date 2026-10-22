@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.28.0] - 2026-10-23 — Codici, sottocodici e raggruppamento con l'AI (#41)
+
+- Menu «AI» e menu contestuali (documento, selezione, codice, albero dei codici): «Suggerisci codici» per il documento aperto o la selezione, «Suggerisci sottocodici» per un codice (guarda i suoi segmenti), «Raggruppa i codici» (primo livello o sottocodici di un codice).
+- Pannello `AiCodesDialog`: mostra destinatario e cosa verrà inviato, invia solo su «Genera» (annullabile). Il risultato è una proposta: casella di spunta, nome e descrizione modificabili, per sottocodici e categorie l'elenco di cosa verrebbe spostato (ogni elemento escludibile). «Applica» crea i codici spuntati e sposta segmenti o codici in **un solo passo di annulla**; la descrizione dei nuovi codici riceve «Proposto da AI (modello X)» (disattivabile).
+- `src/core/ai/AiCodes`: output strutturato (JSON Schema, `strict`), segmenti e codici numerati 1, 2, 3… nel prompt e rimappati agli id del database, numeri inventati dal modello scartati e contati, nomi già esistenti o vuoti scartati, un elemento in una sola proposta; limite di elementi e di token per richiesta con unione dei risultati per nome. Prompt in `resources/ai/`. `src/ui/AiUi`: conferma cloud e client condivisi con `AiAssistDialog`.
+- Test con il server HTTP finto. Non incluso: scelta dell'AI su quali segmenti restano al codice padre (restano dove sono), colori scelti dal modello.
 ## [0.27.0] - 2026-10-22 — Riassunti, spiegazioni e traduzioni con l'AI (#40)
 Commit `6a0680a`
 

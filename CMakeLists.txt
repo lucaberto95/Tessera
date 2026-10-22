@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Tessera VERSION 0.27.0 LANGUAGES CXX)
+project(Tessera VERSION 0.28.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,7 @@ qt_add_library(tessera_core STATIC
     src/core/ai/AiConfig.h src/core/ai/AiConfig.cpp
     src/core/ai/AiClient.h src/core/ai/AiClient.cpp
     src/core/ai/AiAssist.h src/core/ai/AiAssist.cpp
+    src/core/ai/AiCodes.h src/core/ai/AiCodes.cpp
 )
 # Prompts of the AI functions (issue #40), embedded so tests and the app find them anywhere.
 qt_add_resources(tessera_core ai_prompts PREFIX "/ai" BASE "${CMAKE_SOURCE_DIR}/resources/ai" FILES
@@ -46,6 +47,9 @@ qt_add_resources(tessera_core ai_prompts PREFIX "/ai" BASE "${CMAKE_SOURCE_DIR}/
     resources/ai/explain.txt
     resources/ai/translate.txt
     resources/ai/combine.txt
+    resources/ai/suggest_codes.txt
+    resources/ai/suggest_subcodes.txt
+    resources/ai/group_codes.txt
 )
 target_include_directories(tessera_core PUBLIC src)
 target_compile_definitions(tessera_core PUBLIC TESSERA_VERSION_STRING="${PROJECT_VERSION}")
@@ -88,6 +92,8 @@ qt_add_library(tessera_ui STATIC
     src/ui/WordFrequencyDialog.h src/ui/WordFrequencyDialog.cpp
     src/ui/AiSettingsDialog.h src/ui/AiSettingsDialog.cpp
     src/ui/AiAssistDialog.h src/ui/AiAssistDialog.cpp
+    src/ui/AiCodesDialog.h src/ui/AiCodesDialog.cpp
+    src/ui/AiUi.h src/ui/AiUi.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent)

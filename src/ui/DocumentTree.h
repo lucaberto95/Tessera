@@ -33,6 +33,7 @@ signals:
     void activationChanged();
     void importRequested(qint64 groupId);
     void newTextDocumentRequested(qint64 groupId);
+    void aiSuggestCodesRequested(qint64 documentId); // "Suggerisci codici con l'AI" (issue #41)
     void aiSummaryRequested(qint64 documentId); // "Riassumi con l'AI…" (issue #40)
 
 protected:

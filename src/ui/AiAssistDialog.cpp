@@ -1,5 +1,6 @@
 #include "AiAssistDialog.h"
 
+#include "AiUi.h"
 #include "UiUtils.h"
 #include "core/Project.h"
 
@@ -147,12 +148,7 @@ QString AiAssistDialog::inputDescription() const
 
 QString AiAssistDialog::recipientText() const
 {
-    const Ai::Config c = Ai::Settings::load();
-    if (c.provider == Ai::Provider::None)
-        return tr("Nessun provider AI configurato: apri Impostazioni > AI.");
-    if (Ai::isCloud(c.provider))
-        return tr("Destinatario: %1, modello %2. Il testo esce dal tuo computer.").arg(Ai::providerName(c.provider), c.model);
-    return tr("Destinatario: %1, modello %2 (il testo non lascia il computer).").arg(Ai::providerName(c.provider), c.model);
+    return Ui::aiRecipientText();
 }
 
 void AiAssistDialog::updateRecipient()
@@ -205,26 +201,13 @@ void AiAssistDialog::generate()
     if (m_run)
         return;
     updateRecipient();
-    const Ai::Config config = Ai::Settings::load();
-    if (config.provider == Ai::Provider::None) {
-        setStatus(tr("Nessun provider AI configurato: apri Impostazioni > AI."), true);
-        return;
-    }
-    if (Ai::isCloud(config.provider) && !Ai::Settings::cloudConfirmed(config.provider)) {
-        if (!m_confirm(Ai::Settings::cloudNotice(config.provider))) {
-            setStatus(tr("Operazione annullata: l'invio dei dati al provider cloud non è stato confermato."), true);
-            return;
-        }
-        Ai::Settings::setCloudConfirmed(config.provider, true);
-    }
     QString error;
     delete m_client;
-    m_client = Ai::makeClient(config, this, &error);
+    m_client = Ui::makeConfirmedAiClient(this, m_confirm, &m_usedConfig, &error);
     if (!m_client) {
         setStatus(error, true);
         return;
     }
-    m_usedConfig = config;
     m_run = new Run(m_client, m_task, options(), m_sources, this);
     m_run->setMaxChunkTokens(m_maxChunkTokens);
     connect(m_run, &Run::progress, this, [this](int done, int total) {

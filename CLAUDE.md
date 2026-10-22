@@ -83,6 +83,7 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core)
                  italiano; output strutturato; `makeClient`, `splitIntoChunks`, `describeInput`
   ai/AiAssist    (`Ai::Assist::`, #40) `Task` (riassunto documento, riassunto segmenti, spiega, traduci), `Options`, `Source` (citazione + testo),
                  prompt in `resources/ai/*.txt` (qrc `:/ai/`), `planChunks`, `Run` (map-reduce sequenziale)
+  ai/AiCodes     (`Ai::Codes::`, #41) `Task` (codici, sottocodici, raggruppa), `Material` (testo o elementi numerati), `Proposal`, `planChunks`, `mergeAnswer` (valida gli id), `Run`, `apply` (un batch = un passo di undo)
 src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWindow)
   MainWindow (menu, azioni, collega i segnali del Project ai pannelli), DocumentTree / CodeTree (caselle di
   attivazione), DocumentView + CodingStripe (+ ImageView per le immagini, PdfView per i PDF), LinksDialog, SegmentsPanel (`setRetrieval`, `setPassages`),
@@ -90,7 +91,7 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   codici/documenti), SurveyImportDialog, DictionaryDialog (non modale), MemoManager, VariablesDialog,
   WordFrequencyDialog (3 schede: frequenze, nuvola, parole in contesto; calcolo con `QtConcurrent` + barra di
   avanzamento, `Qt6::Concurrent`; il progetto non è thread-safe: i testi si leggono prima, nel thread della UI),
-  ReportDialog (Crea report, menu Progetto), AiSettingsDialog (Impostazioni > AI), AiAssistDialog (pannello del risultato delle funzioni AI), SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
+  ReportDialog (Crea report, menu Progetto), AiSettingsDialog (Impostazioni > AI), AiAssistDialog (pannello del risultato delle funzioni AI), AiCodesDialog (proposte di codici, #41), AiUi (destinatario e client confermato, condivisi), SearchDialog (`searchFor`), MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
 
@@ -239,6 +240,7 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   di output sempre esplicita e dicono al modello che il testo è dato, non istruzioni. Testi lunghi: Run taglia con planChunks (la citazione [Intervista 3] resta
   con il suo testo), riassume ogni blocco e poi fonde i parziali (combine.txt); traduzioni e spiegazioni si concatenano. Il registro i_log riceve ogni esecuzione.
   Le risorse .txt sono in 	essera_core via qt_add_resources (libreria statica: funziona anche nei test). Non fatti: parafrasi, semplificazione, riferimenti cliccabili.
+  **Codici con l'AI** (#41): `AiCodesDialog` mostra una *proposta* (tabella con spunta, nome e descrizione modificabili + elenco degli elementi spostati, escludibili); invia solo su «Genera»; `Applica` chiama `Ai::Codes::apply` (un batch, una voce di undo) e svuota la proposta. Nel prompt segmenti/codici hanno numeri locali 1..n per richiesta (`Chunk::ids` li rimappa): `mergeAnswer` scarta i numeri non presenti (contati in `invalidIds`), i nomi vuoti o già esistenti e un elemento già assegnato; proposte con lo stesso nome (senza maiuscole) di richieste diverse si fondono. Sottocodici: solo i segmenti del codice stesso (non dei discendenti); raggruppa: codici figli di `contextId` (0 = primo livello). La descrizione dei nuovi codici riceve `provenanceNote` (`Proposto da AI (modello X)`). Schema con `additionalProperties:false` e tutti i campi `required` (richiesto dal modo `strict`).
 
 ### Insidie già incontrate
 
@@ -299,7 +301,7 @@ Di norma priorità alta, poi dimensione piccola, rispettando i prerequisiti.
 ### Stato delle issue
 
 Chiuse in `main` (provate solo con test automatici, non a mano): #1, #2, #3, #4, #5, #8, #9, #12, #13, #19,
-#47 (icona originale ed `.iss` per Inno Setup; installer non compilato né firmato), #45 (report DOCX/PDF/HTML con codebook, segmenti, memo, variabili e tabelle riassuntive; senza matrice e senza immagini/aree PDF come miniature), #23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione), #40 (riassunti, spiegazioni e traduzioni con l'AI), #39 (infrastruttura AI: client compatibile OpenAI, impostazioni, registro; nessuna funzione AI concreta ancora: #40-#43). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
+#47 (icona originale ed `.iss` per Inno Setup; installer non compilato né firmato), #45 (report DOCX/PDF/HTML con codebook, segmenti, memo, variabili e tabelle riassuntive; senza matrice e senza immagini/aree PDF come miniature), #23 (accordo tra codificatori; senza alfa di Krippendorff, solo testo al livello segmenti), #22 (unione di progetti; collegamenti e dizionari sì, nessuna scelta per elemento nel riepilogo), #14 (sintesi per documento × codice e tabelle riassuntive; DOCX e QDPX no), #21, #25 (modello e API), #26 (PDF a pagine e aree), #27 (immagini e aree), #46 (QDPX con PDF e immagini; audio/video e grafi no), #33, #44, #18 (senza lemmatizzazione), #40 (riassunti, spiegazioni e traduzioni con l'AI), #41 (suggerimento di codici e sottocodici, raggruppamento con l'AI), #39 (infrastruttura AI: client compatibile OpenAI, impostazioni, registro; altre funzioni AI: #42-#43). Il dettaglio di cosa fanno è nel `CHANGELOG.md`. Rimandato da
 #19: le regole di disambiguazione.
 **#32** documenti con formattazione (titoli, grassetto/corsivo/sottolineato/barrato, elenchi, tabelle come righe a bande da DOCX, ODT, RTF e HTML; logica in `src/core/RichText.*`; non incluso: immagini incorporate, formattazione in MD/PDF e nell'export QDPX, editor rich text: l'editing resta sul testo semplice).
 Aggiornare questo elenco quando una issue viene chiusa.

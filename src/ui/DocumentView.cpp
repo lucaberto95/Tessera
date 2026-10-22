@@ -880,6 +880,7 @@ void DocumentView::showTextMenu(const QPoint &globalPos, int position)
     ai->setEnabled(selected);
     ai->addAction(tr("Spiega la selezione…"), this, [this] { emit aiPassageRequested(int(Ai::Assist::Task::Explain), 0); });
     ai->addAction(tr("Traduci la selezione…"), this, [this] { emit aiPassageRequested(int(Ai::Assist::Task::Translate), 0); });
+    ai->addAction(tr("Suggerisci codici per la selezione…"), this, [this] { emit aiSuggestCodesRequested(); });
     menu.addSeparator();
     QAction *copy = menu.addAction(tr("Copia"), m_edit, &QTextEdit::copy);
     copy->setEnabled(selected);

@@ -14,6 +14,7 @@
 #include "ui/DocumentView.h"
 #include "ui/AgreementDialog.h"
 #include "ui/AiAssistDialog.h"
+#include "ui/AiCodesDialog.h"
 #include "ui/AiSettingsDialog.h"
 #include "ui/ReportDialog.h"
 #include "ui/CooccurrenceDialog.h"
@@ -221,6 +222,15 @@ void MainWindow::createActions()
                              [this] { aiSummarizeCode(m_codes->currentCodeId()); });
     m_aiExplain = make(tr("&Spiega la selezione…"), [this] { aiPassage(int(Ai::Assist::Task::Explain), 0); });
     m_aiTranslate = make(tr("&Traduci la selezione…"), [this] { aiPassage(int(Ai::Assist::Task::Translate), 0); });
+
+    m_aiSuggestCodes = make(tr("Suggerisci &codici per il documento aperto…"),
+                            [this] { aiSuggestCodes(m_view->documentId(), false); });
+    m_aiSuggestCodesSel = make(tr("Suggerisci codici per la s&elezione…"),
+                               [this] { aiSuggestCodes(m_view->documentId(), true); });
+    m_aiSuggestSubcodes = make(tr("Suggerisci so&ttocodici del codice selezionato…"),
+                               [this] { aiSuggestSubcodes(m_codes->currentCodeId()); });
+    m_aiGroupCodes = make(tr("&Raggruppa i sottocodici del codice selezionato (o i codici di primo livello)…"),
+                          [this] { aiGroupCodes(m_codes->currentCodeId()); });
     m_about = make(tr("&Informazioni su Tessera"), &MainWindow::about, {}, false);
 }
 
@@ -303,6 +313,11 @@ void MainWindow::createMenus()
     ai->addAction(m_aiSummarizeCode);
     ai->addAction(m_aiExplain);
     ai->addAction(m_aiTranslate);
+    ai->addSeparator();
+    ai->addAction(m_aiSuggestCodes);
+    ai->addAction(m_aiSuggestCodesSel);
+    ai->addAction(m_aiSuggestSubcodes);
+    ai->addAction(m_aiGroupCodes);
     ai->addSeparator();
     ai->addAction(m_aiSettings);
 
@@ -416,6 +431,10 @@ void MainWindow::connectProject()
     connect(m_documents, &DocumentTree::newTextDocumentRequested, this, &MainWindow::newTextDocument);
     connect(m_documents, &DocumentTree::aiSummaryRequested, this, &MainWindow::aiSummarizeDocument);
     connect(m_codes, &CodeTree::aiSummaryRequested, this, &MainWindow::aiSummarizeCode);
+    connect(m_codes, &CodeTree::aiSubcodesRequested, this, &MainWindow::aiSuggestSubcodes);
+    connect(m_codes, &CodeTree::aiGroupRequested, this, &MainWindow::aiGroupCodes);
+    connect(m_documents, &DocumentTree::aiSuggestCodesRequested, this, [this](qint64 id) { aiSuggestCodes(id, false); });
+    connect(m_view, &DocumentView::aiSuggestCodesRequested, this, [this] { aiSuggestCodes(m_view->documentId(), true); });
     connect(m_view, &DocumentView::aiPassageRequested, this, &MainWindow::aiPassage);
     connect(m_codes, &CodeTree::activationChanged, this, &MainWindow::updateRetrieval);
     connect(m_codes, &CodeTree::currentCodeChanged, this, &MainWindow::updateActions);
@@ -1199,6 +1218,88 @@ void MainWindow::aiPassage(int taskValue, qint64 segmentId)
     dlg.exec();
 }
 
+void MainWindow::aiSuggestCodes(qint64 documentId, bool selectionOnly)
+{
+    if (!documentId) {
+        Ui::showError(this, tr("Apri prima un documento."));
+        return;
+    }
+    const Document doc = m_project->document(documentId);
+    if (doc.kind != DocumentKind::Text && doc.kind != DocumentKind::Pdf) {
+        Ui::showError(this, tr("Il suggerimento di codici funziona sui documenti di testo e sui PDF."));
+        return;
+    }
+    const QString text = selectionOnly && documentId == m_view->documentId() ? m_view->selectedText()
+                                                                              : m_project->documentText(documentId);
+    if (text.trimmed().isEmpty()) {
+        Ui::showError(this, selectionOnly ? tr("Seleziona prima un brano di testo.") : tr("Il documento non contiene testo."));
+        return;
+    }
+    Ai::Codes::Material material;
+    material.task = Ai::Codes::Task::SuggestCodes;
+    material.text = text.trimmed();
+    for (const Code &c : m_project->codes())
+        material.existingNames << c.name;
+    AiCodesDialog dlg(m_project, material,
+                      selectionOnly ? tr("Brano selezionato di «%1»").arg(doc.name) : tr("Documento: %1").arg(doc.name), 0, this);
+    dlg.exec();
+}
+
+void MainWindow::aiSuggestSubcodes(qint64 codeId)
+{
+    if (!codeId) {
+        Ui::showError(this, tr("Seleziona prima un codice."));
+        return;
+    }
+    const Code code = m_project->code(codeId);
+    Ai::Codes::Material material;
+    material.task = Ai::Codes::Task::SuggestSubcodes;
+    material.subject = code.name;
+    material.subjectNote = code.description;
+    QHash<qint64, QString> texts;
+    for (const Segment &s : m_project->allSegments(true)) {
+        if (s.codeId != codeId) // the segments of this code only: they are the ones that can move into a subcode
+            continue;
+        QString text;
+        if (s.kind == SegmentKind::Text) {
+            if (!texts.contains(s.documentId))
+                texts.insert(s.documentId, m_project->documentText(s.documentId));
+            text = texts.value(s.documentId).mid(s.start, s.end - s.start);
+        } else if (s.kind == SegmentKind::Area) {
+            text = s.areaText;
+        }
+        material.addItem(s.id, text);
+    }
+    if (material.items.size() < 2) {
+        Ui::showError(this, tr("Servono almeno due segmenti con testo codificati con questo codice."));
+        return;
+    }
+    for (const Code &c : m_project->codes())
+        if (c.parentId == codeId)
+            material.existingNames << c.name;
+    AiCodesDialog dlg(m_project, material, tr("Codice: %1").arg(m_project->codePath(codeId)), codeId, this);
+    dlg.exec();
+}
+
+void MainWindow::aiGroupCodes(qint64 parentId)
+{
+    Ai::Codes::Material material;
+    material.task = Ai::Codes::Task::GroupCodes;
+    for (const Code &c : m_project->codes()) {
+        if (c.parentId != parentId)
+            continue;
+        material.existingNames << c.name;
+        material.addItem(c.id, c.description.trimmed().isEmpty() ? c.name : c.name + QStringLiteral(" - ") + c.description.simplified());
+    }
+    if (material.items.size() < 3) {
+        Ui::showError(this, tr("Servono almeno tre codici da raggruppare."));
+        return;
+    }
+    AiCodesDialog dlg(m_project, material,
+                      parentId ? tr("Sottocodici di: %1").arg(m_project->codePath(parentId)) : tr("Codici di primo livello"),
+                      parentId, this);
+    dlg.exec();
+}
 void MainWindow::askUserNameOnFirstRun()
 {
     QSettings settings;

@@ -31,6 +31,8 @@ public:
 signals:
     void activationChanged();
     void currentCodeChanged(qint64 id);
+    void aiSubcodesRequested(qint64 codeId); // "Suggerisci sottocodici con l'AI" (issue #41)
+    void aiGroupRequested(qint64 parentId);  // "Raggruppa i sottocodici/codici con l'AI" (0 = first level)
     void aiSummaryRequested(qint64 codeId); // "Riassumi i segmenti con l'AI…" (issue #40)
 
 protected:

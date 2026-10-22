@@ -4,6 +4,7 @@
 #include "core/DemoProject.h"
 #include "core/ai/AiConfig.h"
 #include "ui/AiAssistDialog.h"
+#include "ui/AiCodesDialog.h"
 #include "ui/AiSettingsDialog.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
@@ -1949,6 +1950,98 @@ private slots:
         Ai::Settings::useFilesForTesting({}, {});
     }
 
+    void aiCodesDialogFlow()
+    {
+        using namespace Ai::Codes;
+        FakeHttp srv;
+        srv.handler = [](const FakeHttp::Req &) {
+            return FakeHttp::Res{200, aiReply(R"({"subcodes":[
+                {"name":"Flessibilita","description":"Orari elastici","segment_ids":[1,2,99]},
+                {"name":"Isolamento","description":"Solitudine","segment_ids":[3]}]})")};
+        };
+        QTemporaryDir dir;
+        Ai::Settings::useFilesForTesting(dir.filePath("s.ini"), dir.filePath("admin.ini"));
+        Project p;
+        QVERIFY(p.create(dir.filePath("aicodes.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "Orari flessibili. Gestisco il tempo. Mi sento solo.");
+        const qint64 code = p.addCode(0, "Lavoro da remoto", QColor("#336699"));
+        const qint64 s1 = p.addSegment(doc, code, 0, 16);
+        const qint64 s2 = p.addSegment(doc, code, 17, 34);
+        const qint64 s3 = p.addSegment(doc, code, 35, 49);
+        p.clearUndoHistory();
+
+        Material m;
+        m.task = Task::SuggestSubcodes;
+        m.subject = "Lavoro da remoto";
+        for (const Segment &s : p.segmentsForDocument(doc))
+            m.addItem(s.id, p.documentText(doc).mid(s.start, s.end - s.start));
+
+        // No provider: nothing is sent.
+        {
+            AiCodesDialog dlg(&p, m, "Codice", code);
+            QVERIFY(dlg.inputDescription().contains("3 segmenti"));
+            dlg.generate();
+            QVERIFY(dlg.statusIsError());
+            QCOMPARE(srv.requests.size(), 0);
+        }
+        Ai::Config cfg;
+        cfg.provider = Ai::Provider::Local;
+        cfg.baseUrl = srv.url();
+        cfg.model = "llama3";
+        cfg.timeoutSec = 5;
+        QVERIFY(Ai::Settings::save(cfg));
+
+        AiCodesDialog dlg(&p, m, "Codice: Lavoro da remoto", code);
+        QTest::qWait(100);
+        QCOMPARE(srv.requests.size(), 0); // opening the panel sends nothing
+        QVERIFY(dlg.recipientText().contains("non lascia il computer"));
+        dlg.generate();
+        QVERIFY(dlg.isBusy());
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(srv.requests.size(), 1);
+        QCOMPARE(dlg.proposalCount(), 2);
+        QVERIFY(dlg.statusText().contains("Scartati 1 riferimenti"));
+        QVERIFY(p.code(code).parentId == 0 && p.codes().size() == 1); // nothing created yet
+
+        auto *table = dlg.findChild<QTableWidget *>("aiProposals");
+        QVERIFY(table);
+        table->item(0, 0)->setText("Orari flessibili");   // editable name
+        table->item(1, 0)->setCheckState(Qt::Unchecked); // second proposal not accepted
+        QCOMPARE(dlg.acceptedProposals().size(), 1);
+        const Ai::Codes::ApplyReport rep = dlg.applyProposals();
+        QCOMPARE(rep.createdCodes, 1);
+        QCOMPARE(rep.movedSegments, 2);
+        const qint64 sub = p.findCode(code, "Orari flessibili");
+        QVERIFY(sub > 0);
+        QCOMPARE(p.segment(s1).codeId, sub);
+        QCOMPARE(p.segment(s2).codeId, sub);
+        QCOMPARE(p.segment(s3).codeId, code);
+        QVERIFY(p.code(sub).description.contains("Orari elastici"));
+        QVERIFY(p.code(sub).description.contains("AI (modello llama3)"));
+        QCOMPARE(dlg.proposalCount(), 0);
+        QVERIFY(p.undo()); // one step
+        QCOMPARE(p.findCode(code, "Orari flessibili"), qint64(0));
+        QCOMPARE(p.segment(s1).codeId, code);
+        QVERIFY(!p.canUndo());
+
+        // Without the provenance note, and leaving one segment out of a proposal.
+        dlg.generate();
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(srv.requests.size(), 2);
+        dlg.setProvenanceEnabled(false);
+        auto *detail = dlg.findChild<QListWidget *>("aiDetail");
+        QVERIFY(detail);
+        table->selectRow(0);
+        QCOMPARE(detail->count(), 2);
+        detail->item(1)->setCheckState(Qt::Unchecked);
+        table->item(1, 0)->setCheckState(Qt::Unchecked);
+        const Ai::Codes::ApplyReport rep2 = dlg.applyProposals();
+        QCOMPARE(rep2.movedSegments, 1);
+        const qint64 flex = p.findCode(code, "Flessibilita");
+        QCOMPARE(p.code(flex).description, QString("Orari elastici"));
+        QCOMPARE(p.segment(s2).codeId, code); // left out: stays where it was
+        Ai::Settings::useFilesForTesting({}, {});
+    }
     void aiAssistDialogCloudConsentSummaryAndCancel()
     {
         using namespace Ai::Assist;

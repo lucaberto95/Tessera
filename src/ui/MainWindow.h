@@ -77,6 +77,10 @@ private:
     void aiSummarizeDocument(qint64 documentId);
     void aiSummarizeCode(qint64 codeId);
     void aiPassage(int task, qint64 segmentId);
+    // Help with the code system (issue #41): each opens AiCodesDialog, which sends nothing until "Genera".
+    void aiSuggestCodes(qint64 documentId, bool selectionOnly);
+    void aiSuggestSubcodes(qint64 codeId);
+    void aiGroupCodes(qint64 parentId);
     void about();
     void openSegment(qint64 documentId, int start, int end, qint64 segmentId);
     void showMemoTarget(int targetType, qint64 targetId);
@@ -147,5 +151,9 @@ private:
     QAction *m_aiSummarizeCode = nullptr;
     QAction *m_aiExplain = nullptr;
     QAction *m_aiTranslate = nullptr;
+    QAction *m_aiSuggestCodes = nullptr;
+    QAction *m_aiSuggestCodesSel = nullptr;
+    QAction *m_aiSuggestSubcodes = nullptr;
+    QAction *m_aiGroupCodes = nullptr;
     QAction *m_about = nullptr;
 };

@@ -1,6 +1,7 @@
 #include "FakeHttp.h"
 #include "core/Agreement.h"
 #include "core/ai/AiAssist.h"
+#include "core/ai/AiCodes.h"
 #include "core/ai/AiClient.h"
 #include "core/ai/AiConfig.h"
 #include "core/Cooccurrence.h"
@@ -5018,6 +5019,141 @@ private slots:
         QVERIFY(progress.count() >= chunks);
     }
 
+    // ---------------------------------------------------------------- AI code suggestions (issue #41)
+
+    void aiCodesPromptsChunksAndInvalidIds()
+    {
+        using namespace Ai::Codes;
+        Options o;
+        o.language = "francese";
+        o.maxSuggestions = 5;
+        for (Task t : {Task::SuggestCodes, Task::SuggestSubcodes, Task::GroupCodes}) {
+            const QString s = systemPrompt(t, o, {"Esistente"});
+            QVERIFY2(!s.isEmpty(), "prompt resource missing");
+            QVERIFY(s.contains("francese") && s.contains("5"));
+            QVERIFY(!s.contains("{max}") && !s.contains("{language}") && !s.contains("{existing}"));
+            QVERIFY(!schemaFor(t).isEmpty());
+        }
+        QVERIFY(systemPrompt(Task::SuggestCodes, o, {"Esistente"}).contains("Esistente"));
+
+        Material m;
+        m.task = Task::SuggestSubcodes;
+        m.subject = "Vantaggi";
+        for (int i = 0; i < 5; ++i)
+            m.addItem(1000 + i, QString("Segmento numero %1").arg(i));
+        const QList<Chunk> chunks = planChunks(m, 3000, 2);
+        QCOMPARE(chunks.size(), 3); // at most two segments per request, numbers restart from 1
+        QVERIFY(chunks.first().user.contains("[1] Segmento numero 0"));
+        QVERIFY(!chunks.first().user.contains("1000")); // database ids are never sent
+        QCOMPARE(chunks.at(1).ids.value(1), qint64(1002));
+
+        // Invented numbers (7, 0, "x") are dropped; valid ones are mapped back; an element stays in the first proposal.
+        Result r;
+        const QJsonDocument answer = QJsonDocument::fromJson(
+            R"({"subcodes":[{"name":"Flessibilita","description":"d","segment_ids":[1,7,0,"2"]},
+                           {"name":"Costi","description":"","segment_ids":[2,99]},
+                           {"name":"Vuoto","description":"","segment_ids":[42]},
+                           {"name":"esistente","description":"","segment_ids":[1]}]})");
+        mergeAnswer(Task::SuggestSubcodes, answer, chunks.first().ids, {"Esistente"}, r);
+        QCOMPARE(r.invalidIds, 4);
+        QCOMPARE(r.proposals.size(), 1);
+        QCOMPARE(r.proposals.first().name, QString("Flessibilita"));
+        QCOMPARE(r.proposals.first().refIds, (QList<qint64>{1000, 1001}));
+        QVERIFY(r.skippedProposals >= 2);
+    }
+
+    void aiCodesRunSplitsAndMerges()
+    {
+        using namespace Ai::Codes;
+        FakeHttp srv;
+        int n = 0;
+        srv.handler = [&n](const FakeHttp::Req &) {
+            ++n;
+            return FakeHttp::Res{200, completion(n == 1 ? QString(R"({"subcodes":[{"name":"Tempo","description":"t","segment_ids":[1,2]}]})")
+                                                        : QString(R"({"subcodes":[{"name":"TEMPO","description":"x","segment_ids":[1,5]}]})"))};
+        };
+        Ai::Client client(localConfig(srv));
+        Material m;
+        m.task = Task::SuggestSubcodes;
+        m.subject = "Lavoro";
+        for (int i = 0; i < 4; ++i)
+            m.addItem(10 + i, QString("Brano %1").arg(i));
+        Run run(&client, m, Options());
+        run.setMaxItemsPerRequest(2);
+        QTest::qWait(100);
+        QCOMPARE(srv.requests.size(), 0); // nothing before start()
+        QSignalSpy spy(&run, &Run::finished);
+        run.start();
+        spy.wait(8000);
+        QVERIFY2(run.response().ok, qPrintable(run.response().error));
+        QCOMPARE(srv.requests.size(), 2);
+        QVERIFY(sentSystem(srv.requests.last()).contains("part 2 of 2"));
+        QVERIFY(sentSystem(srv.requests.last()).contains("Tempo")); // names found so far are offered again
+        const Result r = run.result();
+        QCOMPARE(r.proposals.size(), 1); // same name (any case) merged
+        QCOMPARE(r.proposals.first().refIds, (QList<qint64>{10, 11, 12}));
+        QCOMPARE(r.invalidIds, 1);
+        QVERIFY(srv.requests.first().body.contains("json_schema"));
+    }
+
+    void aiCodesApplyIsOneUndoStep()
+    {
+        using namespace Ai::Codes;
+        QTemporaryDir dir;
+        Project p;
+        QVERIFY(p.create(dir.filePath("aicodes.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d = p.addDocument(g, "D", "Uno due tre quattro cinque sei sette otto.");
+        const qint64 parent = p.addCode(0, "Lavoro", QColor("#112233"));
+        const qint64 s1 = p.addSegment(d, parent, 0, 3);
+        const qint64 s2 = p.addSegment(d, parent, 4, 7);
+        const qint64 s3 = p.addSegment(d, parent, 8, 12);
+        p.clearUndoHistory();
+        // Subcodes: s1 and s2 move; a deleted segment and a segment of another code are skipped.
+        const qint64 other = p.addCode(0, "Altro", QColor("#445566"));
+        const qint64 s4 = p.addSegment(d, other, 13, 18);
+        QVERIFY(p.deleteSegment(s3));
+        p.clearUndoHistory();
+        Ai::Config cfg;
+        cfg.model = "m1";
+        const ApplyReport rep = apply(p, Task::SuggestSubcodes, parent,
+                                      {{"Casa", "Da casa", {s1, s2, s3, s4}, true}, {"Ufficio", "", {}, true}, {"Casa", "", {}, true}},
+                                      provenanceNote(cfg));
+        QCOMPARE(rep.createdCodes, 2);
+        QCOMPARE(rep.movedSegments, 2);
+        QCOMPARE(rep.skipped, 3); // s3 gone, s4 elsewhere, duplicate name
+        const qint64 casa = p.findCode(parent, "Casa");
+        QVERIFY(casa > 0);
+        QCOMPARE(p.segment(s1).codeId, casa);
+        QCOMPARE(p.segment(s4).codeId, other);
+        QVERIFY(p.code(casa).description.startsWith("Da casa"));
+        QVERIFY(p.code(casa).description.contains("AI (modello m1)")); // provenance note
+        QVERIFY(p.undo()); // ONE step undoes codes and moves
+        QCOMPARE(p.findCode(parent, "Casa"), qint64(0));
+        QCOMPARE(p.segment(s1).codeId, parent);
+        QVERIFY(!p.canUndo());
+
+        // Groups: codes move under the new category.
+        const qint64 a = p.addCode(0, "A", QColor("#111111"));
+        const qint64 b = p.addCode(0, "B", QColor("#222222"));
+        p.clearUndoHistory();
+        const ApplyReport g2 = apply(p, Task::GroupCodes, 0, {{"Gruppo", "", {a, b}, true}}, QString());
+        QCOMPARE(g2.movedCodes, 2);
+        const qint64 grp = p.findCode(0, "Gruppo");
+        QCOMPARE(p.code(a).parentId, grp);
+        QCOMPARE(p.code(grp).description, QString()); // no provenance when switched off
+        QVERIFY(p.undo());
+        QCOMPARE(p.code(a).parentId, qint64(0));
+        QCOMPARE(p.findCode(0, "Gruppo"), qint64(0));
+        QVERIFY(!p.canUndo());
+
+        // New codes under a parent.
+        const ApplyReport g3 = apply(p, Task::SuggestCodes, parent, {{"Nuovo", "d", {}, true}}, QString());
+        QCOMPARE(g3.createdCodes, 1);
+        QVERIFY(p.findCode(parent, "Nuovo") > 0);
+        QVERIFY(p.undo());
+        QVERIFY(!p.canUndo());
+    }
     void aiAssistTranslateConcatenates()
     {
         using namespace Ai::Assist;

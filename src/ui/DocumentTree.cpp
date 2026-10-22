@@ -377,6 +377,7 @@ void DocumentTree::contextMenuEvent(QContextMenuEvent *event)
         const qint64 id = item->data(0, IdRole).toLongLong();
         menu.addAction(tr("Apri documento"), this, [this, id] { emit documentOpened(id); });
         menu.addAction(tr("Riassumi con l'AI…"), this, [this, id] { emit aiSummaryRequested(id); });
+        menu.addAction(tr("Suggerisci codici con l'AI…"), this, [this, id] { emit aiSuggestCodesRequested(id); });
         menu.addSeparator();
         if (kind == DocumentItem) {
             QMenu *move = menu.addMenu(tr("Sposta nel gruppo"));

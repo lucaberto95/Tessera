@@ -91,6 +91,7 @@ signals:
     void linkFollowed(qint64 documentId); // the view now shows that document
     // "Spiega"/"Traduci con l'AI…" (issue #40): task is Ai::Assist::Task as int; segmentId 0 = the selection.
     void aiPassageRequested(int task, qint64 segmentId);
+    void aiSuggestCodesRequested(); // "Suggerisci codici per la selezione" (issue #41)
 
 private:
     struct LinkEnd {
