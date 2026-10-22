@@ -213,7 +213,7 @@ void CodeTree::editDescription(qint64 id)
 
 void CodeTree::editMemo(qint64 id)
 {
-    Ui::editMemo(this, m_project, int(MemoTarget::Code), id, tr("codice \"%1\"").arg(m_project->codePath(id)));
+    Ui::editMemo(this, m_project, int(MemoTarget::Code), id);
 }
 
 void CodeTree::deleteCode(qint64 id)

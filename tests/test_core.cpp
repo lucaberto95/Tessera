@@ -1439,6 +1439,157 @@ private slots:
         QCOMPARE(q.memos().size(), 2);
     }
 
+    void memoLinkedToSeveralElements()
+    {
+        Project p;
+        QVERIFY(p.create(path("memolinks.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d = p.addDocument(g, "Doc", "testo del documento");
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        const qint64 b = p.addCode(0, "B", Qt::green);
+        const qint64 c = p.addCode(0, "C", Qt::blue);
+        Memo m;
+        m.targetType = MemoTarget::Code;
+        m.targetId = a;
+        m.title = "Teoria";
+        const qint64 memo = p.saveMemo(m);
+        QVERIFY(memo > 0);
+        QVERIFY(p.addMemoLink(memo, MemoTarget::Code, b));
+        QVERIFY(p.addMemoLink(memo, MemoTarget::Code, c));
+        QVERIFY(p.addMemoLink(memo, MemoTarget::Code, c)); // already linked: no duplicate
+        QVERIFY(!p.addMemoLink(memo, MemoTarget::Code, 9999)); // missing element
+        QVERIFY(!p.addMemoLink(memo, MemoTarget::Project, 0));
+        const QList<MemoLink> abc = {{MemoTarget::Code, a}, {MemoTarget::Code, b}, {MemoTarget::Code, c}};
+        QCOMPARE(p.memoLinks(memo), abc);
+
+        // The memo shows up on all three codes.
+        const QHash<qint64, qint64> byCode = p.memoIdsFor(MemoTarget::Code);
+        QCOMPARE(byCode.size(), 3);
+        for (qint64 code : {a, b, c}) {
+            QCOMPARE(byCode.value(code), memo);
+            QCOMPARE(p.memoFor(MemoTarget::Code, code).id, memo);
+        }
+        QVERIFY(p.memoIdsFor(MemoTarget::Document).isEmpty());
+
+        // Deleting one of the codes, even the primary target, keeps the memo on the others.
+        QVERIFY(p.deleteCode(a));
+        QCOMPARE(p.memos().size(), 1);
+        QCOMPARE(p.memo(memo).targetType, MemoTarget::Code);
+        QCOMPARE(p.memo(memo).targetId, b);
+        QCOMPARE(p.memoLinks(memo), (QList<MemoLink>{{MemoTarget::Code, b}, {MemoTarget::Code, c}}));
+        QCOMPARE(p.memoIdsFor(MemoTarget::Code).size(), 2);
+        QVERIFY(p.undo());
+        QCOMPARE(p.memoLinks(memo), abc);
+        QCOMPARE(p.memo(memo).targetId, a);
+
+        // A memo goes away only with its last element.
+        QVERIFY(p.deleteCode(b));
+        QVERIFY(p.deleteCode(c));
+        QCOMPARE(p.memoLinks(memo), (QList<MemoLink>{{MemoTarget::Code, a}}));
+        QVERIFY(p.deleteCode(a));
+        QVERIFY(p.memos().isEmpty());
+        QVERIFY(p.undo());
+        QVERIFY(p.undo());
+        QVERIFY(p.undo());
+        QCOMPARE(p.memoLinks(memo), abc);
+
+        // Replacing the links is one undo step; without the primary target the first link takes over.
+        QVERIFY(p.setMemoLinks(memo, {{MemoTarget::Document, d}, {MemoTarget::Code, c}, {MemoTarget::Code, 9999}}));
+        QCOMPARE(p.undoLabel(), QString("Collega memo"));
+        QCOMPARE(p.memo(memo).targetType, MemoTarget::Document);
+        QCOMPARE(p.memoLinks(memo), (QList<MemoLink>{{MemoTarget::Document, d}, {MemoTarget::Code, c}}));
+        QVERIFY(p.undo());
+        QCOMPARE(p.memoLinks(memo), abc);
+        // With no elements left the memo becomes free, and survives.
+        QVERIFY(p.setMemoLinks(memo, {}));
+        QCOMPARE(p.memo(memo).targetType, MemoTarget::Free);
+        QVERIFY(p.deleteDocument(d));
+        QCOMPARE(p.memos().size(), 1);
+
+        // A free memo keeps no primary target: its links are only links.
+        Memo freeMemo;
+        freeMemo.targetType = MemoTarget::Free;
+        freeMemo.body = "idea";
+        const qint64 freeId = p.saveMemo(freeMemo);
+        QVERIFY(p.addMemoLink(freeId, MemoTarget::Code, b));
+        QCOMPARE(p.memo(freeId).targetType, MemoTarget::Free);
+        QCOMPARE(p.memoLinks(freeId), (QList<MemoLink>{{MemoTarget::Code, b}}));
+        QCOMPARE(p.memoFor(MemoTarget::Code, b).id, freeId);
+        QVERIFY(p.deleteCode(b));
+        QVERIFY(p.memoLinks(freeId).isEmpty());
+        QCOMPARE(p.memo(freeId).body, QString("idea"));
+
+        // Deleting a memo drops its links.
+        QVERIFY(p.addMemoLink(freeId, MemoTarget::Code, c));
+        QVERIFY(p.deleteMemo(freeId));
+        QVERIFY(!p.memoIdsFor(MemoTarget::Code).contains(c));
+    }
+
+    void qdpxMemoWithSeveralNoteRefs()
+    {
+        Project p;
+        QVERIFY(p.create(path("noterefs_src.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d = p.addDocument(g, "Doc", "un testo da codificare");
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        const qint64 b = p.addCode(0, "B", Qt::green);
+        const qint64 c = p.addCode(0, "C", Qt::blue);
+        const qint64 s = p.addSegment(d, a, 0, 8);
+        Memo m;
+        m.targetType = MemoTarget::Code;
+        m.targetId = a;
+        m.title = "Teorico";
+        m.body = "collega tutto";
+        const qint64 memo = p.saveMemo(m);
+        QVERIFY(p.setMemoLinks(memo, {{MemoTarget::Code, a}, {MemoTarget::Code, b}, {MemoTarget::Segment, s},
+                                      {MemoTarget::Document, d}}));
+        Memo freeMemo;
+        freeMemo.targetType = MemoTarget::Free;
+        freeMemo.title = "Libero";
+        p.saveMemo(freeMemo);
+        Memo pm;
+        pm.title = "Progetto";
+        pm.body = "domanda";
+        p.saveMemo(pm);
+        Q_UNUSED(c);
+
+        QString err, report;
+        QVERIFY2(Qdpx::exportProject(p, path("noterefs.qdpx"), &err), qPrintable(err));
+        Project q;
+        QVERIFY(q.create(path("noterefs_dst.tsra")));
+        QVERIFY2(Qdpx::importProject(q, path("noterefs.qdpx"), &report, &err), qPrintable(err));
+
+        // One memo per note, linked to every object that refers to it.
+        QCOMPARE(q.memos().size(), 3);
+        const qint64 qa = q.findCode(0, "A"), qb = q.findCode(0, "B"), qc = q.findCode(0, "C");
+        const qint64 qd = q.documents().first().id;
+        const qint64 qs = q.allSegments().first().id;
+        Memo theory;
+        for (const Memo &x : q.memos())
+            if (x.title == "Teorico")
+                theory = x;
+        QVERIFY(theory.id);
+        QCOMPARE(theory.uuid, p.memo(memo).uuid);
+        const QList<MemoLink> links = q.memoLinks(theory.id);
+        QCOMPARE(links.size(), 4);
+        for (const MemoLink &l : QList<MemoLink>{{MemoTarget::Code, qa}, {MemoTarget::Code, qb},
+                                                 {MemoTarget::Segment, qs}, {MemoTarget::Document, qd}})
+            QVERIFY(links.contains(l));
+        QVERIFY(!q.memoIdsFor(MemoTarget::Code).contains(qc));
+        QCOMPARE(q.memoFor(MemoTarget::Project, 0).body, QString("domanda"));
+        for (const Memo &x : q.memos())
+            if (x.title == "Libero")
+                QCOMPARE(x.targetType, MemoTarget::Free);
+
+        // Exported again, the memo is still a single note with four references.
+        QVERIFY2(Qdpx::exportProject(q, path("noterefs2.qdpx"), &err), qPrintable(err));
+        Project r;
+        QVERIFY(r.create(path("noterefs_dst2.tsra")));
+        QVERIFY2(Qdpx::importProject(r, path("noterefs2.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(r.memos().size(), 3);
+        QCOMPARE(r.memoLinks(r.memoFor(MemoTarget::Code, r.findCode(0, "B")).id).size(), 4);
+    }
+
     void qdpxLinks()
     {
         Project p;

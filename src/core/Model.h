@@ -73,8 +73,11 @@ struct DocumentLink {
     QString uuid;
 };
 
-enum class MemoTarget { Project, Group, Document, Code, Segment, DocumentSet };
+// Free: a memo with no primary target (it may still be linked to elements, see MemoLink).
+enum class MemoTarget { Project, Group, Document, Code, Segment, DocumentSet, Free };
 
+// Primary target of a memo (Group..DocumentSet, Project or Free); the memo can be linked to
+// further elements through MemoLink.
 struct Memo {
     qint64 id = 0;
     MemoTarget targetType = MemoTarget::Project;
@@ -85,6 +88,14 @@ struct Memo {
     QDateTime createdAt;
     QDateTime modifiedAt;
     QString uuid;
+};
+
+// An element a memo is attached to: its primary target or one of its additional links.
+// Only groups, documents, codes, segments and document sets can be linked.
+struct MemoLink {
+    MemoTarget targetType = MemoTarget::Code;
+    qint64 targetId = 0;
+    bool operator==(const MemoLink &) const = default;
 };
 
 enum class VariableType { Text, Integer, Decimal, Boolean, Date };

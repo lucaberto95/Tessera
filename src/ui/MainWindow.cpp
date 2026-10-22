@@ -789,7 +789,7 @@ void MainWindow::openSegment(qint64 documentId, int start, int end, qint64 segme
 
 void MainWindow::editProjectMemo()
 {
-    Ui::editMemo(this, m_project, int(MemoTarget::Project), 0, tr("progetto \"%1\"").arg(m_project->name()));
+    Ui::editMemo(this, m_project, int(MemoTarget::Project), 0);
 }
 
 void MainWindow::showMemos()

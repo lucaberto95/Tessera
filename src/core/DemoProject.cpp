@@ -140,7 +140,8 @@ bool populate(Project &project)
     codeMemo.title = QObject::tr("Isolamento e nuovi assunti");
     codeMemo.body = QObject::tr("Marco sottolinea che l'isolamento pesa soprattutto su chi entra in azienda adesso: "
                                 "verificare nelle prossime interviste.");
-    project.saveMemo(codeMemo);
+    // The memo is also linked to the interview it talks about.
+    project.addMemoLink(project.saveMemo(codeMemo), MemoTarget::Document, docs[1]);
     return project.commitBatch();
 }
 

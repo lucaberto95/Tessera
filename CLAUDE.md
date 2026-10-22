@@ -84,7 +84,10 @@ src/ui/     Qt Widgets (libreria statica tessera_ui; main.cpp crea solo MainWind
   CooccurrenceDialog  matrice + mappa (QGraphicsScene, export PNG e SVG con Qt6::Svg); il doppio clic su una cella
                  emette `passagesRequested` verso il SegmentsPanel
   StatsDialog    schede Variabili (frequenze, media, mediana...) e Tabella incrociata (colonne = variabile, gruppi o set)
-  MemoDialog, MemoManager, VariablesDialog, SearchDialog, MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
+  MemoDialog     non modale (`Ui::editMemo/openMemo`, una finestra per memo): "Collegato a" con
+                 `MemoLinkPicker` e drop di codici/documenti (`Ui::CodeMimeType`, `Ui::DocumentMimeType`);
+                 testo e collegamenti si scrivono insieme al "Salva" (un passo di undo)
+  MemoManager, VariablesDialog, SearchDialog, MatrixDialog, RetrievalDialog, VariableFilterDialog, UiUtils
 tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 ```
 
@@ -124,6 +127,17 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   (`linkEndGuid()`), più `<Links><Link originGUID targetGUID direction="Bidirectional">`; il commento
   viaggia nell'attributo `name`. All'import i `<Link>` tra oggetti che non sono selezioni di testo
   (codici, note…) sono ignorati e contati nel resoconto.
+- **Memo e collegamenti** (`memo_links`, migrazione v4). Un memo ha un bersaglio principale in
+  `memos.target_type/target_id` (un elemento, `project`, o `free` = memo libero) e altri elementi
+  (gruppi, documenti, codici, segmenti, set) in `memo_links`. `memoFor`/`memoIdsFor` considerano
+  entrambi; `memoLinks(id)` = principale (se elemento) + collegamenti; `setMemoLinks` li sostituisce
+  (se il principale manca dalla lista prende il suo posto il primo elemento, senza elementi il memo
+  diventa libero; memo del progetto e liberi tengono il loro bersaglio). `removeOrphanMemos()` toglie
+  i collegamenti a elementi cancellati, promuove il primo collegamento se è sparito il principale e
+  cancella solo i memo senza più elementi (mai i liberi né quello del progetto). In QDPX ogni
+  elemento collegato ha un `<NoteRef>` alla stessa `<Note>`; all'import il primo riferimento crea il
+  memo e gli altri diventano collegamenti; una nota riferita solo dal progetto è il memo del progetto,
+  una nota senza riferimenti è un memo libero. I memo di gruppi e set restano solo `Description`.
 - **Posizioni nel testo** = indici UTF-16 (`QString`) nel testo semplice con `\n`. QDPX usa code
   point Unicode: convertire con `TextUtils` (test con emoji). In import QDPX i CRLF vengono
   normalizzati rimappando le posizioni.
@@ -179,6 +193,11 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
   filtrano serve un ciclo esplicito (vedi `adjustSegmentsForEdit`).
 - Seguire un link può aprire un altro documento e sostituire `m_links`: copiare il link/estremità
   prima di chiamare `openDocument` (vedi `DocumentView::followLink`).
+- Un widget riceve un `QDropEvent` solo dopo aver accettato il `QDragEnterEvent`: nei test mandare
+  prima l'enter. I campi di testo accettano già i drop come testo: per trasformarli in altro serve
+  un event filter (vedi `MemoDialog::eventFilter`, sul `viewport()` del `QPlainTextEdit`).
+- Da PowerShell 5.1 `Get-Content` legge come ANSI i file UTF-8 senza BOM e `Set-Content -Encoding utf8`
+  aggiunge il BOM: per riscrivere un sorgente usare Edit, o `[IO.File]::ReadAllText/WriteAllText`.
 
 ## Flusso di lavoro per le issue
 
@@ -228,6 +247,9 @@ non ci sono classi per le variabili di tipo data).
 **#8** collegamenti tra brani dei documenti (menu Documenti ▸ "Inizia collegamento" Ctrl+L, "Completa
 collegamento" Ctrl+Maiusc+L, "Collegamenti…"; Ctrl+clic sul testo collegato apre l'altra estremità;
 tabella `links`, migrazione v3; anche in QDPX).
+**#9** memo collegati a più elementi (finestra del memo non modale con "Collegato a", "Aggiungi…",
+"Rimuovi" e drop di codici/documenti; "Nuovo memo libero…" in Tutti i memo crea un memo `free`;
+tabella `memo_links`, migrazione v4; più `<NoteRef>` in QDPX).
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.

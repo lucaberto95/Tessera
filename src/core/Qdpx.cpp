@@ -144,6 +144,17 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     auto memosFor = [&](MemoTarget t, qint64 id) {
         return memosByTarget.value(memoTargetToString(t) + QLatin1Char(':') + QString::number(id));
     };
+    // NoteRefs: a note is referenced by every element it is linked to. Memos of groups and sets
+    // travel as the set's Description (see below), so they and their links have no NoteRefs.
+    QHash<QString, QStringList> noteRefsByTarget; // "type:id" -> note guids
+    for (const Memo &m : memos) {
+        if (m.targetType == MemoTarget::Group || m.targetType == MemoTarget::DocumentSet)
+            continue;
+        if (m.targetType == MemoTarget::Project)
+            noteRefsByTarget[memoTargetToString(MemoTarget::Project) + QStringLiteral(":0")] << m.uuid;
+        for (const MemoLink &l : project.memoLinks(m.id))
+            noteRefsByTarget[memoTargetToString(l.targetType) + QLatin1Char(':') + QString::number(l.targetId)] << m.uuid;
+    }
 
     QHash<qint64, QList<Code>> children;
     for (const Code &c : codes)
@@ -186,9 +197,9 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     w.writeEndElement();
 
     auto writeNoteRefs = [&](MemoTarget t, qint64 id) {
-        for (const Memo &m : memosFor(t, id)) {
+        for (const QString &guid : noteRefsByTarget.value(memoTargetToString(t) + QLatin1Char(':') + QString::number(id))) {
             w.writeEmptyElement(QStringLiteral("NoteRef"));
-            w.writeAttribute(QStringLiteral("targetGUID"), m.uuid);
+            w.writeAttribute(QStringLiteral("targetGUID"), guid);
         }
     };
 
@@ -856,11 +867,13 @@ struct Importer {
         if (createdGroups && project.documentsInGroup(defaultGroup).isEmpty())
             project.deleteGroup(defaultGroup);
 
-        // Notes -> memos, attached to the objects that reference them.
+        // Notes -> memos. A note referenced by several objects becomes one memo linked to all of
+        // them; one referenced only by the project is the project memo; any other note is free.
         QHash<QString, PendingNote> notesByGuid;
         for (const PendingNote &n : notes)
-            notesByGuid.insert(n.guid, n);
-        QSet<QString> usedNotes;
+            if (!notesByGuid.contains(n.guid))
+                notesByGuid.insert(n.guid, n);
+        QHash<QString, qint64> memoOfNote; // note guid -> memo id
         auto makeMemo = [&](MemoTarget type, qint64 target, const PendingNote &n) {
             Memo memo;
             memo.targetType = type;
@@ -869,12 +882,11 @@ struct Importer {
             memo.body = n.body;
             memo.author = users.value(n.user);
             memo.createdAt = n.created;
-            memo.uuid = usedNotes.contains(n.guid) ? QString() : n.guid;
-            project.saveMemo(memo);
-            usedNotes.insert(n.guid);
+            memo.uuid = n.guid;
+            return project.saveMemo(memo);
         };
         for (const auto &[type, targetGuid, noteGuid] : noteRefs) {
-            if (!notesByGuid.contains(noteGuid))
+            if (noteGuid.isEmpty() || !notesByGuid.contains(noteGuid))
                 continue;
             qint64 target = 0;
             if (type == MemoTarget::Code)
@@ -883,12 +895,20 @@ struct Importer {
                 target = docIds.value(targetGuid);
             else if (type == MemoTarget::Segment)
                 target = segmentIds.value(targetGuid);
-            if (target)
-                makeMemo(type, target, notesByGuid.value(noteGuid));
+            if (!target)
+                continue;
+            if (const qint64 memo = memoOfNote.value(noteGuid))
+                project.addMemoLink(memo, type, target);
+            else
+                memoOfNote.insert(noteGuid, makeMemo(type, target, notesByGuid.value(noteGuid)));
         }
+        const QSet<QString> projectNotes(projectNoteRefs.cbegin(), projectNoteRefs.cend());
         for (const PendingNote &n : notes) {
-            if (!usedNotes.contains(n.guid))
-                makeMemo(MemoTarget::Project, 0, n);
+            if (n.guid.isEmpty())
+                makeMemo(MemoTarget::Free, 0, n);
+            else if (!memoOfNote.contains(n.guid))
+                memoOfNote.insert(n.guid, makeMemo(projectNotes.contains(n.guid) ? MemoTarget::Project : MemoTarget::Free,
+                                                   0, n));
         }
 
         // Links between two text selections become document links; REFI-QDA also links other

@@ -26,7 +26,7 @@ MemoManager::MemoManager(Project *project, QWidget *parent)
     resize(900, 520);
 
     m_table->setColumnCount(5);
-    m_table->setHorizontalHeaderLabels({tr("Riferito a"), tr("Titolo"), tr("Anteprima"), tr("Autore"), tr("Modificato")});
+    m_table->setHorizontalHeaderLabels({tr("Collegato a"), tr("Titolo"), tr("Anteprima"), tr("Autore"), tr("Modificato")});
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -45,9 +45,8 @@ MemoManager::MemoManager(Project *project, QWidget *parent)
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(newMemo, &QPushButton::clicked, this, [this] {
         Memo m;
-        m.targetType = MemoTarget::Project;
-        MemoDialog dlg(m_project, m, tr("progetto"), this);
-        dlg.exec();
+        m.targetType = MemoTarget::Free;
+        Ui::openMemo(parentWidget() ? parentWidget() : this, m_project, m);
     });
     connect(open, &QPushButton::clicked, this, [this] {
         if (m_table->currentRow() >= 0)
@@ -57,17 +56,18 @@ MemoManager::MemoManager(Project *project, QWidget *parent)
         const int row = m_table->currentRow();
         if (row < 0)
             return;
-        const Memo m = m_project->memo(m_table->item(row, 0)->data(MemoIdRole).toLongLong());
-        emit showTarget(int(m.targetType), m.targetId);
+        const QList<MemoLink> links = m_project->memoLinks(m_table->item(row, 0)->data(MemoIdRole).toLongLong());
+        if (!links.isEmpty())
+            emit showTarget(int(links.first().targetType), links.first().targetId);
     });
     connect(exportBtn, &QPushButton::clicked, this, [this] {
         const QString path = Ui::saveFileName(this, tr("Esporta memo"), m_project->name() + tr(" - memo.html"),
                                               tr("Pagina HTML (*.html);;CSV per Excel (*.csv)"));
         if (path.isEmpty())
             return;
-        Exporters::Table rows{{tr("Riferito a"), tr("Titolo"), tr("Testo"), tr("Autore"), tr("Creato"), tr("Modificato")}};
+        Exporters::Table rows{{tr("Collegato a"), tr("Titolo"), tr("Testo"), tr("Autore"), tr("Creato"), tr("Modificato")}};
         for (const Memo &m : m_project->memos())
-            rows << QStringList{targetLabel(int(m.targetType), m.targetId), m.title, m.body, m.author,
+            rows << QStringList{targetLabel(m), m.title, m.body, m.author,
                                 QLocale().toString(m.createdAt.toLocalTime(), QLocale::ShortFormat),
                                 QLocale().toString(m.modifiedAt.toLocalTime(), QLocale::ShortFormat)};
         QString error;
@@ -85,31 +85,17 @@ MemoManager::MemoManager(Project *project, QWidget *parent)
     refresh();
 }
 
-QString MemoManager::targetLabel(int type, qint64 id) const
+// All the elements of the memo, or "Progetto" / "Memo libero" when it has none.
+QString MemoManager::targetLabel(const Memo &memo) const
 {
-    switch (static_cast<MemoTarget>(type)) {
-    case MemoTarget::Project:
-        return tr("Progetto");
-    case MemoTarget::Group:
-        for (const DocumentGroup &g : m_project->groups())
-            if (g.id == id)
-                return tr("Gruppo: %1").arg(g.name);
-        return tr("Gruppo");
-    case MemoTarget::Document:
-        return tr("Documento: %1").arg(m_project->document(id).name);
-    case MemoTarget::Code:
-        return tr("Codice: %1").arg(m_project->codePath(id));
-    case MemoTarget::Segment: {
-        const Segment s = m_project->segment(id);
-        return tr("Segmento: %1 / %2").arg(m_project->document(s.documentId).name, m_project->code(s.codeId).name);
-    }
-    case MemoTarget::DocumentSet:
-        for (const DocumentSet &s : m_project->documentSets())
-            if (s.id == id)
-                return tr("Set: %1").arg(s.name);
-        return tr("Set");
-    }
-    return {};
+    QStringList labels;
+    if (memo.targetType == MemoTarget::Project)
+        labels << Ui::memoTargetLabel(m_project, int(MemoTarget::Project), 0);
+    for (const MemoLink &l : m_project->memoLinks(memo.id))
+        labels << Ui::memoTargetLabel(m_project, int(l.targetType), l.targetId);
+    if (labels.isEmpty())
+        labels << Ui::memoTargetLabel(m_project, int(MemoTarget::Free), 0);
+    return labels.join(QStringLiteral("; "));
 }
 
 void MemoManager::refresh()
@@ -119,7 +105,8 @@ void MemoManager::refresh()
     m_table->setRowCount(int(memos.size()));
     for (int row = 0; row < memos.size(); ++row) {
         const Memo &m = memos[row];
-        auto *target = new QTableWidgetItem(Ui::memoIcon(), targetLabel(int(m.targetType), m.targetId));
+        auto *target = new QTableWidgetItem(Ui::memoIcon(), targetLabel(m));
+        target->setToolTip(Ui::plainToolTip(target->text().replace(QStringLiteral("; "), QStringLiteral("\n"))));
         target->setData(MemoIdRole, m.id);
         m_table->setItem(row, 0, target);
         m_table->setItem(row, 1, new QTableWidgetItem(m.title));
@@ -137,6 +124,5 @@ void MemoManager::openRow(int row)
     const Memo m = m_project->memo(m_table->item(row, 0)->data(MemoIdRole).toLongLong());
     if (!m.id)
         return;
-    MemoDialog dlg(m_project, m, targetLabel(int(m.targetType), m.targetId), this);
-    dlg.exec();
+    Ui::openMemo(parentWidget() ? parentWidget() : this, m_project, m);
 }

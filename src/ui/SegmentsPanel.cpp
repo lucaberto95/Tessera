@@ -292,11 +292,8 @@ void SegmentsPanel::contextMenuEvent(QContextMenuEvent *event)
         if (ok)
             m_project->setSegmentWeight(seg.id, w);
     });
-    menu.addAction(Ui::memoIcon(), tr("Memo…"), this, [this, seg] {
-        Ui::editMemo(this, m_project, int(MemoTarget::Segment), seg.id,
-                     tr("segmento \"%1\"").arg(TextUtils::excerpt(m_project->documentText(seg.documentId), seg.start,
-                                                                  seg.end, 80)));
-    });
+    menu.addAction(Ui::memoIcon(), tr("Memo…"), this,
+                   [this, seg] { Ui::editMemo(this, m_project, int(MemoTarget::Segment), seg.id); });
     menu.addSeparator();
     menu.addAction(tr("Rimuovi codifica"), this, [this, seg] {
         if (Ui::confirm(this, tr("Rimuovi codifica"), tr("Rimuovere questa codifica?")))

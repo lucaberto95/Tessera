@@ -1,7 +1,9 @@
 #include "ui/UiUtils.h"
 #include "core/Project.h"
+#include "core/TextUtils.h"
 #include "ui/MemoDialog.h"
 
+#include <QApplication>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -121,10 +123,58 @@ QStringList openFileNames(QWidget *parent, const QString &title, const QString &
     return files;
 }
 
-bool editMemo(QWidget *parent, Project *project, int targetType, qint64 targetId, const QString &targetLabel)
+void editMemo(QWidget *parent, Project *project, int targetType, qint64 targetId)
 {
-    MemoDialog dlg(project, project->memoFor(static_cast<MemoTarget>(targetType), targetId), targetLabel, parent);
-    return dlg.exec() == QDialog::Accepted;
+    openMemo(parent, project, project->memoFor(static_cast<MemoTarget>(targetType), targetId));
+}
+
+void openMemo(QWidget *parent, Project *project, const Memo &memo)
+{
+    QWidget *window = parent ? parent->window() : nullptr;
+    if (memo.id) {
+        for (QWidget *w : QApplication::topLevelWidgets()) {
+            auto *open = qobject_cast<MemoDialog *>(w);
+            if (open && open->memoId() == memo.id && open->isVisible()) {
+                open->raise();
+                open->activateWindow();
+                return;
+            }
+        }
+    }
+    auto *dlg = new MemoDialog(project, memo, window);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->show();
+}
+
+QString memoTargetLabel(const Project *project, int targetType, qint64 id)
+{
+    switch (static_cast<MemoTarget>(targetType)) {
+    case MemoTarget::Project:
+        return QObject::tr("Progetto");
+    case MemoTarget::Free:
+        return QObject::tr("Memo libero");
+    case MemoTarget::Group:
+        for (const DocumentGroup &g : project->groups())
+            if (g.id == id)
+                return QObject::tr("Gruppo: %1").arg(g.name);
+        return QObject::tr("Gruppo");
+    case MemoTarget::Document:
+        return QObject::tr("Documento: %1").arg(project->document(id).name);
+    case MemoTarget::Code:
+        return QObject::tr("Codice: %1").arg(project->codePath(id));
+    case MemoTarget::Segment: {
+        const Segment s = project->segment(id);
+        return QObject::tr("Segmento: %1 / %2 – \"%3\"")
+            .arg(project->document(s.documentId).name, project->code(s.codeId).name,
+                 TextUtils::excerpt(project->documentText(s.documentId), s.start, s.end, 50));
+    }
+    case MemoTarget::DocumentSet:
+        for (const DocumentSet &s : project->documentSets())
+            if (s.id == id)
+                return QObject::tr("Set: %1").arg(s.name);
+        return QObject::tr("Set");
+    }
+    return {};
 }
 
 } // namespace Ui

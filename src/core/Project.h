@@ -136,13 +136,24 @@ public:
     bool setLinkComment(qint64 id, const QString &comment);
     bool deleteLink(qint64 id);
 
-    // Memos
+    // Memos. A memo has a primary target (an element, the project, or none for a free memo) and can
+    // be linked to further elements; lookups by element consider both. A memo is deleted only when
+    // none of its elements is left: if its primary target goes, its first remaining link takes over.
     QList<Memo> memos() const;
     Memo memo(qint64 id) const;
-    Memo memoFor(MemoTarget type, qint64 targetId) const; // id == 0 if none
+    // The memo of an element: the one whose primary target it is, else one linked to it; id == 0 if none.
+    Memo memoFor(MemoTarget type, qint64 targetId) const;
     qint64 saveMemo(Memo memo);                          // inserts when memo.id == 0
     bool deleteMemo(qint64 id);
-    QHash<qint64, qint64> memoIdsFor(MemoTarget type) const; // targetId -> memoId
+    QHash<qint64, qint64> memoIdsFor(MemoTarget type) const; // targetId -> memoId (primary or linked)
+    // Elements of a memo: the primary target (if it is an element) first, then the links in order.
+    QList<MemoLink> memoLinks(qint64 memoId) const;
+    // Replaces the elements of a memo (one undo step). Invalid or missing elements are skipped. If the
+    // primary target is not in the list, the first element takes its place, or the memo becomes free;
+    // project and free memos keep their primary target.
+    bool setMemoLinks(qint64 memoId, const QList<MemoLink> &links);
+    bool addMemoLink(qint64 memoId, MemoTarget type, qint64 targetId); // no-op if already linked
+    static bool isLinkableMemoTarget(MemoTarget type);
 
     // Document variables
     QList<Variable> variables() const;
@@ -188,6 +199,7 @@ private:
     void notifySegments(qint64 documentId);
     int nextPosition(const QString &table, const QString &where = {}, const QVariantList &binds = {}) const;
     void removeOrphanMemos();
+    bool memoTargetExists(MemoTarget type, qint64 id) const;
 
     QSqlDatabase m_db;
     QString m_connection;

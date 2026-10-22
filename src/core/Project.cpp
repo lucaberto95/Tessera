@@ -193,6 +193,7 @@ QString memoTargetToString(MemoTarget t)
     case MemoTarget::Code: return QStringLiteral("code");
     case MemoTarget::Segment: return QStringLiteral("segment");
     case MemoTarget::DocumentSet: return QStringLiteral("document_set");
+    case MemoTarget::Free: return QStringLiteral("free");
     }
     return QStringLiteral("project");
 }
@@ -204,6 +205,7 @@ MemoTarget memoTargetFromString(const QString &s)
     if (s == QLatin1String("code")) return MemoTarget::Code;
     if (s == QLatin1String("segment")) return MemoTarget::Segment;
     if (s == QLatin1String("document_set")) return MemoTarget::DocumentSet;
+    if (s == QLatin1String("free")) return MemoTarget::Free;
     return MemoTarget::Project;
 }
 
@@ -389,7 +391,7 @@ bool Project::installUndoTriggers()
         return false;
     static const char *const tables[] = {"document_groups", "documents", "codes", "segments",
                                          "memos", "variables", "variable_values",
-                                         "document_sets", "document_set_members", "links"};
+                                         "document_sets", "document_set_members", "links", "memo_links"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -581,6 +583,14 @@ QList<Project::Migration> Project::builtInMigrations()
                          " CHECK (from_end > from_start AND to_end > to_start))"),
           QStringLiteral("CREATE INDEX idx_links_from ON links(from_document_id)"),
           QStringLiteral("CREATE INDEX idx_links_to ON links(to_document_id)")}},
+        {4,
+         {// Memos linked to further elements besides their primary target (issue #9).
+          QStringLiteral("CREATE TABLE memo_links ("
+                         " id INTEGER PRIMARY KEY,"
+                         " memo_id INTEGER NOT NULL REFERENCES memos(id) ON DELETE CASCADE,"
+                         " target_type TEXT NOT NULL, target_id INTEGER NOT NULL,"
+                         " UNIQUE (memo_id, target_type, target_id))"),
+          QStringLiteral("CREATE INDEX idx_memo_links_target ON memo_links(target_type, target_id)")}},
     };
 }
 
@@ -741,15 +751,43 @@ void Project::setMeta(const QString &key, const QString &value)
          {key, value});
 }
 
+// A memo is orphaned only when none of its elements is left. Links to deleted elements go first;
+// a memo whose primary target was deleted then moves to its first remaining link.
 void Project::removeOrphanMemos()
 {
-    exec(QStringLiteral(
-        "DELETE FROM memos WHERE "
-        "(target_type = 'group' AND target_id NOT IN (SELECT id FROM document_groups)) OR "
+    // Unqualified columns: the condition applies to both memos and memo_links.
+    const QString missing = QStringLiteral(
+        "((target_type = 'group' AND target_id NOT IN (SELECT id FROM document_groups)) OR "
         "(target_type = 'document' AND target_id NOT IN (SELECT id FROM documents)) OR "
         "(target_type = 'code' AND target_id NOT IN (SELECT id FROM codes)) OR "
         "(target_type = 'segment' AND target_id NOT IN (SELECT id FROM segments)) OR "
-        "(target_type = 'document_set' AND target_id NOT IN (SELECT id FROM document_sets))"));
+        "(target_type = 'document_set' AND target_id NOT IN (SELECT id FROM document_sets)))");
+    exec(QStringLiteral("DELETE FROM memo_links WHERE ") + missing);
+    exec(QStringLiteral(
+             "UPDATE memos SET"
+             " target_type = (SELECT l.target_type FROM memo_links l WHERE l.memo_id = memos.id ORDER BY l.id LIMIT 1),"
+             " target_id = (SELECT l.target_id FROM memo_links l WHERE l.memo_id = memos.id ORDER BY l.id LIMIT 1)"
+             " WHERE id IN (SELECT memo_id FROM memo_links) AND ") +
+         missing);
+    // The promoted link is now the primary target.
+    exec(QStringLiteral("DELETE FROM memo_links WHERE id IN (SELECT l.id FROM memo_links l JOIN memos m"
+                        " ON m.id = l.memo_id AND m.target_type = l.target_type AND m.target_id = l.target_id)"));
+    exec(QStringLiteral("DELETE FROM memos WHERE ") + missing);
+}
+
+bool Project::memoTargetExists(MemoTarget type, qint64 id) const
+{
+    QString table;
+    switch (type) {
+    case MemoTarget::Group: table = QStringLiteral("document_groups"); break;
+    case MemoTarget::Document: table = QStringLiteral("documents"); break;
+    case MemoTarget::Code: table = QStringLiteral("codes"); break;
+    case MemoTarget::Segment: table = QStringLiteral("segments"); break;
+    case MemoTarget::DocumentSet: table = QStringLiteral("document_sets"); break;
+    case MemoTarget::Project:
+    case MemoTarget::Free: return false;
+    }
+    return scalar(QStringLiteral("SELECT COUNT(*) FROM %1 WHERE id = ?").arg(table), {id}).toInt() > 0;
 }
 
 // ---------------------------------------------------------------- groups
@@ -1495,10 +1533,15 @@ Memo Project::memo(qint64 id) const
 Memo Project::memoFor(MemoTarget type, qint64 targetId) const
 {
     QSqlQuery q(m_db);
+    const QString target = memoTargetToString(type);
     q.prepare(QStringLiteral("SELECT ") + kMemoColumns +
-              QStringLiteral(" FROM memos WHERE target_type = ? AND target_id = ? ORDER BY id LIMIT 1"));
-    q.addBindValue(memoTargetToString(type));
-    q.addBindValue(targetId);
+              QStringLiteral(" FROM memos WHERE (target_type = ? AND target_id = ?)"
+                             " OR id IN (SELECT memo_id FROM memo_links WHERE target_type = ? AND target_id = ?)"
+                             " ORDER BY (target_type = ? AND target_id = ?) DESC, id LIMIT 1"));
+    for (int i = 0; i < 3; ++i) {
+        q.addBindValue(target);
+        q.addBindValue(targetId);
+    }
     if (q.exec() && q.next())
         return readMemo(q);
     Memo m;
@@ -1541,12 +1584,84 @@ QHash<qint64, qint64> Project::memoIdsFor(MemoTarget type) const
 {
     QHash<qint64, qint64> out;
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT target_id, MIN(id) FROM memos WHERE target_type = ? GROUP BY target_id"));
+    q.prepare(QStringLiteral("SELECT target_id, MIN(memo_id) FROM ("
+                             " SELECT target_id, id AS memo_id FROM memos WHERE target_type = ?"
+                             " UNION ALL SELECT target_id, memo_id FROM memo_links WHERE target_type = ?)"
+                             " GROUP BY target_id"));
+    q.addBindValue(memoTargetToString(type));
     q.addBindValue(memoTargetToString(type));
     q.exec();
     while (q.next())
         out.insert(q.value(0).toLongLong(), q.value(1).toLongLong());
     return out;
+}
+
+bool Project::isLinkableMemoTarget(MemoTarget type)
+{
+    return type != MemoTarget::Project && type != MemoTarget::Free;
+}
+
+QList<MemoLink> Project::memoLinks(qint64 memoId) const
+{
+    QList<MemoLink> out;
+    const Memo m = memo(memoId);
+    if (!m.id)
+        return out;
+    if (isLinkableMemoTarget(m.targetType))
+        out.append({m.targetType, m.targetId});
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT target_type, target_id FROM memo_links WHERE memo_id = ? ORDER BY id"));
+    q.addBindValue(memoId);
+    q.exec();
+    while (q.next()) {
+        const MemoLink l{memoTargetFromString(q.value(0).toString()), q.value(1).toLongLong()};
+        if (isLinkableMemoTarget(l.targetType) && !out.contains(l))
+            out << l;
+    }
+    return out;
+}
+
+bool Project::setMemoLinks(qint64 memoId, const QList<MemoLink> &links)
+{
+    setUndoLabel(tr("Collega memo"));
+    const Memo m = memo(memoId);
+    if (!m.id)
+        return fail(tr("Il memo non esiste più"));
+    QList<MemoLink> wanted;
+    for (const MemoLink &l : links)
+        if (isLinkableMemoTarget(l.targetType) && !wanted.contains(l) && memoTargetExists(l.targetType, l.targetId))
+            wanted << l;
+
+    beginBatch();
+    bool ok = true;
+    MemoLink primary{m.targetType, m.targetId};
+    if (isLinkableMemoTarget(m.targetType) && !wanted.contains(primary)) {
+        primary = wanted.isEmpty() ? MemoLink{MemoTarget::Free, 0} : wanted.first();
+        ok = exec(QStringLiteral("UPDATE memos SET target_type = ?, target_id = ? WHERE id = ?"),
+                  {memoTargetToString(primary.targetType), primary.targetId, memoId});
+    }
+    wanted.removeAll(primary);
+    ok = ok && exec(QStringLiteral("DELETE FROM memo_links WHERE memo_id = ?"), {memoId});
+    for (const MemoLink &l : std::as_const(wanted))
+        ok = ok && exec(QStringLiteral("INSERT INTO memo_links(memo_id, target_type, target_id) VALUES (?, ?, ?)"),
+                        {memoId, memoTargetToString(l.targetType), l.targetId});
+    if (!ok) {
+        rollbackBatch();
+        return false;
+    }
+    notify(&Project::memosChanged);
+    return commitBatch();
+}
+
+bool Project::addMemoLink(qint64 memoId, MemoTarget type, qint64 targetId)
+{
+    if (!isLinkableMemoTarget(type) || !memoTargetExists(type, targetId))
+        return false;
+    QList<MemoLink> links = memoLinks(memoId);
+    if (links.contains(MemoLink{type, targetId}))
+        return true;
+    links.append({type, targetId});
+    return setMemoLinks(memoId, links);
 }
 
 // ---------------------------------------------------------------- variables

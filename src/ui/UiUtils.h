@@ -6,10 +6,12 @@
 
 class QWidget;
 class Project;
+struct Memo;
 
 namespace Ui {
 
 inline constexpr const char *CodeMimeType = "application/x-tessera-code-id";
+inline constexpr const char *DocumentMimeType = "application/x-tessera-document-id";
 
 // Names, document text and other values may come from imported files. Qt renders tooltips,
 // labels and message boxes as rich text when the text looks like HTML, and rich text loads the
@@ -32,7 +34,12 @@ QString saveFileName(QWidget *parent, const QString &title, const QString &sugge
 QString openFileName(QWidget *parent, const QString &title, const QString &filter);
 QStringList openFileNames(QWidget *parent, const QString &title, const QString &filter);
 
-// Opens the memo editor for an object. Returns true if the memo was saved or deleted.
-bool editMemo(QWidget *parent, Project *project, int targetType, qint64 targetId, const QString &targetLabel);
+// Opens the (non-modal) memo editor for an object: its memo, or a new one. The window stays open
+// while the user works elsewhere, so codes and documents can be dragged onto it.
+void editMemo(QWidget *parent, Project *project, int targetType, qint64 targetId);
+// Opens the editor for a memo; an editor already open for the same memo is raised instead.
+void openMemo(QWidget *parent, Project *project, const Memo &memo);
+// "Codice: Tema > Sotto", "Documento: Intervista"… for a memo target (MemoTarget as int).
+QString memoTargetLabel(const Project *project, int targetType, qint64 targetId);
 
 } // namespace Ui

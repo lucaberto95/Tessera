@@ -38,6 +38,7 @@ protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
     void dropEvent(QDropEvent *event) override;
+    QMimeData *mimeData(const QList<QTreeWidgetItem *> &items) const override;
 
 private:
     static bool isDocument(const QTreeWidgetItem *item);

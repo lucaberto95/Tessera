@@ -10,7 +10,9 @@
 #include "ui/LinksDialog.h"
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
+#include "ui/MemoDialog.h"
 #include "ui/MemoManager.h"
+#include "ui/UiUtils.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
@@ -23,6 +25,8 @@
 #include <QImage>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMimeData>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTableWidget>
@@ -30,7 +34,10 @@
 #include <QTest>
 #include <QTextDocument>
 #include <QTextEdit>
+#include <QTreeWidgetItemIterator>
 #include <QUrl>
+
+#include <memory>
 
 class TestUi : public QObject {
     Q_OBJECT
@@ -664,6 +671,95 @@ private slots:
         auto *results = search.findChild<QTableWidget *>();
         QCOMPARE(results->rowCount(), 3); // "videochiamata", "Teams", "video"
         shot(&search, "search");
+    }
+
+    void memoLinks()
+    {
+        const qint64 a = codeNamed("Benefici");
+        const qint64 b = codeNamed("Isolamento");
+        const qint64 c = codeNamed("Strumenti digitali");
+        const qint64 doc = m_project->documents().first().id;
+        Memo memo;
+        memo.targetType = MemoTarget::Free;
+        MemoDialog dlg(m_project, memo);
+        dlg.show();
+        QVERIFY(dlg.links().isEmpty());
+
+        // A code dropped on the text becomes a link, not text.
+        auto *body = dlg.findChild<QPlainTextEdit *>();
+        QMimeData codeMime;
+        codeMime.setData(QString::fromLatin1(Ui::CodeMimeType), QByteArray::number(a));
+        codeMime.setText("Benefici");
+        const QPointF pos(20, 20);
+        QDragEnterEvent enter(pos.toPoint(), Qt::CopyAction, &codeMime, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(body->viewport(), &enter);
+        QVERIFY(enter.isAccepted());
+        QDropEvent drop(pos, Qt::CopyAction, &codeMime, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(body->viewport(), &drop);
+        QVERIFY(body->toPlainText().isEmpty());
+        QCOMPARE(dlg.links(), (QList<MemoLink>{{MemoTarget::Code, a}}));
+
+        // Documents dragged from the document tree carry their id.
+        DocumentTree docs(m_project);
+        docs.rebuild();
+        const QModelIndex docIndex = docs.model()->index(0, 0, docs.model()->index(0, 0));
+        std::unique_ptr<QMimeData> docMime(docs.model()->mimeData({docIndex}));
+        QVERIFY(docMime->hasFormat(QString::fromLatin1(Ui::DocumentMimeType)));
+        QDragEnterEvent docEnter(pos.toPoint(), Qt::CopyAction, docMime.get(), Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(&dlg, &docEnter);
+        QVERIFY(docEnter.isAccepted());
+        QDropEvent docDrop(pos, Qt::CopyAction, docMime.get(), Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(&dlg, &docDrop);
+        QVERIFY(docDrop.isAccepted());
+        QCOMPARE(dlg.links().size(), 2);
+        QCOMPARE(dlg.links().last(), (MemoLink{MemoTarget::Document, doc}));
+
+        // The picker lists codes, documents and segments; already linked ones are not added twice.
+        MemoLinkPicker picker(m_project, dlg.links());
+        int checkedNow = 0;
+        for (QTreeWidgetItemIterator it(picker.tree()); *it; ++it) {
+            if ((*it)->checkState(0) == Qt::Checked)
+                ++checkedNow;
+            if ((*it)->text(0) == "Strumenti digitali" || (*it)->text(0) == "Isolamento" ||
+                (*it)->text(0) == "Benefici")
+                (*it)->setCheckState(0, Qt::Checked);
+        }
+        QCOMPARE(checkedNow, 2);
+        QCOMPARE(picker.selectedLinks(), (QList<MemoLink>{{MemoTarget::Code, b}, {MemoTarget::Code, c}}));
+        dlg.addLinks(picker.selectedLinks());
+        QCOMPARE(dlg.links().size(), 4);
+        dlg.removeLinks({1}); // the document
+        dlg.findChild<QLineEdit *>()->setText("Memo teorico");
+        shot(&dlg, "memo_links");
+        QVERIFY(dlg.save());
+
+        const qint64 id = dlg.memoId();
+        QVERIFY(id);
+        QCOMPARE(m_project->memo(id).targetType, MemoTarget::Free);
+        const QList<MemoLink> abc = {{MemoTarget::Code, a}, {MemoTarget::Code, b}, {MemoTarget::Code, c}};
+        QCOMPARE(m_project->memoLinks(id), abc);
+        QCOMPARE(m_project->undoLabel(), QString("Memo"));
+
+        // The memo icon appears on all three codes.
+        CodeTree codes(m_project);
+        codes.rebuild();
+        for (const QString &name : {QString("Benefici"), QString("Isolamento"), QString("Strumenti digitali")}) {
+            const QList<QTreeWidgetItem *> found = codes.findItems(name, Qt::MatchExactly | Qt::MatchRecursive);
+            QCOMPARE(found.size(), 1);
+            QVERIFY(!found.first()->icon(1).isNull());
+        }
+
+        // The memo manager lists every element of the memo.
+        MemoManager memos(m_project);
+        auto *table = memos.findChild<QTableWidget *>();
+        bool listed = false;
+        for (int row = 0; row < table->rowCount(); ++row)
+            if (table->item(row, 1)->text() == "Memo teorico")
+                listed = table->item(row, 0)->text().count("Codice:") == 3;
+        QVERIFY(listed);
+
+        QVERIFY(m_project->undo());
+        QVERIFY(!m_project->memo(id).id);
     }
 
     void mainWindow()

@@ -3,6 +3,7 @@
 #include <QDialog>
 
 class Project;
+struct Memo;
 class QTableWidget;
 
 // Lists all memos of the project; double-click opens one.
@@ -16,7 +17,7 @@ signals:
 
 private:
     void refresh();
-    QString targetLabel(int type, qint64 id) const;
+    QString targetLabel(const Memo &memo) const;
     void openRow(int row);
 
     Project *m_project;

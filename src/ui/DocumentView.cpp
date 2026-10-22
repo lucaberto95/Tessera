@@ -709,10 +709,8 @@ void DocumentView::showTextMenu(const QPoint &globalPos, int position)
                 if (ok)
                     m_project->setSegmentWeight(s.id, w);
             });
-            sub->addAction(Ui::memoIcon(), tr("Memo…"), this, [this, s] {
-                Ui::editMemo(this, m_project, int(MemoTarget::Segment), s.id,
-                             tr("segmento \"%1\"").arg(TextUtils::excerpt(rawText(m_edit), s.start, s.end, 80)));
-            });
+            sub->addAction(Ui::memoIcon(), tr("Memo…"), this,
+                           [this, s] { Ui::editMemo(this, m_project, int(MemoTarget::Segment), s.id); });
             sub->addSeparator();
             sub->addAction(tr("Rimuovi codifica"), this, [this, s] { m_project->deleteSegment(s.id); });
         }

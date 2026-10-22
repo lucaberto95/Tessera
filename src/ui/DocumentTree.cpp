@@ -6,6 +6,7 @@
 #include <QDropEvent>
 #include <QHeaderView>
 #include <QMenu>
+#include <QMimeData>
 #include <QStyle>
 #include <QTreeWidgetItemIterator>
 
@@ -320,19 +321,25 @@ void DocumentTree::deleteItem(QTreeWidgetItem *item)
 void DocumentTree::editMemo(QTreeWidgetItem *item)
 {
     MemoTarget target = MemoTarget::Document;
-    QString label = tr("documento ");
     switch (item->data(0, KindRole).toInt()) {
     case GroupItem:
         target = MemoTarget::Group;
-        label = tr("gruppo ");
         break;
     case SetItem:
         target = MemoTarget::DocumentSet;
-        label = tr("set ");
         break;
     }
-    Ui::editMemo(this, m_project, int(target), item->data(0, IdRole).toLongLong(),
-                 label + QLatin1Char('"') + item->text(0) + QLatin1Char('"'));
+    Ui::editMemo(this, m_project, int(target), item->data(0, IdRole).toLongLong());
+}
+
+// Documents also carry their id in Tessera's own format, so they can be dropped onto a memo.
+QMimeData *DocumentTree::mimeData(const QList<QTreeWidgetItem *> &items) const
+{
+    QMimeData *mime = QTreeWidget::mimeData(items);
+    if (mime && items.size() == 1 && isDocument(items.first()))
+        mime->setData(QString::fromLatin1(Ui::DocumentMimeType),
+                      QByteArray::number(items.first()->data(0, IdRole).toLongLong()));
+    return mime;
 }
 
 void DocumentTree::addSetMenu(QMenu *menu, qint64 documentId)
