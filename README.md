@@ -43,7 +43,8 @@ da remoto, già codificate, con variabili e memo.
 | `Ctrl+E` | Codifica la selezione con il codice selezionato |
 | `Ctrl+Shift+E` | Codifica la selezione con un nuovo codice |
 | `Ctrl+Z` / `Ctrl+Y` | Annulla / ripeti |
-| `Ctrl+F` | Ricerca lessicale |
+| `Ctrl+F` | Cerca nel documento aperto (barra di ricerca; `F3` / `Maiusc+F3` per scorrere, `Esc` per chiudere) |
+| `Ctrl+Shift+F` | Ricerca lessicale su tutto il progetto |
 | `Ctrl+M` | Matrice codici × documenti |
 | `Ctrl+Shift+M` | Tutti i memo |
 | `Ctrl+rotella` | Zoom del testo |
