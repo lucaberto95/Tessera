@@ -98,7 +98,8 @@ StatsDialog::StatsDialog(Project *project, const QList<qint64> &activeDocuments,
     statsBar->addWidget(new QLabel(tr("Variabile:")));
     statsBar->addWidget(m_variable);
     statsBar->addStretch();
-    auto *statsCsv = new QPushButton(tr("Esporta CSV…"));
+    auto *statsCsv = new QPushButton(tr("Esporta…"));
+    statsCsv->setToolTip(tr("Esporta in Excel (.xlsx), CSV o HTML"));
     connect(statsCsv, &QPushButton::clicked, this, [this] { exportTable(m_statsExport, tr("statistiche")); });
     statsBar->addWidget(statsCsv);
     statsLayout->addLayout(statsBar);
@@ -121,7 +122,8 @@ StatsDialog::StatsDialog(Project *project, const QList<qint64> &activeDocuments,
     crossBar->addWidget(m_measure);
     crossBar->addWidget(m_percent);
     crossBar->addStretch();
-    auto *crossCsv = new QPushButton(tr("Esporta CSV…"));
+    auto *crossCsv = new QPushButton(tr("Esporta…"));
+    crossCsv->setToolTip(tr("Esporta in Excel (.xlsx), CSV o HTML"));
     connect(crossCsv, &QPushButton::clicked, this, [this] { exportTable(m_crosstabExport, tr("tabella incrociata")); });
     crossBar->addWidget(crossCsv);
     auto *toVariables = new QPushButton(tr("Codici in variabili"));
@@ -396,10 +398,15 @@ void StatsDialog::rebuildCrosstab()
 
 void StatsDialog::exportTable(const Exporters::Table &table, const QString &suffix)
 {
-    const QString path = Ui::saveFileName(this, tr("Esporta"), m_project->name() + QStringLiteral(" - ") + suffix + QStringLiteral(".csv"),
-                                          tr("CSV per Excel (*.csv);;Pagina HTML (*.html)"));
+    const QString path = Ui::saveFileName(this, tr("Esporta"), m_project->name() + QStringLiteral(" - ") + suffix + QStringLiteral(".xlsx"),
+                                          tr("Cartella di lavoro Excel (*.xlsx);;CSV per Excel (*.csv);;"
+                                             "Pagina HTML (*.html)"));
     if (path.isEmpty())
         return;
+    if (Ui::isXlsxPath(path)) {
+        Ui::saveXlsx(this, path, {Exporters::tableSheet(suffix, table)});
+        return;
+    }
     QString error;
     const bool ok = path.endsWith(QLatin1String(".html"), Qt::CaseInsensitive)
                         ? Exporters::writeHtmlTable(path, windowTitle(), table, &error)

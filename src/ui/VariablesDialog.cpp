@@ -144,7 +144,7 @@ VariablesDialog::VariablesDialog(Project *project, QWidget *parent)
     addButton(tr("Rinomina…"), &VariablesDialog::renameVariable);
     addButton(tr("Elimina variabile"), &VariablesDialog::deleteVariable);
     addButton(tr("Importa CSV…"), &VariablesDialog::importCsv);
-    addButton(tr("Esporta CSV…"), &VariablesDialog::exportCsv);
+    addButton(tr("Esporta…"), &VariablesDialog::exportValues);
 
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(hint);
@@ -304,12 +304,16 @@ void VariablesDialog::importCsv()
     refresh();
 }
 
-void VariablesDialog::exportCsv()
+void VariablesDialog::exportValues()
 {
-    const QString path = Ui::saveFileName(this, tr("Esporta variabili"), m_project->name() + tr(" - variabili.csv"),
-                                          tr("CSV per Excel (*.csv)"));
+    const QString path = Ui::saveFileName(this, tr("Esporta variabili"), m_project->name() + tr(" - variabili.xlsx"),
+                                          tr("Cartella di lavoro Excel (*.xlsx);;CSV per Excel (*.csv)"));
     if (path.isEmpty())
         return;
+    if (Ui::isXlsxPath(path)) {
+        Ui::saveXlsx(this, path, {Exporters::variablesSheet(*m_project)});
+        return;
+    }
     QString error;
     if (!Exporters::writeCsv(path, Exporters::variablesTable(*m_project), &error))
         Ui::showError(this, error);

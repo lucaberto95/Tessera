@@ -62,9 +62,12 @@ bool writeUtf8(const QString &path, const QString &content, bool bom, QString *e
     return true;
 }
 
-QString dateString(const QDateTime &dt)
+QString dateString(const QDateTime &dt, bool iso = false)
 {
-    return dt.isValid() ? QLocale().toString(dt.toLocalTime(), QLocale::ShortFormat) : QString();
+    if (!dt.isValid())
+        return {};
+    return iso ? dt.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
+               : QLocale().toString(dt.toLocalTime(), QLocale::ShortFormat);
 }
 
 const char *const kHtmlStyle =
@@ -179,7 +182,7 @@ bool writeHtmlTable(const QString &path, const QString &title, const Table &rows
     return writeUtf8(path, html, false, error);
 }
 
-Table segmentsTable(const Project &project, const QList<Segment> &segments)
+Table segmentsTable(const Project &project, const QList<Segment> &segments, bool isoDates)
 {
     QHash<qint64, QString> groupNames;
     for (const DocumentGroup &g : project.groups())
@@ -202,7 +205,7 @@ Table segmentsTable(const Project &project, const QList<Segment> &segments)
         const Document d = docs.value(s.documentId);
         rows << QStringList{groupNames.value(d.groupId), d.name, codePaths.value(s.codeId), QString::number(s.start),
                             QString::number(s.end), QString::number(s.weight), s.comment, s.author,
-                            dateString(s.createdAt), texts.value(s.documentId).mid(s.start, s.length())};
+                            dateString(s.createdAt, isoDates), texts.value(s.documentId).mid(s.start, s.length())};
     }
     return rows;
 }
@@ -291,6 +294,160 @@ Table variablesTable(const Project &project)
         rows << row;
     }
     return rows;
+}
+
+Table documentsTable(const Project &project, bool isoDates)
+{
+    QHash<qint64, QString> groupNames;
+    for (const DocumentGroup &g : project.groups())
+        groupNames.insert(g.id, g.name);
+    QHash<qint64, QStringList> setNames;
+    for (const DocumentSet &s : project.documentSets())
+        for (qint64 doc : project.documentSetMembers(s.id))
+            setNames[doc] << s.name;
+    const QHash<qint64, int> segmentCounts = project.segmentCountByDocument();
+
+    Table rows;
+    rows << QStringList{QObject::tr("Documento"), QObject::tr("Gruppo"), QObject::tr("Set"), QObject::tr("Segmenti"),
+                        QObject::tr("Caratteri"), QObject::tr("Importato"), QObject::tr("File di origine")};
+    for (const Document &d : project.documents())
+        rows << QStringList{d.name, groupNames.value(d.groupId), setNames.value(d.id).join(QStringLiteral("; ")),
+                            QString::number(segmentCounts.value(d.id)),
+                            QString::number(project.documentText(d.id).size()), dateString(d.importedAt, isoDates),
+                            d.sourcePath};
+    return rows;
+}
+
+QString memoTargetLabel(const Project &project, MemoTarget type, qint64 id)
+{
+    switch (type) {
+    case MemoTarget::Project:
+        return QObject::tr("Progetto");
+    case MemoTarget::Free:
+        return QObject::tr("Memo libero");
+    case MemoTarget::Group:
+        for (const DocumentGroup &g : project.groups())
+            if (g.id == id)
+                return QObject::tr("Gruppo: %1").arg(g.name);
+        return QObject::tr("Gruppo");
+    case MemoTarget::Document:
+        return QObject::tr("Documento: %1").arg(project.document(id).name);
+    case MemoTarget::Code:
+        return QObject::tr("Codice: %1").arg(project.codePath(id));
+    case MemoTarget::Segment: {
+        const Segment s = project.segment(id);
+        return QObject::tr("Segmento: %1 / %2 – \"%3\"")
+            .arg(project.document(s.documentId).name, project.code(s.codeId).name,
+                 TextUtils::excerpt(project.documentText(s.documentId), s.start, s.end, 50));
+    }
+    case MemoTarget::DocumentSet:
+        for (const DocumentSet &s : project.documentSets())
+            if (s.id == id)
+                return QObject::tr("Set: %1").arg(s.name);
+        return QObject::tr("Set");
+    }
+    return {};
+}
+
+QString memoLinksLabel(const Project &project, const Memo &memo)
+{
+    QStringList labels;
+    if (memo.targetType == MemoTarget::Project)
+        labels << memoTargetLabel(project, MemoTarget::Project, 0);
+    for (const MemoLink &l : project.memoLinks(memo.id))
+        labels << memoTargetLabel(project, l.targetType, l.targetId);
+    if (labels.isEmpty())
+        labels << memoTargetLabel(project, MemoTarget::Free, 0);
+    return labels.join(QStringLiteral("; "));
+}
+
+Table memosTable(const Project &project, bool isoDates)
+{
+    Table rows{{QObject::tr("Collegato a"), QObject::tr("Titolo"), QObject::tr("Testo"), QObject::tr("Autore"),
+                QObject::tr("Creato"), QObject::tr("Modificato")}};
+    for (const Memo &m : project.memos())
+        rows << QStringList{memoLinksLabel(project, m), m.title, m.body, m.author, dateString(m.createdAt, isoDates),
+                            dateString(m.modifiedAt, isoDates)};
+    return rows;
+}
+
+Xlsx::Sheet segmentsSheet(const Project &project, const QList<Segment> &segments)
+{
+    QHash<qint64, QColor> colors;
+    for (const Code &c : project.codes())
+        colors.insert(c.id, c.color);
+    Xlsx::Sheet sheet;
+    sheet.name = QObject::tr("Segmenti");
+    sheet.rows = segmentsTable(project, segments, true);
+    sheet.textColumns = {0, 1, 2, 6, 7, 9};
+    sheet.wrapColumns = {6, 9};
+    for (qsizetype i = 0; i < segments.size(); ++i)
+        sheet.fills.insert({int(i) + 1, 2}, colors.value(segments[i].codeId));
+    return sheet;
+}
+
+Xlsx::Sheet codebookSheet(const Project &project)
+{
+    Xlsx::Sheet sheet;
+    sheet.name = QObject::tr("Codici");
+    sheet.rows = codebookTable(project);
+    sheet.textColumns = {0, 2, 3, 5};
+    sheet.wrapColumns = {3, 5};
+    for (qsizetype r = 1; r < sheet.rows.size(); ++r) {
+        const QColor color = QColor::fromString(sheet.rows[r].value(2));
+        if (color.isValid()) {
+            sheet.fills.insert({int(r), 0}, color);
+            sheet.fills.insert({int(r), 2}, color);
+        }
+    }
+    return sheet;
+}
+
+Xlsx::Sheet variablesSheet(const Project &project)
+{
+    Xlsx::Sheet sheet;
+    sheet.name = QObject::tr("Variabili");
+    sheet.rows = variablesTable(project);
+    sheet.textColumns = {0, 1};
+    const QList<Variable> vars = project.variables();
+    for (qsizetype i = 0; i < vars.size(); ++i)
+        if (vars[i].type == VariableType::Text) // "007" or "2024" typed as text stays text
+            sheet.textColumns.insert(int(i) + 2);
+    return sheet;
+}
+
+Xlsx::Sheet documentsSheet(const Project &project)
+{
+    Xlsx::Sheet sheet;
+    sheet.name = QObject::tr("Documenti");
+    sheet.rows = documentsTable(project, true);
+    sheet.textColumns = {0, 1, 2, 6};
+    return sheet;
+}
+
+Xlsx::Sheet memosSheet(const Project &project)
+{
+    Xlsx::Sheet sheet;
+    sheet.name = QObject::tr("Memo");
+    sheet.rows = memosTable(project, true);
+    sheet.textColumns = {0, 1, 2, 3};
+    sheet.wrapColumns = {0, 2};
+    return sheet;
+}
+
+Xlsx::Sheet tableSheet(const QString &name, const Table &rows)
+{
+    Xlsx::Sheet sheet;
+    sheet.name = name;
+    sheet.rows = rows;
+    sheet.textColumns = {0};
+    return sheet;
+}
+
+QList<Xlsx::Sheet> projectSheets(const Project &project)
+{
+    return {documentsSheet(project), codebookSheet(project), segmentsSheet(project, project.allSegments()),
+            variablesSheet(project), memosSheet(project)};
 }
 
 namespace {

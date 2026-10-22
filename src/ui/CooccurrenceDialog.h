@@ -60,6 +60,7 @@ private:
     QGraphicsScene *m_scene;
     QGraphicsView *m_view;
     Exporters::Table m_exportTable;
+    QMap<std::pair<int, int>, QColor> m_exportFills; // the heatmap, for the .xlsx export
     int m_mapNodes = 0;
     int m_mapEdges = 0;
 };

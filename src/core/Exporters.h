@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Model.h"
+#include "core/Xlsx.h"
 
 #include <QHash>
 #include <QList>
@@ -19,7 +20,9 @@ Table readCsv(const QString &path, QString *error);
 
 bool writeHtmlTable(const QString &path, const QString &title, const Table &rows, QString *error);
 
-Table segmentsTable(const Project &project, const QList<Segment> &segments);
+// isoDates: dates as "yyyy-MM-dd HH:mm:ss" (local time), which the .xlsx export turns into real dates,
+// instead of the short format of the user's locale.
+Table segmentsTable(const Project &project, const QList<Segment> &segments, bool isoDates = false);
 bool exportSegmentsHtml(const Project &project, const QList<Segment> &segments, const QString &path,
                         QString *error);
 
@@ -27,6 +30,25 @@ Table codebookTable(const Project &project);
 bool exportCodebookHtml(const Project &project, const QString &path, QString *error);
 
 Table variablesTable(const Project &project);
+Table documentsTable(const Project &project, bool isoDates = false);
+Table memosTable(const Project &project, bool isoDates = false);
+
+// "Codice: Tema > Sotto", "Documento: Intervista"… for a memo target.
+QString memoTargetLabel(const Project &project, MemoTarget type, qint64 targetId);
+// Every element a memo is attached to, or "Progetto" / "Memo libero" when it has none.
+QString memoLinksLabel(const Project &project, const Memo &memo);
+
+// Sheets for the .xlsx export (Xlsx::writeWorkbook): names and free text kept as text, the code's
+// colour behind the code's cell, long text wrapped, numbers and dates typed.
+Xlsx::Sheet segmentsSheet(const Project &project, const QList<Segment> &segments);
+Xlsx::Sheet codebookSheet(const Project &project);
+Xlsx::Sheet variablesSheet(const Project &project);
+Xlsx::Sheet documentsSheet(const Project &project);
+Xlsx::Sheet memosSheet(const Project &project);
+// A table computed elsewhere (matrices, statistics): the first column holds the row labels.
+Xlsx::Sheet tableSheet(const QString &name, const Table &rows);
+// "Export the whole project": documents, codes, segments, variables and memos, one sheet each.
+QList<Xlsx::Sheet> projectSheets(const Project &project);
 // Validates a user/CSV value against a variable type and returns it in the stored form:
 // decimals with '.', dates as ISO yyyy-MM-dd, booleans as "1"/"0". Empty input is valid.
 bool normalizeVariableValue(VariableType type, const QString &input, QString *out);

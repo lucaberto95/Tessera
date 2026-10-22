@@ -131,6 +131,7 @@ void MainWindow::createActions()
     m_closeProject = make(tr("&Chiudi progetto"), &MainWindow::closeProject);
     m_importQdpx = make(tr("Importa progetto &QDPX (REFI-QDA)…"), &MainWindow::importQdpx, {}, false);
     m_exportQdpx = make(tr("&Esporta come QDPX (REFI-QDA)…"), &MainWindow::exportQdpx);
+    m_exportProjectXlsx = make(tr("Esporta tutto il progetto in E&xcel…"), &MainWindow::exportProjectXlsx);
     m_example = make(tr("Crea progetto di &esempio…"), &MainWindow::newExampleProject, {}, false);
     m_quit = make(tr("&Esci"), &QWidget::close, QKeySequence::Quit, false);
 
@@ -186,7 +187,8 @@ void MainWindow::createActions()
     m_cooccurrence = make(tr("Co-&occorrenze dei codici…"), &MainWindow::showCooccurrence);
     m_statsAction = make(tr("&Statistiche e tabelle incrociate…"), &MainWindow::showStats);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
-    m_exportSegmentsCsv = make(tr("Esporta segmenti recuperati (&Excel/CSV)…"), [this] { m_segments->exportCsv(); });
+    m_exportSegmentsXlsx = make(tr("Esporta segmenti recuperati (&Excel .xlsx)…"), [this] { m_segments->exportXlsx(); });
+    m_exportSegmentsCsv = make(tr("Esporta segmenti recuperati (CS&V per Excel)…"), [this] { m_segments->exportCsv(); });
 
     m_projectMemo = make(tr("Memo del &progetto…"), &MainWindow::editProjectMemo);
     m_memos = make(tr("&Tutti i memo…"), &MainWindow::showMemos, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M));
@@ -208,6 +210,7 @@ void MainWindow::createMenus()
     project->addSeparator();
     project->addAction(m_importQdpx);
     project->addAction(m_exportQdpx);
+    project->addAction(m_exportProjectXlsx);
     project->addSeparator();
     project->addAction(m_example);
     project->addSeparator();
@@ -259,6 +262,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_activateByVariables);
     analysis->addSeparator();
     analysis->addAction(m_exportSegmentsHtml);
+    analysis->addAction(m_exportSegmentsXlsx);
     analysis->addAction(m_exportSegmentsCsv);
 
     QMenu *memos = menuBar()->addMenu(tr("&Memo"));
@@ -595,6 +599,15 @@ void MainWindow::exportQdpx()
         Ui::showError(this, error);
 }
 
+void MainWindow::exportProjectXlsx()
+{
+    m_view->commitEdits();
+    const QString path = Ui::saveFileName(this, tr("Esporta il progetto in Excel"), m_project->name() + QStringLiteral(".xlsx"),
+                                          tr("Cartella di lavoro Excel (*.xlsx)"));
+    if (!path.isEmpty() && Ui::saveXlsx(this, path, Exporters::projectSheets(*m_project)))
+        statusBar()->showMessage(tr("Progetto esportato in %1").arg(path), 5000);
+}
+
 // ---------------------------------------------------------------- documents
 
 void MainWindow::importDocuments(qint64 groupId)
@@ -737,9 +750,14 @@ void MainWindow::codeWithNewCode()
 void MainWindow::exportCodebook()
 {
     const QString path = Ui::saveFileName(this, tr("Esporta codebook"), m_project->name() + tr(" - codebook.html"),
-                                          tr("Pagina HTML (*.html);;CSV per Excel (*.csv)"));
+                                          tr("Pagina HTML (*.html);;Cartella di lavoro Excel (*.xlsx);;"
+                                             "CSV per Excel (*.csv)"));
     if (path.isEmpty())
         return;
+    if (Ui::isXlsxPath(path)) {
+        Ui::saveXlsx(this, path, {Exporters::codebookSheet(*m_project)});
+        return;
+    }
     QString error;
     const bool ok = path.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive)
                         ? Exporters::writeCsv(path, Exporters::codebookTable(*m_project), &error)

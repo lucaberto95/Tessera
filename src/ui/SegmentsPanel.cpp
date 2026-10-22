@@ -45,6 +45,9 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     auto *html = new QToolButton;
     html->setText(tr("Esporta HTML"));
     connect(html, &QToolButton::clicked, this, &SegmentsPanel::exportHtml);
+    auto *xlsx = new QToolButton;
+    xlsx->setText(tr("Esporta Excel (.xlsx)"));
+    connect(xlsx, &QToolButton::clicked, this, &SegmentsPanel::exportXlsx);
     auto *csv = new QToolButton;
     csv->setText(tr("Esporta Excel (CSV)"));
     connect(csv, &QToolButton::clicked, this, &SegmentsPanel::exportCsv);
@@ -56,6 +59,7 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     bar->addWidget(m_codeResults);
     bar->addWidget(m_filter);
     bar->addWidget(html);
+    bar->addWidget(xlsx);
     bar->addWidget(csv);
 
     m_table->setColumnCount(ColumnCount);
@@ -330,4 +334,16 @@ void SegmentsPanel::exportCsv()
     QString error;
     if (!Exporters::writeCsv(path, Exporters::segmentsTable(*m_project, m_segments), &error))
         Ui::showError(this, error);
+}
+
+void SegmentsPanel::exportXlsx()
+{
+    if (m_segments.isEmpty()) {
+        Ui::showError(this, tr("Non ci sono segmenti recuperati da esportare."));
+        return;
+    }
+    const QString path = Ui::saveFileName(this, tr("Esporta segmenti"), m_project->name() + tr(" - segmenti.xlsx"),
+                                          tr("Cartella di lavoro Excel (*.xlsx)"));
+    if (!path.isEmpty())
+        Ui::saveXlsx(this, path, {Exporters::segmentsSheet(*m_project, m_segments)});
 }

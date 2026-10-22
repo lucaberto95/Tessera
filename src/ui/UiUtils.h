@@ -7,6 +7,9 @@
 class QWidget;
 class Project;
 struct Memo;
+namespace Xlsx {
+struct Sheet;
+}
 
 namespace Ui {
 
@@ -41,5 +44,9 @@ void editMemo(QWidget *parent, Project *project, int targetType, qint64 targetId
 void openMemo(QWidget *parent, Project *project, const Memo &memo);
 // "Codice: Tema > Sotto", "Documento: Intervista"… for a memo target (MemoTarget as int).
 QString memoTargetLabel(const Project *project, int targetType, qint64 targetId);
+
+// Writes an .xlsx workbook; shows the error, or a notice when cells were cut to Excel's limit.
+bool saveXlsx(QWidget *parent, const QString &path, const QList<Xlsx::Sheet> &sheets);
+bool isXlsxPath(const QString &path);
 
 } // namespace Ui

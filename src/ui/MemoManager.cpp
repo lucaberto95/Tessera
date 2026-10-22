@@ -62,14 +62,15 @@ MemoManager::MemoManager(Project *project, QWidget *parent)
     });
     connect(exportBtn, &QPushButton::clicked, this, [this] {
         const QString path = Ui::saveFileName(this, tr("Esporta memo"), m_project->name() + tr(" - memo.html"),
-                                              tr("Pagina HTML (*.html);;CSV per Excel (*.csv)"));
+                                              tr("Pagina HTML (*.html);;Cartella di lavoro Excel (*.xlsx);;"
+                                                 "CSV per Excel (*.csv)"));
         if (path.isEmpty())
             return;
-        Exporters::Table rows{{tr("Collegato a"), tr("Titolo"), tr("Testo"), tr("Autore"), tr("Creato"), tr("Modificato")}};
-        for (const Memo &m : m_project->memos())
-            rows << QStringList{targetLabel(m), m.title, m.body, m.author,
-                                QLocale().toString(m.createdAt.toLocalTime(), QLocale::ShortFormat),
-                                QLocale().toString(m.modifiedAt.toLocalTime(), QLocale::ShortFormat)};
+        if (Ui::isXlsxPath(path)) {
+            Ui::saveXlsx(this, path, {Exporters::memosSheet(*m_project)});
+            return;
+        }
+        const Exporters::Table rows = Exporters::memosTable(*m_project);
         QString error;
         const bool ok = path.endsWith(QLatin1String(".csv"), Qt::CaseInsensitive)
                             ? Exporters::writeCsv(path, rows, &error)
@@ -88,14 +89,7 @@ MemoManager::MemoManager(Project *project, QWidget *parent)
 // All the elements of the memo, or "Progetto" / "Memo libero" when it has none.
 QString MemoManager::targetLabel(const Memo &memo) const
 {
-    QStringList labels;
-    if (memo.targetType == MemoTarget::Project)
-        labels << Ui::memoTargetLabel(m_project, int(MemoTarget::Project), 0);
-    for (const MemoLink &l : m_project->memoLinks(memo.id))
-        labels << Ui::memoTargetLabel(m_project, int(l.targetType), l.targetId);
-    if (labels.isEmpty())
-        labels << Ui::memoTargetLabel(m_project, int(MemoTarget::Free), 0);
-    return labels.join(QStringLiteral("; "));
+    return Exporters::memoLinksLabel(*m_project, memo);
 }
 
 void MemoManager::refresh()

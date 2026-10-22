@@ -18,7 +18,7 @@ private:
     void renameVariable();
     void deleteVariable();
     void importCsv();
-    void exportCsv();
+    void exportValues();
     void onItemChanged(QTableWidgetItem *item);
     qint64 currentVariableId() const;
 

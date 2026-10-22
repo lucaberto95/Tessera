@@ -35,6 +35,7 @@
 #include <QTest>
 #include <QTextDocument>
 #include <QTextEdit>
+#include <QToolButton>
 #include <QTreeWidgetItemIterator>
 #include <QUrl>
 
@@ -839,6 +840,18 @@ private slots:
         w.showOverview();
         QTest::qWait(200);
         shot(&w, "main_window");
+
+        // Excel exports: the whole project, and the retrieved segments next to the CSV.
+        QAction *exportAll = nullptr;
+        for (QAction *a : w.findChildren<QAction *>())
+            if (a->text().startsWith("Esporta tutto il progetto in E&xcel"))
+                exportAll = a;
+        QVERIFY(exportAll && exportAll->isEnabled());
+        QStringList buttons;
+        for (QToolButton *b : w.findChild<SegmentsPanel *>()->findChildren<QToolButton *>())
+            buttons << b->text();
+        QVERIFY(buttons.contains("Esporta Excel (.xlsx)"));
+        QVERIFY(buttons.contains("Esporta Excel (CSV)"));
     }
 };
 

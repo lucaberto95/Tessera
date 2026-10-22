@@ -22,7 +22,8 @@ signals:
 
 private:
     void rebuild();
-    void exportTable(const Exporters::Table &table, const QString &suffix);
+    void exportTable(const Exporters::Table &table, const QString &suffix,
+                     const QMap<std::pair<int, int>, QColor> &fills);
 
     Project *m_project;
     QList<qint64> m_docIds;
@@ -34,5 +35,7 @@ private:
     QChartView *m_chart;
     QLabel *m_scopeLabel;
     Exporters::Table m_matrixTable;
+    QMap<std::pair<int, int>, QColor> m_matrixFills; // the heatmap and the code colours, for the .xlsx export
     Exporters::Table m_frequencyTable;
+    QMap<std::pair<int, int>, QColor> m_frequencyFills;
 };

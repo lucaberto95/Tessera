@@ -108,9 +108,10 @@ CooccurrenceDialog::CooccurrenceDialog(Project *project, const QList<qint64> &ac
     auto *matrixLayout = new QVBoxLayout(matrixPage);
     auto *matrixBar = new QHBoxLayout;
     matrixBar->addStretch();
-    auto *exportCsv = new QPushButton(tr("Esporta CSV…"));
-    connect(exportCsv, &QPushButton::clicked, this, &CooccurrenceDialog::exportMatrix);
-    matrixBar->addWidget(exportCsv);
+    auto *exportButton = new QPushButton(tr("Esporta…"));
+    exportButton->setToolTip(tr("Esporta in Excel (.xlsx), CSV o HTML"));
+    connect(exportButton, &QPushButton::clicked, this, &CooccurrenceDialog::exportMatrix);
+    matrixBar->addWidget(exportButton);
     matrixLayout->addLayout(matrixBar);
     matrixLayout->addWidget(m_table);
     tabs->addTab(matrixPage, tr("Matrice"));
@@ -219,9 +220,11 @@ void CooccurrenceDialog::rebuildMatrix()
     }
 
     m_exportTable.clear();
+    m_exportFills.clear();
     m_exportTable << (QStringList{tr("Codice")} + header);
     for (int r = 0; r < n; ++r) {
         QStringList csvRow{header[r]};
+        m_exportFills.insert({r + 1, 0}, codes.value(m_codeIds[r]).color);
         for (int c = 0; c < n; ++c) {
             const double v = cellValue(m_codeIds[r], m_codeIds[c]);
             auto *item = new QTableWidgetItem(r == c || v > 0 ? cellText(v, r == c) : QString());
@@ -231,10 +234,12 @@ void CooccurrenceDialog::rebuildMatrix()
                 bold.setBold(true);
                 item->setFont(bold);
                 item->setBackground(palette().alternateBase());
+                m_exportFills.insert({r + 1, c + 1}, QColor(0xf2, 0xf2, 0xf2));
             } else if (v > 0 && maxValue > 0) {
                 QColor bg = codes.value(m_codeIds[r]).color;
                 bg.setAlpha(40 + int(160.0 * v / maxValue));
                 item->setBackground(bg);
+                m_exportFills.insert({r + 1, c + 1}, bg);
             }
             m_table->setItem(r, c, item);
             csvRow << cellText(v, r == c);
@@ -324,10 +329,17 @@ void CooccurrenceDialog::activateCell(int row, int col)
 
 void CooccurrenceDialog::exportMatrix()
 {
-    const QString path = Ui::saveFileName(this, tr("Esporta"), m_project->name() + tr(" - co-occorrenze.csv"),
-                                          tr("CSV per Excel (*.csv);;Pagina HTML (*.html)"));
+    const QString path = Ui::saveFileName(this, tr("Esporta"), m_project->name() + tr(" - co-occorrenze.xlsx"),
+                                          tr("Cartella di lavoro Excel (*.xlsx);;CSV per Excel (*.csv);;"
+                                             "Pagina HTML (*.html)"));
     if (path.isEmpty())
         return;
+    if (Ui::isXlsxPath(path)) {
+        Xlsx::Sheet sheet = Exporters::tableSheet(tr("Co-occorrenze"), m_exportTable);
+        sheet.fills = m_exportFills;
+        Ui::saveXlsx(this, path, {sheet});
+        return;
+    }
     QString error;
     const bool ok = path.endsWith(QLatin1String(".html"), Qt::CaseInsensitive)
                         ? Exporters::writeHtmlTable(path, windowTitle(), m_exportTable, &error)

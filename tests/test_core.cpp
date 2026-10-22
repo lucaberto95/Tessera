@@ -20,6 +20,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
+#include <QtCore/private/qzipreader_p.h>
 #include <QtCore/private/qzipwriter_p.h>
 
 namespace VF = VariableFilter;
@@ -840,6 +841,139 @@ private slots:
         writeFile("finto.xlsx", "non sono uno zip");
         QVERIFY(Xlsx::readFirstSheet(path("finto.xlsx"), &error).isEmpty());
         QVERIFY(!error.isEmpty());
+    }
+
+    void xlsxWriterRoundTrip()
+    {
+        const QString longText(Xlsx::MaxCellLength + 10, QLatin1Char('a'));
+        Xlsx::Sheet data;
+        data.name = "Dati: prova/1"; // characters Excel refuses in sheet names
+        data.rows = {
+            {"Nome", "Numero", "Data", "Data e ora", "Codice", "Note"},
+            {"Anna", "3.5", "2024-01-01", "2024-01-01 12:30:00", "007", QString::fromUtf8("riga1\nriga2 ☕ \x01")},
+            {"Bruno", "-12", "2024-02-30", "1899-12-31", "1e5", " spazi "},
+            {"2024", "42", "", "", "_x0041_", longText},
+        };
+        data.textColumns = {0};
+        data.wrapColumns = {5};
+        data.fills.insert({1, 0}, QColor("#202060"));       // dark: white text
+        data.fills.insert({2, 0}, QColor(255, 0, 0, 128));  // translucent: laid on white
+        Xlsx::Sheet second;
+        second.name = "dati: prova_1"; // the same name once cleaned, ignoring case
+        second.rows = {{"A"}, {"x"}};
+        Xlsx::Sheet empty;
+
+        QString error;
+        int truncated = -1;
+        QVERIFY2(Xlsx::writeWorkbook(path("out.xlsx"), {data, second, empty}, &error, &truncated), qPrintable(error));
+        QCOMPARE(truncated, 1);
+        QCOMPARE(Xlsx::sheetNames(path("out.xlsx")),
+                 QStringList({"Dati_ prova_1", "dati_ prova_1 (2)", "Foglio 3"}));
+
+        // Numbers and dates come back as values (the reader formats them), invalid dates, dates before
+        // 1900-03-01, "007" and "1e5" stay text; the control character is dropped, spaces are kept.
+        const Xlsx::Table expected{
+            {"Nome", "Numero", "Data", "Data e ora", "Codice", "Note"},
+            {"Anna", "3.5", "2024-01-01", "2024-01-01 12:30:00", "007", QString::fromUtf8("riga1\nriga2 ☕ ")},
+            {"Bruno", "-12", "2024-02-30", "1899-12-31", "1e5", " spazi "},
+            {"2024", "42", "", "", "_x0041_", longText.left(Xlsx::MaxCellLength)},
+        };
+        QCOMPARE(Xlsx::readFirstSheet(path("out.xlsx"), &error), expected);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(Xlsx::readSheet(path("out.xlsx"), 1, &error), Xlsx::Table({{"A"}, {"x"}}));
+        QVERIFY(Xlsx::readSheet(path("out.xlsx"), 2, &error).isEmpty());
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+
+        // The parts Excel needs, typed cells, frozen and filtered header, fills and wrapping.
+        QZipReader zip(path("out.xlsx"));
+        for (const char *part : {"[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/_rels/workbook.xml.rels",
+                                 "xl/styles.xml", "xl/worksheets/sheet1.xml", "xl/worksheets/sheet3.xml"})
+            QVERIFY2(!zip.fileData(QString::fromLatin1(part)).isEmpty(), part);
+        const QByteArray sheet = zip.fileData("xl/worksheets/sheet1.xml");
+        QVERIFY(sheet.contains("<c r=\"B2\"><v>3.5</v></c>"));
+        QVERIFY(sheet.contains("<c r=\"B3\"><v>-12</v></c>"));
+        QVERIFY(sheet.contains("<c r=\"A4\" t=\"inlineStr\"><is><t>2024</t></is></c>")); // a text column
+        QVERIFY(sheet.contains("state=\"frozen\""));
+        QVERIFY(sheet.contains("<autoFilter ref=\"A1:F4\"/>"));
+        QVERIFY(sheet.contains("_x005F_x0041_"));
+        QVERIFY(!sheet.contains("\x01"));
+        const QByteArray styles = zip.fileData("xl/styles.xml");
+        QVERIFY(styles.contains("<b/>"));
+        QVERIFY(styles.contains("<fgColor rgb=\"FF202060\"/>"));
+        QVERIFY(styles.contains("<fgColor rgb=\"FFFF7F7F\"/>"));
+        QVERIFY(styles.contains("<color rgb=\"FFFFFFFF\"/>"));
+        QVERIFY(styles.contains("wrapText=\"1\""));
+        QVERIFY(styles.contains("numFmtId=\"14\""));
+        QVERIFY(styles.contains("numFmtId=\"22\""));
+        const QByteArray workbook = zip.fileData("xl/workbook.xml");
+        QVERIFY(workbook.contains("_xlnm._FilterDatabase"));
+        QVERIFY(workbook.contains("'Dati_ prova_1'!$A$1:$F$4"));
+
+        // Nothing to write.
+        QVERIFY(!Xlsx::writeWorkbook(path("vuoto.xlsx"), {}, &error));
+        QVERIFY(!error.isEmpty());
+    }
+
+    void xlsxProjectExport()
+    {
+        Project p;
+        QVERIFY(p.create(path("excel.tsra")));
+        const qint64 group = p.groups().first().id;
+        const qint64 doc = p.addDocument(group, "Intervista 1", "Il lavoro da casa mi piace molto.");
+        const qint64 doc2 = p.addDocument(group, "2024", "Secondo documento.");
+        p.addDocumentSet("Campione", {doc});
+        const qint64 code = p.addCode(0, "Benessere", QColor("#3366cc"));
+        p.setCodeDescription(code, "Stare bene");
+        p.addSegment(doc, code, 0, 9, 2, "commento");
+        const qint64 age = p.addVariable("Età", VariableType::Integer);
+        const qint64 zip = p.addVariable("CAP", VariableType::Text);
+        const qint64 since = p.addVariable("Dal", VariableType::Date);
+        p.setVariableValue(doc, age, "34");
+        p.setVariableValue(doc, zip, "00184");
+        p.setVariableValue(doc2, since, "2023-09-01");
+        Memo m;
+        m.targetType = MemoTarget::Code;
+        m.targetId = code;
+        m.title = "Nota";
+        m.body = "Testo del memo";
+        p.saveMemo(m);
+
+        QString error;
+        QVERIFY2(Xlsx::writeWorkbook(path("progetto.xlsx"), Exporters::projectSheets(p), &error), qPrintable(error));
+        QCOMPARE(Xlsx::sheetNames(path("progetto.xlsx")),
+                 QStringList({"Documenti", "Codici", "Segmenti", "Variabili", "Memo"}));
+
+        const Xlsx::Table docs = Xlsx::readSheet(path("progetto.xlsx"), 0, &error);
+        QCOMPARE(docs.size(), 3);
+        QCOMPARE(docs[1].mid(0, 5), QStringList({"Intervista 1", "Documenti", "Campione", "1", "33"}));
+        QCOMPARE(docs[2].value(0), QString("2024")); // a name, not a number
+        QVERIFY(QDate::fromString(docs[1].value(5).left(10), Qt::ISODate).isValid()); // a real date
+
+        const Xlsx::Table codes = Xlsx::readSheet(path("progetto.xlsx"), 1, &error);
+        QCOMPARE(codes.value(1), QStringList({"Benessere", "1", "#3366cc", "Stare bene", "1", "Testo del memo"}));
+
+        const Xlsx::Table segs = Xlsx::readSheet(path("progetto.xlsx"), 2, &error);
+        QCOMPARE(segs.size(), 2);
+        QCOMPARE(segs[1].mid(1, 6), QStringList({"Intervista 1", "Benessere", "0", "9", "2", "commento"}));
+        QVERIFY(QDateTime::fromString(segs[1].value(8), "yyyy-MM-dd HH:mm:ss").isValid()); // a real date and time
+        QCOMPARE(segs[1].value(9), QString("Il lavoro"));
+
+        const Xlsx::Table vars = Xlsx::readSheet(path("progetto.xlsx"), 3, &error);
+        QCOMPARE(vars.value(0), QStringList({"Documento", "Gruppo", "Età", "CAP", "Dal"}));
+        QCOMPARE(vars.value(1).mid(2, 2), QStringList({"34", "00184"})); // the text variable keeps its zeros
+        QCOMPARE(vars.value(2).value(4), QString("2023-09-01"));
+
+        const Xlsx::Table memos = Xlsx::readSheet(path("progetto.xlsx"), 4, &error);
+        QCOMPARE(memos.value(1).mid(0, 3), QStringList({"Codice: Benessere", "Nota", "Testo del memo"}));
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+
+        // The code's colour behind the code's cell, typed numbers and dates in the sheet.
+        QZipReader archive(path("progetto.xlsx"));
+        QVERIFY(archive.fileData("xl/styles.xml").contains("<fgColor rgb=\"FF3366CC\"/>"));
+        const QByteArray varsXml = archive.fileData("xl/worksheets/sheet4.xml");
+        QVERIFY(varsXml.contains("<c r=\"C2\"><v>34</v></c>"));
+        QVERIFY(varsXml.contains("<t>00184</t>"));
+        QVERIFY(varsXml.contains("<c r=\"E3\" s=\""));
     }
 
     void surveyImport()

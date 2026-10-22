@@ -43,6 +43,7 @@ private:
     void saveCopyAs();
     void importQdpx();
     void exportQdpx();
+    void exportProjectXlsx();
     void newExampleProject();
     void importDocuments(qint64 groupId);
     void importSurvey();
@@ -86,6 +87,7 @@ private:
     QAction *m_closeProject = nullptr;
     QAction *m_importQdpx = nullptr;
     QAction *m_exportQdpx = nullptr;
+    QAction *m_exportProjectXlsx = nullptr;
     QAction *m_example = nullptr;
     QAction *m_quit = nullptr;
     QAction *m_undo = nullptr;
@@ -113,6 +115,7 @@ private:
     QAction *m_cooccurrence = nullptr;
     QAction *m_statsAction = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;
+    QAction *m_exportSegmentsXlsx = nullptr;
     QAction *m_exportSegmentsCsv = nullptr;
     QAction *m_projectMemo = nullptr;
     QAction *m_memos = nullptr;

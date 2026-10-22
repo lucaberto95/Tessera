@@ -31,6 +31,7 @@ public:
     qint64 codeResults(const QString &codeName);
     void exportHtml();
     void exportCsv();
+    void exportXlsx();
 
 signals:
     void segmentActivated(qint64 documentId, int start, int end, qint64 segmentId);

@@ -69,10 +69,12 @@ src/core/   nessuna dipendenza dai widget (libreria statica tessera_core, usata 
   Cooccurrence   matrice codici × codici (sovrapposizione / vicinanza / stesso documento), Jaccard e layout force-directed
   Stats          statistiche descrittive delle variabili, gruppi di documenti, tabelle incrociate codici × gruppi, codici -> variabili
   VariableFilter condizioni sulle variabili (E/O) -> documenti; ultimo filtro in meta 'variable_filter'
-  Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV
+  Exporters      CSV per Excel (UTF-8 BOM, separatore ';'), tabelle/segmenti HTML, import variabili CSV;
+                 tabelle di documenti/memo, etichette dei bersagli dei memo, fogli .xlsx (`*Sheet`, `projectSheets`)
   Qdpx           export/import REFI-QDA 1.0 (project.qde + sources/*.txt)
-  Xlsx           lettore .xlsx (QZipReader + XML): primo foglio dalle relazioni del workbook, stringhe condivise
-                 e inline, numeri, date dai formati numerici (seriale -> ISO, sistema 1904); servirà a #44 come scrittore
+  Xlsx           lettore .xlsx (QZipReader + XML): fogli dalle relazioni del workbook, stringhe condivise
+                 e inline, numeri, date dai formati numerici (seriale -> ISO, sistema 1904);
+                 scrittore `writeWorkbook(Sheet...)` (QZipWriter, stringhe inline, stili creati al bisogno)
   Survey         import di sondaggi (.xlsx/.csv): ruoli delle colonne (ID / variabile / risposta aperta / ignora),
                  un documento per rispondente con le risposte codificate per domanda, variabili tipizzate
   TextUtils      newline, UTF-16 <-> code point, adattamento di intervalli/segmenti/link dopo modifiche, frasi/paragrafi
@@ -193,6 +195,14 @@ tests/      test_core.cpp (QtTest, logica), test_ui.cpp (widget offscreen)
 - XLSX: una data è solo un numero con uno stile di data (`cellXfs` in `styles.xml`, non `cellStyleXfs`);
   nei codici di formato le parti tra virgolette e tra `[...]` non contano e `m` accanto a `h`/`s` sono minuti.
   Il seriale 60 del sistema 1900 è il 29/02/1900 che non esiste: prima del 61 la base è 31/12/1899.
+- Scrittura XLSX (`Xlsx::writeWorkbook`): una cella diventa numero solo se è un numero C senza zeri
+  iniziali ("007" resta testo) e data solo se è ISO dal 01/03/1900 in poi; le colonne di nomi e testo
+  libero vanno in `Sheet::textColumns` (un documento "2024" non deve diventare un numero). Per avere date
+  vere le tabelle si costruiscono con `isoDates = true`. Excel legge `_xHHHH_` nel testo come un carattere:
+  lo scrittore lo protegge con `_x005F_` e il lettore lo decodifica. Celle oltre 32.767 caratteri troncate
+  (contate per l'avviso), caratteri di controllo tolti; l'ordine degli elementi di `worksheet` e
+  `styleSheet` è imposto dallo schema (Excel altrimenti "ripara" il file). Verificato aprendo i file in
+  Excel via COM (nessun log `error*.xml` di riparazione in `%TEMP%`).
 - `Project::addSegment` rifiuta posizioni fuori dal testo. Durante la modifica del testo,
   `DocumentView` incorpora i segmenti aggiunti da altre parti (codifica automatica), riportandoli
   sul testo modificato: altrimenti il salvataggio li cancellerebbe. Lo stesso vale per i link
@@ -262,6 +272,10 @@ tabella `memo_links`, migrazione v4; più `<NoteRef>` in QDPX).
 `src/core/Survey.*` e `src/core/Xlsx.*`; solo la modalità "un documento per rispondente": testo = domanda + risposta
 per paragrafo, ogni risposta codificata con un codice di primo livello col nome della domanda (riusato se esiste);
 nuovo gruppo; rispondenti senza risposte aperte saltati; un solo passo di undo; dall'.xlsx si legge solo il primo foglio).
+**#44** export Excel `.xlsx` nativo (`Xlsx::writeWorkbook` + fogli in `Exporters`; pulsante "Esporta Excel (.xlsx)"
+nel pannello dei segmenti, filtro .xlsx nei dialoghi di salvataggio di codebook, variabili, memo, matrice,
+co-occorrenze e statistiche, il CSV resta; menu Progetto ▸ "Esporta tutto il progetto in Excel…" = 5 fogli;
+heatmap e colori dei codici come riempimenti statici, non formattazione condizionale; `Ui::saveXlsx` avvisa delle celle troncate).
 Aggiornare questo elenco quando una issue viene chiusa.
 
 Attenzione: non usare `git stash` per "provare" qualcosa e non resettare `main` con `--hard`.

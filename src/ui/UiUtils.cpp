@@ -1,6 +1,7 @@
 #include "ui/UiUtils.h"
+#include "core/Exporters.h"
 #include "core/Project.h"
-#include "core/TextUtils.h"
+#include "core/Xlsx.h"
 #include "ui/MemoDialog.h"
 
 #include <QApplication>
@@ -148,33 +149,27 @@ void openMemo(QWidget *parent, Project *project, const Memo &memo)
 
 QString memoTargetLabel(const Project *project, int targetType, qint64 id)
 {
-    switch (static_cast<MemoTarget>(targetType)) {
-    case MemoTarget::Project:
-        return QObject::tr("Progetto");
-    case MemoTarget::Free:
-        return QObject::tr("Memo libero");
-    case MemoTarget::Group:
-        for (const DocumentGroup &g : project->groups())
-            if (g.id == id)
-                return QObject::tr("Gruppo: %1").arg(g.name);
-        return QObject::tr("Gruppo");
-    case MemoTarget::Document:
-        return QObject::tr("Documento: %1").arg(project->document(id).name);
-    case MemoTarget::Code:
-        return QObject::tr("Codice: %1").arg(project->codePath(id));
-    case MemoTarget::Segment: {
-        const Segment s = project->segment(id);
-        return QObject::tr("Segmento: %1 / %2 – \"%3\"")
-            .arg(project->document(s.documentId).name, project->code(s.codeId).name,
-                 TextUtils::excerpt(project->documentText(s.documentId), s.start, s.end, 50));
+    return Exporters::memoTargetLabel(*project, static_cast<MemoTarget>(targetType), id);
+}
+
+bool saveXlsx(QWidget *parent, const QString &path, const QList<Xlsx::Sheet> &sheets)
+{
+    QString error;
+    int truncated = 0;
+    if (!Xlsx::writeWorkbook(path, sheets, &error, &truncated)) {
+        showError(parent, error);
+        return false;
     }
-    case MemoTarget::DocumentSet:
-        for (const DocumentSet &s : project->documentSets())
-            if (s.id == id)
-                return QObject::tr("Set: %1").arg(s.name);
-        return QObject::tr("Set");
-    }
-    return {};
+    if (truncated > 0)
+        showInfo(parent, QObject::tr("Esporta in Excel"),
+                 QObject::tr("%n celle superavano il limite di Excel di 32.767 caratteri e sono state troncate.",
+                             nullptr, truncated));
+    return true;
+}
+
+bool isXlsxPath(const QString &path)
+{
+    return path.endsWith(QLatin1String(".xlsx"), Qt::CaseInsensitive);
 }
 
 } // namespace Ui

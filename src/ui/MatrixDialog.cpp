@@ -63,8 +63,10 @@ MatrixDialog::MatrixDialog(Project *project, const QList<qint64> &activeDocument
     options->addWidget(m_presenceOnly);
     options->addWidget(m_aggregate);
     options->addStretch();
-    auto *exportMatrix = new QPushButton(tr("Esporta CSV…"));
-    connect(exportMatrix, &QPushButton::clicked, this, [this] { exportTable(m_matrixTable, tr("matrice")); });
+    auto *exportMatrix = new QPushButton(tr("Esporta…"));
+    exportMatrix->setToolTip(tr("Esporta in Excel (.xlsx), CSV o HTML"));
+    connect(exportMatrix, &QPushButton::clicked, this,
+            [this] { exportTable(m_matrixTable, tr("matrice"), m_matrixFills); });
     options->addWidget(exportMatrix);
     matrixLayout->addLayout(options);
     matrixLayout->addWidget(m_matrix);
@@ -72,8 +74,10 @@ MatrixDialog::MatrixDialog(Project *project, const QList<qint64> &activeDocument
 
     auto *freqPage = new QWidget;
     auto *freqLayout = new QVBoxLayout(freqPage);
-    auto *exportFreq = new QPushButton(tr("Esporta CSV…"));
-    connect(exportFreq, &QPushButton::clicked, this, [this] { exportTable(m_frequencyTable, tr("frequenze")); });
+    auto *exportFreq = new QPushButton(tr("Esporta…"));
+    exportFreq->setToolTip(tr("Esporta in Excel (.xlsx), CSV o HTML"));
+    connect(exportFreq, &QPushButton::clicked, this,
+            [this] { exportTable(m_frequencyTable, tr("frequenze"), m_frequencyFills); });
     auto *freqBar = new QHBoxLayout;
     freqBar->addStretch();
     freqBar->addWidget(exportFreq);
@@ -136,12 +140,14 @@ void MatrixDialog::rebuild()
         m_matrix->verticalHeaderItem(r)->setIcon(Ui::colorIcon(codes.value(m_codeIds[r]).color));
 
     m_matrixTable.clear();
+    m_matrixFills.clear();
     m_matrixTable << (QStringList{tr("Codice")} + header);
     QList<int> colTotals(cols + 1, 0);
     for (int r = 0; r < rows; ++r) {
         int rowTotal = 0;
         QStringList csvRow{vheader[r]};
         QColor base = codes.value(m_codeIds[r]).color;
+        m_matrixFills.insert({r + 1, 0}, base);
         for (int c = 0; c < cols; ++c) {
             const int v = values[r][c];
             rowTotal += v;
@@ -152,6 +158,7 @@ void MatrixDialog::rebuild()
                 QColor bg = base;
                 bg.setAlpha(40 + int(160.0 * v / maxValue));
                 item->setBackground(bg);
+                m_matrixFills.insert({r + 1, c + 1}, bg);
             }
             m_matrix->setItem(r, c, item);
             csvRow << QString::number(v);
@@ -185,6 +192,7 @@ void MatrixDialog::rebuild()
     m_frequencies->setHorizontalHeaderLabels({tr("Codice"), tr("Segmenti"), tr("Documenti"), tr("% documenti")});
     m_frequencies->setRowCount(rows);
     m_frequencyTable.clear();
+    m_frequencyFills.clear();
     m_frequencyTable << QStringList{tr("Codice"), tr("Segmenti"), tr("Documenti"), tr("% documenti")};
     QList<std::pair<qint64, int>> chartData;
     for (int r = 0; r < rows; ++r) {
@@ -211,6 +219,7 @@ void MatrixDialog::rebuild()
             m_frequencies->setItem(r, c, item);
         }
         m_frequencyTable << row;
+        m_frequencyFills.insert({r + 1, 0}, codes.value(m_codeIds[r]).color);
         chartData.append({m_codeIds[r], segs});
     }
     m_frequencies->setSortingEnabled(true);
@@ -255,13 +264,21 @@ void MatrixDialog::rebuild()
     delete old;
 }
 
-void MatrixDialog::exportTable(const Exporters::Table &table, const QString &suffix)
+void MatrixDialog::exportTable(const Exporters::Table &table, const QString &suffix,
+                               const QMap<std::pair<int, int>, QColor> &fills)
 {
     const QString path = Ui::saveFileName(this, tr("Esporta"), m_project->name() + QStringLiteral(" - ") + suffix +
-                                                                   QStringLiteral(".csv"),
-                                          tr("CSV per Excel (*.csv);;Pagina HTML (*.html)"));
+                                                                   QStringLiteral(".xlsx"),
+                                          tr("Cartella di lavoro Excel (*.xlsx);;CSV per Excel (*.csv);;"
+                                             "Pagina HTML (*.html)"));
     if (path.isEmpty())
         return;
+    if (Ui::isXlsxPath(path)) {
+        Xlsx::Sheet sheet = Exporters::tableSheet(suffix, table);
+        sheet.fills = fills;
+        Ui::saveXlsx(this, path, {sheet});
+        return;
+    }
     QString error;
     const bool ok = path.endsWith(QLatin1String(".html"), Qt::CaseInsensitive)
                         ? Exporters::writeHtmlTable(path, windowTitle(), table, &error)
