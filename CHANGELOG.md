@@ -2,6 +2,13 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.20.0] - 2026-10-22 — Sintesi per documento × codice e tabelle riassuntive (#14)
+Commit `d1efc95`
+
+- «Griglia delle sintesi…» (menu Analisi): finestra a tre pannelli con la matrice documenti × codici (numero di segmenti, colore del codice, icona dove c'è una sintesi), i segmenti della cella selezionata (anche aree PDF/immagine) e l'editor della sintesi, che si salva da solo dopo una pausa, al cambio di cella, alla chiusura e quando la finestra perde il fuoco. Scrivere una sintesi è un solo passo di annulla (le modifiche consecutive della stessa sintesi si fondono).
+- «Tabelle riassuntive…»: tabelle salvate nel progetto con nome e configurazione (documenti scelti o un set, codici, variabili); documenti come righe, variabili e codici come colonne, ogni cella con la sintesi. L'anteprima si rigenera quando le sintesi cambiano; esportazione in Excel (.xlsx), CSV e HTML.
+- Schema v9 (migrazione con backup): tabelle `summaries` (UNIQUE documento × codice, CASCADE) e `summary_tables`. Eliminare un codice o un documento elimina le sue sintesi (annullabile) e la conferma dice quante sono.
+- Non incluso: esportazione DOCX (#45) e QDPX (REFI-QDA non ha un elemento adatto: le sintesi non viaggiano nel file, si esportano dalle tabelle); sintesi in testo semplice, non formattato.
 ## [0.19.0] - 2026-10-22 — QDPX con PDF e immagini (#46)
 Commit `88f5cd8`
 
