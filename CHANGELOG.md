@@ -3,6 +3,7 @@
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
 ## [0.17.0] - 2026-10-22 — Documenti immagine e codifica di aree (#27)
+Commit `37f5cc8`
 
 - Si importano immagini PNG, JPG, GIF, BMP, TIFF e WebP (`Ctrl+I`): i byte originali stanno nel progetto, in una tabella `document_data` (schema v7, migrazione con backup), separata da `documents` per non copiare il blob nel log di annulla a ogni rinomina. API: `Project::addImageDocument`, `setDocumentData`/`documentData`, `documentImage`.
 - L'orientamento EXIF si applica in un solo punto (`documentImage`, `QImageReader::setAutoTransform`): visualizzazione, coordinate delle aree e ritagli usano la stessa immagine raddrizzata.
