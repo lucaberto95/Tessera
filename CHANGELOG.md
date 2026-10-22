@@ -2,6 +2,16 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.9.0] - 2026-10-22 — Statistiche e tabelle incrociate (#21)
+Commit `2b9fcb9`, `5ae8955`
+
+- Nuovo modulo `Stats`: statistiche descrittive delle variabili (frequenze, n, media, mediana, deviazione standard, minimo e massimo; vuoti e non validi contati a parte).
+- Tabella incrociata codici × valori di una variabile (anche in classi numeriche), gruppi o set di documenti; segmenti o documenti con il codice, in assoluto o in % di colonna/riga; riga *Totale documenti*.
+- Chi-quadrato con p-value sotto la tabella, con avvisi sulle frequenze attese basse e sui gruppi sovrapposti.
+- Grafico a barre (variabili categoriali) o istogramma (numeriche) per la variabile scelta.
+- *Codici in variabili*: una variabile intera per codice con il numero di segmenti (o 0/1) per documento, in un solo passo di annulla.
+- Finestra *Statistiche e tabelle incrociate…* (menu Analisi) con esportazione CSV/HTML.
+
 ## [0.8.0] - 2026-10-22 — Co-occorrenze dei codici (#13)
 Commit `4ea4eba`
 
