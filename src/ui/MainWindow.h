@@ -73,6 +73,7 @@ private:
     void showVariables();
     void showMemos();
     void showLinks();
+    void showTranscript();
     void editProjectMemo();
     void exportCodebook();
     void createReport();
@@ -133,6 +134,7 @@ private:
     QAction *m_startLink = nullptr;
     QAction *m_completeLink = nullptr;
     QAction *m_links = nullptr;
+    QAction *m_transcript = nullptr;
     QAction *m_exportCodebook = nullptr;
     QAction *m_createReport = nullptr;
     QAction *m_search = nullptr;
