@@ -25,6 +25,10 @@ public:
     // First launch: asks the name recorded as author of codings and memos (the merge of projects tells
     // people's work apart by it). Does nothing once a name has been saved.
     void askUserNameOnFirstRun();
+    // Looks for a newer release. At startup (manual = false) it is silent unless an update exists and does nothing
+    // when the user turned the check off; from the Aiuto menu (manual = true) it always reports the outcome.
+    void checkForUpdates(bool manual);
+    void checkForUpdatesAtStartup();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -156,4 +160,7 @@ private:
     QAction *m_aiSuggestSubcodes = nullptr;
     QAction *m_aiGroupCodes = nullptr;
     QAction *m_about = nullptr;
+    QAction *m_checkUpdates = nullptr;
+    QAction *m_autoUpdateCheck = nullptr;
+    bool m_updating = false;
 };

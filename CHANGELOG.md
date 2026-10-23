@@ -2,6 +2,12 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.29.0] - 2026-10-23 — Aggiornamento automatico
+
+- Aiuto › «Verifica aggiornamenti…» e, all'avvio, un controllo silenzioso (una richiesta all'API delle release su GitHub, con il solo User-Agent `Tessera/versione`; si spegne da Aiuto › «Cerca aggiornamenti all'avvio»). Se esiste una versione più recente compare il riepilogo con le note; «Aggiorna ora» scarica lo zip con barra di avanzamento e annullabile.
+- `src/core/Updater`: confronto numerico delle versioni, scelta dell'asset `Tessera-x.y.z-win64.zip` solo se servito da github.com, controllo di dimensione e SHA-256 (se GitHub fornisce il digest), estrazione che rifiuta percorsi fuori dalla cartella, script `update.cmd` che attende la chiusura di Tessera, copia i file sopra la cartella dell'applicazione e la riavvia. Se la cartella non è scrivibile si apre la pagina della release per l'installazione manuale.
+- Crediti e licenza: autore Luca Bertocchi. README: nota sul vibecoding e sugli aggiornamenti.
+- Test con il server HTTP finto (controllo, download, file corrotto, errore del server) e con lo script di sostituzione. Non incluso: aggiornamento tramite installer (richiede Inno Setup), canale di anteprime.
 ## [0.28.0] - 2026-10-23 — Codici, sottocodici e raggruppamento con l'AI (#41)
 
 - Menu «AI» e menu contestuali (documento, selezione, codice, albero dei codici): «Suggerisci codici» per il documento aperto o la selezione, «Suggerisci sottocodici» per un codice (guarda i suoi segmenti), «Raggruppa i codici» (primo livello o sottocodici di un codice).

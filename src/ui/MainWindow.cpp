@@ -9,6 +9,7 @@
 #include "core/Qdpx.h"
 #include "core/Survey.h"
 #include "core/TextUtils.h"
+#include "core/Updater.h"
 #include "ui/CodeTree.h"
 #include "ui/DocumentTree.h"
 #include "ui/DocumentView.h"
@@ -49,8 +50,11 @@
 #include <QPlainTextEdit>
 #include <QProgressDialog>
 #include <QPushButton>
+#include <QDesktopServices>
 #include <QSettings>
 #include <QSplitter>
+#include <QStandardPaths>
+#include <QUrl>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTabWidget>
@@ -233,6 +237,13 @@ void MainWindow::createActions()
     m_aiGroupCodes = make(tr("&Raggruppa i sottocodici del codice selezionato (o i codici di primo livello)…"),
                           [this] { aiGroupCodes(m_codes->currentCodeId()); });
     m_about = make(tr("&Informazioni su Tessera"), &MainWindow::about, {}, false);
+    m_checkUpdates = make(tr("Verifica &aggiornamenti…"), [this] { checkForUpdates(true); }, {}, false);
+    m_autoUpdateCheck = make(tr("Cerca aggiornamenti &all'avvio"), [] {}, {}, false);
+    m_autoUpdateCheck->setCheckable(true);
+    m_autoUpdateCheck->setChecked(QSettings().value(QStringLiteral("update/checkAtStartup"), true).toBool());
+    connect(m_autoUpdateCheck, &QAction::toggled, this, [](bool on) {
+        QSettings().setValue(QStringLiteral("update/checkAtStartup"), on);
+    });
 }
 
 void MainWindow::createMenus()
@@ -331,6 +342,9 @@ void MainWindow::createMenus()
     settings->addAction(m_aiSettings);
 
     QMenu *help = menuBar()->addMenu(tr("&Aiuto"));
+    help->addAction(m_checkUpdates);
+    help->addAction(m_autoUpdateCheck);
+    help->addSeparator();
     help->addAction(m_about);
 }
 
@@ -1344,13 +1358,13 @@ void MainWindow::about()
                .arg(QStringLiteral(TESSERA_VERSION_STRING), QString::fromLatin1(qVersion())));
     addTab(tr("Crediti"),
            tr("<h3>Crediti</h3>"
-              "<p><b>Ideazione e sviluppo</b><br>Luca Berto</p>"
+              "<p><b>Ideazione e sviluppo</b><br>Luca Bertocchi</p>"
               "<p><b>Componenti di terze parti</b><br>"
               "Qt (<a href=\"https://www.qt.io\">qt.io</a>), distribuito con licenza LGPL v3.</p>"
               "<p>Codice sorgente: <a href=\"https://github.com/lucaberto95/Tessera\">github.com/lucaberto95/Tessera</a></p>"));
     addTab(tr("Licenza"),
            tr("<h3>Licenza MIT</h3>"
-              "<p>Copyright © 2026 Luca Berto</p>"
+              "<p>Copyright © 2026 Luca Bertocchi</p>"
               "<p>Tessera è software libero, distribuito con licenza MIT: puoi usarlo, copiarlo, modificarlo e "
               "ridistribuirlo, anche a fini commerciali, purché venga mantenuta questa nota di copyright. "
               "Il software è fornito «così com'è», senza garanzie di alcun tipo. "
@@ -1360,6 +1374,103 @@ void MainWindow::about()
     connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     layout->addWidget(buttons);
     dlg.exec();
+}
+
+void MainWindow::checkForUpdatesAtStartup()
+{
+    // Leftovers of a previous update (downloaded archive, extracted files, script).
+    QDir(QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation)).filePath(QStringLiteral("tessera-update")))
+        .removeRecursively();
+    if (m_autoUpdateCheck->isChecked())
+        checkForUpdates(false);
+}
+
+void MainWindow::checkForUpdates(bool manual)
+{
+    if (m_updating)
+        return;
+    m_updating = true;
+    auto *checker = new Update::Checker(Update::Checker::defaultApiUrl(), this);
+    if (manual)
+        statusBar()->showMessage(tr("Controllo degli aggiornamenti…"), 5000);
+
+    connect(checker, &Update::Checker::checked, this,
+            [this, checker, manual](bool ok, const Update::Release &release, bool newer, const QString &error) {
+        checker->deleteLater();
+        m_updating = false;
+        if (!ok) {
+            if (manual)
+                Ui::showError(this, error);
+            return;
+        }
+        if (!newer) {
+            if (manual)
+                Ui::showInfo(this, tr("Aggiornamenti"),
+                             tr("Hai già l'ultima versione di Tessera (%1).").arg(QStringLiteral(TESSERA_VERSION_STRING)));
+            return;
+        }
+        QMessageBox box(QMessageBox::Question, tr("Aggiornamento disponibile"),
+                        tr("È disponibile Tessera %1 (hai la %2). Vuoi scaricarla e installarla ora?")
+                            .arg(release.version, QStringLiteral(TESSERA_VERSION_STRING)),
+                        QMessageBox::NoButton, this);
+        box.setTextFormat(Qt::PlainText);
+        box.setDetailedText(release.notes);
+        QPushButton *yes = box.addButton(tr("Aggiorna ora"), QMessageBox::AcceptRole);
+        box.addButton(tr("Più tardi"), QMessageBox::RejectRole);
+        box.exec();
+        if (box.clickedButton() != yes)
+            return;
+
+        const QString appDir = QCoreApplication::applicationDirPath();
+        if (!release.hasAsset() || !Update::canWriteTo(appDir)) {
+            Ui::showInfo(this, tr("Aggiornamento manuale"),
+                         tr("Tessera non può aggiornarsi da sola in questa cartella. "
+                            "Scarica la nuova versione dalla pagina della release: si aprirà nel browser."));
+            if (QUrl url(release.pageUrl); url.scheme() == QLatin1String("https"))
+                QDesktopServices::openUrl(url);
+            return;
+        }
+
+        const QString work = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+                                 .filePath(QStringLiteral("tessera-update"));
+        QDir().mkpath(work);
+        const QString zip = QDir(work).filePath(release.assetName);
+
+        auto *progress = new QProgressDialog(tr("Download di Tessera %1…").arg(release.version), tr("Annulla"), 0, 100, this);
+        progress->setWindowModality(Qt::WindowModal);
+        progress->setMinimumDuration(0);
+        progress->setAutoClose(false);
+        progress->setAutoReset(false);
+        progress->setValue(0);
+
+        auto *dl = new Update::Checker(Update::Checker::defaultApiUrl(), this);
+        m_updating = true;
+        connect(progress, &QProgressDialog::canceled, dl, &Update::Checker::cancel);
+        connect(dl, &Update::Checker::downloadProgress, progress, [progress](qint64 got, qint64 total) {
+            if (total > 0)
+                progress->setValue(int(got * 100 / total));
+        });
+        connect(dl, &Update::Checker::downloaded, this,
+                [this, dl, progress, work, appDir](bool done, const QString &path, const QString &err) {
+            progress->close();
+            progress->deleteLater();
+            dl->deleteLater();
+            m_updating = false;
+            if (!done) {
+                Ui::showError(this, err);
+                return;
+            }
+            QString problem;
+            const QString source = Update::extractDistribution(path, QDir(work).filePath(QStringLiteral("new")), &problem);
+            if (source.isEmpty() || !Update::launchReplacement(source, appDir, QCoreApplication::applicationPid(), work, &problem)) {
+                Ui::showError(this, problem);
+                return;
+            }
+            close(); // the script waits for this process to end, copies the files and restarts Tessera
+        });
+        dl->download(release, zip);
+    });
+    checker->check();
 }
 
 void MainWindow::addRecent(const QString &path)

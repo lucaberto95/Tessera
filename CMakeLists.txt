@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Tessera VERSION 0.28.0 LANGUAGES CXX)
+project(Tessera VERSION 0.29.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,7 @@ qt_add_library(tessera_core STATIC
     src/core/Dictionaries.h src/core/Dictionaries.cpp
     src/core/WordFrequencies.h src/core/WordFrequencies.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
+    src/core/Updater.h src/core/Updater.cpp
     src/core/ai/AiConfig.h src/core/ai/AiConfig.cpp
     src/core/ai/AiClient.h src/core/ai/AiClient.cpp
     src/core/ai/AiAssist.h src/core/ai/AiAssist.cpp

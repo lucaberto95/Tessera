@@ -14,6 +14,11 @@ estrai la cartella e avvia `Tessera.exe`: non richiede installazione. Se la rele
 l'installer `Tessera-x.y.z-setup.exe`, che installa per l'utente corrente senza diritti di amministratore,
 crea il collegamento nel menu Start e associa i file `.tsra` (doppio clic = apre il progetto).
 
+**Aggiornamenti automatici**: all'avvio Tessera controlla (una richiesta a GitHub, senza inviare dati tuoi) se
+esiste una versione più recente e, se vuoi, la scarica, la verifica e si riavvia aggiornata. Si può spegnere in
+**Aiuto → Cerca aggiornamenti all'avvio** o lanciare a mano con **Aiuto → Verifica aggiornamenti…**.
+Se la cartella non è scrivibile (es. `Program Files`) ti rimanda alla pagina della release.
+
 Per provarlo subito: **Progetto → Crea progetto di esempio…** crea tre interviste sul lavoro da remoto,
 già codificate, con variabili e memo.
 
@@ -113,6 +118,13 @@ creati portano l'indicazione «AI (modello X)» e si annullano con `Ctrl+Z`.
 | `Ctrl+Shift+M` | Tutti i memo |
 | `Ctrl+rotella` | Zoom del testo e dei PDF |
 | `Alt` + trascinamento | In un PDF: seleziona un rettangolo da codificare |
+
+## Come è fatto
+
+Tessera è un progetto sviluppato in **vibecoding**: il codice è scritto dall'assistente AI
+[Claude Code](https://claude.com/claude-code) su indicazione di Luca Bertocchi, che ne ha ideato funzioni e
+direzione e ne verifica il comportamento. Per questo i test automatici (`tessera_tests`, `tessera_ui_tests`)
+sono parte integrante del progetto.
 
 ## Licenza
 

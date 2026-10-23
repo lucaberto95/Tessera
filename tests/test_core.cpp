@@ -21,6 +21,7 @@
 #include "core/Survey.h"
 #include "core/TextUtils.h"
 #include "core/VariableFilter.h"
+#include "core/Updater.h"
 #include "core/WordFrequencies.h"
 #include "core/Xlsx.h"
 
@@ -4809,6 +4810,182 @@ private slots:
         QVERIFY(!cloud.isConfigured());
         Ai::Settings::useFilesForTesting({}, {});
         QCOMPARE(srv.requests.size(), 0);
+    }
+
+    // ---- automatic updates --------------------------------------------------------------------------------
+
+    static QByteArray makeZip(const QList<QPair<QString, QByteArray>> &files)
+    {
+        QBuffer buffer;
+        buffer.open(QIODevice::WriteOnly);
+        QZipWriter zip(&buffer);
+        for (const auto &f : files)
+            zip.addFile(f.first, f.second);
+        zip.close();
+        return buffer.data();
+    }
+
+    static QByteArray releaseJson(const FakeHttp &srv, const QString &tag, const QByteArray &zip, bool withDigest = true)
+    {
+        QJsonObject asset{{"name", "Tessera-" + tag.mid(1) + "-win64.zip"},
+                          {"size", zip.size()},
+                          {"browser_download_url", srv.url() + "/asset.zip"}};
+        if (withDigest)
+            asset["digest"] = "sha256:" + QString::fromLatin1(QCryptographicHash::hash(zip, QCryptographicHash::Sha256).toHex());
+        return QJsonDocument(QJsonObject{{"tag_name", tag}, {"name", "Release " + tag}, {"body", "<b>notes</b>"},
+                                         {"html_url", "https://github.com/x/y/releases/tag/" + tag},
+                                         {"assets", QJsonArray{asset}}}).toJson();
+    }
+
+    void updateVersionComparison()
+    {
+        QVERIFY(Update::compareVersions("0.9.1", "0.28.0") < 0);
+        QVERIFY(Update::compareVersions("v1.0.0", "0.99.9") > 0);
+        QCOMPARE(Update::compareVersions("1.2", "1.2.0"), 0);
+        QVERIFY(Update::compareVersions("0.28.0", "0.28.1") < 0);
+    }
+
+    void updateParseReleaseTrustsOnlyGithub()
+    {
+        const QString base = "https://github.com/o/r/releases/download/v0.30.0/";
+        const QByteArray json = QJsonDocument(QJsonObject{
+            {"tag_name", "v0.30.0"}, {"name", "n"}, {"body", "b"},
+            {"html_url", "https://github.com/o/r/releases/tag/v0.30.0"},
+            {"assets", QJsonArray{
+                QJsonObject{{"name", "evil.zip"}, {"size", 1}, {"browser_download_url", base + "evil.zip"}},
+                QJsonObject{{"name", "Tessera-0.30.0-win64.zip"}, {"size", 10}, {"digest", "sha256:ABCD"},
+                            {"browser_download_url", base + "Tessera-0.30.0-win64.zip"}}}}}).toJson();
+        Update::Release r;
+        QVERIFY(Update::parseRelease(json, {}, &r));
+        QCOMPARE(r.version, QString("0.30.0"));
+        QCOMPARE(r.assetName, QString("Tessera-0.30.0-win64.zip"));
+        QCOMPARE(r.sha256, QString("abcd"));
+        QVERIFY(r.hasAsset());
+        // The same asset on another host is not accepted.
+        QByteArray other = json;
+        other.replace("https://github.com", "https://evil.example.com");
+        QVERIFY(Update::parseRelease(other, {}, &r));
+        QVERIFY(!r.hasAsset());
+        QString err;
+        QVERIFY(!Update::parseRelease("{\"tag_name\":\"latest\"}", {}, &r, &err));
+        QVERIFY(!Update::parseRelease("not json", {}, &r, &err));
+    }
+
+    void updateExtractRefusesPathTraversal()
+    {
+        QTemporaryDir dir;
+        QString err;
+        const QString zip = dir.filePath("bad.zip");
+        QFile f(zip);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        // QZipWriter drops "../" itself, so the name is patched in the bytes (same length, CRC unaffected).
+        QByteArray bad = makeZip({{"Tessera/Tessera.exe", "x"}, {"xx/escape.txt", "x"}});
+        bad.replace("xx/escape.txt", "../escape.txt");
+        f.write(bad);
+        f.close();
+        // Whether the reader refuses the entry or flattens it (Qt strips "../"), nothing leaves the folder.
+        Update::extractDistribution(zip, dir.filePath("out"), &err);
+        QVERIFY(!QFileInfo::exists(dir.filePath("escape.txt")));
+
+        QFile g(dir.filePath("ok.zip"));
+        QVERIFY(g.open(QIODevice::WriteOnly));
+        g.write(makeZip({{"Tessera/Tessera.exe", "exe"}, {"Tessera/platforms/q.dll", "dll"}}));
+        g.close();
+        const QString src = Update::extractDistribution(dir.filePath("ok.zip"), dir.filePath("good"), &err);
+        QVERIFY2(!src.isEmpty(), qPrintable(err));
+        QVERIFY(QFileInfo::exists(QDir(src).filePath("platforms/q.dll")));
+
+        QFile h(dir.filePath("nope.zip"));
+        QVERIFY(h.open(QIODevice::WriteOnly));
+        h.write(makeZip({{"readme.txt", "x"}}));
+        h.close();
+        QVERIFY(Update::extractDistribution(dir.filePath("nope.zip"), dir.filePath("none"), &err).isEmpty());
+    }
+
+#ifdef Q_OS_WIN
+    void updateReplacementScriptCopiesFiles()
+    {
+        QTemporaryDir dir;
+        QDir().mkpath(dir.filePath("src/sub"));
+        QDir().mkpath(dir.filePath("app"));
+        for (const char *name : {"src/new.txt", "src/sub/deep.txt"}) {
+            QFile f(dir.filePath(name));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("new");
+        }
+        QFile old(dir.filePath("app/new.txt"));
+        QVERIFY(old.open(QIODevice::WriteOnly));
+        old.write("old");
+        old.close();
+        QString err;
+        // A pid that does not exist: the script starts copying at once.
+        QVERIFY2(Update::launchReplacement(dir.filePath("src"), dir.filePath("app"), 999999, dir.filePath("work"), &err),
+                 qPrintable(err));
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(dir.filePath("app/sub/deep.txt")), 10000);
+        QFile now(dir.filePath("app/new.txt"));
+        QVERIFY(now.open(QIODevice::ReadOnly));
+        QCOMPARE(now.readAll(), QByteArray("new"));
+        QVERIFY(!Update::launchReplacement("C:/a%b", dir.filePath("app"), 1, dir.filePath("work2"), &err));
+    }
+#endif
+
+    void updateCheckAndDownload()
+    {
+        const QByteArray zip = makeZip({{"Tessera/Tessera.exe", "exe"}});
+        FakeHttp srv;
+        QByteArray tag = "v9.9.9";
+        bool corrupt = false;
+        srv.handler = [&](const FakeHttp::Req &r) {
+            if (r.path.endsWith("/asset.zip")) {
+                QByteArray body = zip;
+                if (corrupt)
+                    body[body.size() - 1] = char(body.at(body.size() - 1) ^ 0x55);
+                return FakeHttp::Res{200, body};
+            }
+            return FakeHttp::Res{200, releaseJson(srv, QString::fromLatin1(tag), zip)};
+        };
+        Update::Checker checker(srv.url() + "/releases/latest");
+        checker.setCurrentVersion("0.28.0");
+        QSignalSpy checked(&checker, &Update::Checker::checked);
+        checker.check();
+        QVERIFY(checked.wait(3000));
+        QVERIFY(checked.at(0).at(0).toBool());
+        QVERIFY(checked.at(0).at(2).toBool()); // newer
+        const auto release = qvariant_cast<Update::Release>(checked.at(0).at(1));
+        QCOMPARE(release.version, QString("9.9.9"));
+        QVERIFY(release.hasAsset());
+        QVERIFY(srv.requests.at(0).headers.value("user-agent").startsWith("Tessera/"));
+
+        QTemporaryDir dir;
+        QSignalSpy done(&checker, &Update::Checker::downloaded);
+        checker.download(release, dir.filePath("t.zip"));
+        QVERIFY(done.wait(3000));
+        QVERIFY2(done.at(0).at(0).toBool(), qPrintable(done.at(0).at(2).toString()));
+        QCOMPARE(QFileInfo(dir.filePath("t.zip")).size(), qint64(zip.size()));
+
+        // A corrupted download is rejected and leaves nothing behind.
+        corrupt = true;
+        QSignalSpy bad(&checker, &Update::Checker::downloaded);
+        checker.download(release, dir.filePath("c.zip"));
+        QVERIFY(bad.wait(3000));
+        QVERIFY(!bad.at(0).at(0).toBool());
+        QVERIFY(!QFileInfo::exists(dir.filePath("c.zip")));
+        QVERIFY(!QFileInfo::exists(dir.filePath("c.zip.part")));
+
+        // Same version: not newer.
+        checker.setCurrentVersion("9.9.9");
+        QSignalSpy same(&checker, &Update::Checker::checked);
+        checker.check();
+        QVERIFY(same.wait(3000));
+        QVERIFY(!same.at(0).at(2).toBool());
+
+        // Server error: reported, not crashed.
+        srv.handler = [](const FakeHttp::Req &) { return FakeHttp::Res{500, "{}"}; };
+        QSignalSpy err(&checker, &Update::Checker::checked);
+        checker.check();
+        QVERIFY(err.wait(3000));
+        QVERIFY(!err.at(0).at(0).toBool());
+        QVERIFY(!err.at(0).at(3).toString().isEmpty());
     }
 
     void aiSettingsSecretsAndLock()

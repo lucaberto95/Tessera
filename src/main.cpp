@@ -68,8 +68,10 @@ int main(int argc, char *argv[])
         window.reopenLastProject();
     }
 
-    if (!parser.isSet(screenshotOption))
+    if (!parser.isSet(screenshotOption)) {
         window.askUserNameOnFirstRun();
+        QTimer::singleShot(3000, &window, [&window] { window.checkForUpdatesAtStartup(); });
+    }
 
     if (parser.isSet(screenshotOption)) {
         window.resize(1400, 860);
