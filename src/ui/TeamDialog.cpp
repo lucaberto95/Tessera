@@ -3,6 +3,7 @@
 #include "core/Agreement.h"
 #include "core/Project.h"
 #include "core/Team.h"
+#include "ui/TeamSyncDialog.h"
 #include "ui/UiUtils.h"
 
 #include <QApplication>
@@ -53,17 +54,23 @@ TeamDialog::TeamDialog(Project *project, QWidget *parent)
     auto *newButton = new QPushButton(tr("Nuovo ciclo…"));
     auto *importButton = new QPushButton(tr("Importa copie rientrate…"));
     auto *agreementButton = new QPushButton(tr("Confronta i codificatori…"));
+    auto *syncButton = new QPushButton(tr("Sincronizzazione continua…"));
+    syncButton->setToolTip(tr("Lavoro di gruppo senza cicli: ognuno pubblica le proprie modifiche nella cartella condivisa e legge quelle degli altri."));
     m_reopen = new QPushButton(tr("Segna come inviata"));
     m_reopen->setToolTip(tr("Se hai annullato un'unione: la copia potrà essere importata di nuovo."));
     m_remove = new QPushButton(tr("Rimuovi voce"));
     auto *close = new QPushButton(tr("Chiudi"));
-    for (auto *b : {newButton, importButton, agreementButton, m_reopen, m_remove, close})
+    for (auto *b : {newButton, importButton, agreementButton, syncButton, m_reopen, m_remove, close})
         b->setAutoDefault(false);
     connect(newButton, &QPushButton::clicked, this, &TeamDialog::newRound);
     connect(importButton, &QPushButton::clicked, this, &TeamDialog::importReturned);
     connect(agreementButton, &QPushButton::clicked, this, [this] {
         m_agreementRequested = true;
         accept();
+    });
+    connect(syncButton, &QPushButton::clicked, this, [this] {
+        TeamSyncDialog dlg(m_project, this);
+        dlg.exec();
     });
     connect(m_reopen, &QPushButton::clicked, this, [this] {
         const auto items = m_table->selectedItems();
@@ -84,6 +91,7 @@ TeamDialog::TeamDialog(Project *project, QWidget *parent)
     buttons->addWidget(newButton);
     buttons->addWidget(importButton);
     buttons->addWidget(agreementButton);
+    buttons->addWidget(syncButton);
     buttons->addWidget(m_reopen);
     buttons->addWidget(m_remove);
     buttons->addStretch(1);

@@ -19,6 +19,7 @@
 #include "core/Retrieval.h"
 #include "core/Stats.h"
 #include "core/Team.h"
+#include "core/TeamSync.h"
 #include "core/Summaries.h"
 #include "core/Survey.h"
 #include "core/TextUtils.h"
@@ -4544,6 +4545,239 @@ private slots:
         QVERIFY(m.deleteTeamCycle(m.teamCycles().at(1).id));
         QCOMPARE(m.teamCycles().size(), 1);
         QCOMPARE(Team::copyFileName("Mio progetto", 2, "A:b"), QString("Mio_progetto_ciclo2_A_b.tsra"));
+    }
+
+    void teamSyncChangeLogs()
+    {
+        const QString shared = path("sync-shared");
+        QDir().mkpath(shared);
+        const QString baseFile = path("sync-base.tsra");
+        {
+            Project b;
+            QVERIFY(b.create(baseFile));
+            b.addDocument(b.groups().first().id, "Intervista", "Mi piace lavorare da casa, ma il traffico pesa molto.");
+            b.addCode(0, "Tema", Qt::red);
+        }
+        // Three coders, each with their own copy of the same project.
+        const QStringList names = {"Anna", "Bruno", "Carla"};
+        QHash<QString, QString> files;
+        for (const QString &n : names) {
+            files[n] = path("sync-" + n + ".tsra");
+            Project b;
+            QVERIFY(b.open(baseFile));
+            QVERIFY(b.saveCopyAs(files[n]));
+        }
+        Project a, b;
+        QVERIFY(a.open(files["Anna"]));
+        QVERIFY(b.open(files["Bruno"]));
+        a.setAuthor("Anna");
+        b.setAuthor("Bruno");
+        const qint64 doc = a.documents().first().id;
+        const qint64 tema = a.findCode(0, "Tema");
+
+        // Refusals: no author, project file inside the shared folder, no folder.
+        {
+            Project nobody;
+            QVERIFY(nobody.open(files["Carla"]));
+            nobody.setAuthor("  ");
+            QVERIFY(!TeamSync::publish(nobody, shared).ok);
+            QVERIFY(!TeamSync::synchronize(nobody, shared).ok);
+        }
+        {
+            const QString inside = path("sync-shared/inside.tsra");
+            QVERIFY(QFile::copy(baseFile, inside));
+            QFile::setPermissions(inside, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+            Project in;
+            QVERIFY(in.open(inside));
+            in.setAuthor("Dentro");
+            const TeamSync::PublishResult pr = TeamSync::publish(in, shared);
+            QVERIFY(!pr.ok);
+            QVERIFY(pr.error.contains(".tsra"));
+            QVERIFY(!TeamSync::synchronize(in, shared).ok);
+            QVERIFY(!QDir(TeamSync::syncFolder(shared, in.meta("project_uuid"))).exists());
+        }
+        QVERIFY(!TeamSync::synchronize(b, path("sync-missing")).ok);
+        QVERIFY(TeamSync::synchronize(b, shared).warnings.size() == 1); // nobody published yet
+
+        // Anna codes and publishes.
+        const qint64 soloAnna = a.addCode(0, "Solo Anna", Qt::green);
+        const qint64 segA = a.addSegment(doc, tema, 0, 14, 0, "commento A");
+        a.addSegment(doc, soloAnna, 15, 30);
+        a.addLink(doc, 0, 3, doc, 10, 14, "legame");
+        Memo memo;
+        memo.targetType = MemoTarget::Document;
+        memo.targetId = doc;
+        memo.title = "Nota";
+        memo.body = "Prima versione";
+        const qint64 memoA = a.saveMemo(memo);
+        QVERIFY(a.setSummary(doc, tema, "Sintesi di Anna"));
+        const TeamSync::PublishResult pa = TeamSync::publish(a, shared);
+        QVERIFY2(pa.ok, qPrintable(pa.error));
+        QCOMPARE(pa.records, 5);
+        QCOMPARE(pa.generation, 1);
+        QVERIFY(QFileInfo::exists(pa.path));
+        QVERIFY(pa.path.contains(".sync"));
+        // Bruno's own work, published too; his own log is never applied to himself.
+        const qint64 segB = b.addSegment(doc, tema, 31, 46);
+        QVERIFY(TeamSync::publish(b, shared).ok);
+        QCOMPARE(TeamSync::members(b, shared), (QStringList{"Anna", "Bruno"}));
+
+        // Dry run writes nothing; the real run brings everything in one undo step.
+        const TeamSync::SyncReport dry = TeamSync::synchronize(b, shared, true);
+        QVERIFY2(dry.ok, qPrintable(dry.error));
+        QCOMPARE(dry.members.size(), 1);
+        QCOMPARE(dry.members.first().segmentsNew, 2);
+        QCOMPARE(b.allSegments().size(), 1);
+        const bool hadUndo = b.canUndo();
+        const TeamSync::SyncReport first = TeamSync::synchronize(b, shared);
+        QVERIFY2(first.ok, qPrintable(first.error));
+        QCOMPARE(first.members.first().segmentsNew, 2);
+        QCOMPARE(first.members.first().linksNew, 1);
+        QCOMPARE(first.members.first().memosNew, 1);
+        QCOMPARE(first.members.first().summariesNew, 1);
+        QCOMPARE(first.members.first().codesNew, 1); // "Solo Anna"
+        QVERIFY(first.conflicts.isEmpty());
+        QCOMPARE(b.allSegments().size(), 3);
+        QVERIFY(b.findCode(0, "Solo Anna") > 0);
+        QCOMPARE(b.links().size(), 1);
+        QCOMPARE(b.links().first().author, QString("Anna"));
+        QCOMPARE(b.memoFor(MemoTarget::Document, doc).body, QString("Prima versione"));
+        QCOMPARE(b.memoFor(MemoTarget::Document, doc).author, QString("Anna"));
+        QCOMPARE(b.summary(doc, tema).body, QString("Sintesi di Anna"));
+        QCOMPARE(b.summary(doc, tema).author, QString("Anna"));
+        QCOMPARE(Agreement::byAuthor(b.allSegments(), "Anna").size(), 2);
+        // Idempotent: a second run, and a forced re-read, change nothing.
+        const TeamSync::SyncReport again = TeamSync::synchronize(b, shared);
+        QVERIFY(again.members.first().unchanged);
+        QCOMPARE(again.changes(), 0);
+        const TeamSync::SyncReport forced = TeamSync::synchronize(b, shared, false, true);
+        QCOMPARE(forced.changes(), 0);
+        QCOMPARE(b.allSegments().size(), 3);
+        QCOMPARE(b.links().size(), 1);
+        QCOMPARE(b.memos().size(), 1);
+        // One undo step undoes it all; "forget" lets it be applied again.
+        QVERIFY(b.undo());
+        QCOMPARE(b.allSegments().size(), 1);
+        QCOMPARE(b.canUndo(), hadUndo);
+        QCOMPARE(TeamSync::synchronize(b, shared).changes(), 0); // remembered as read
+        TeamSync::resetState(b);
+        QCOMPARE(TeamSync::synchronize(b, shared).members.first().segmentsNew, 2);
+        QCOMPARE(b.allSegments().size(), 3);
+
+        // The author edits their texts, Bruno had not touched them: the new version replaces the old one.
+        QVERIFY(a.setSegmentComment(segA, "commento A rivisto"));
+        Memo m2 = a.memo(memoA);
+        m2.body = "Seconda versione";
+        QVERIFY(a.saveMemo(m2));
+        QCOMPARE(TeamSync::publish(a, shared).generation, 2);
+        const TeamSync::SyncReport upd = TeamSync::synchronize(b, shared);
+        QCOMPARE(upd.members.first().updated, 2);
+        QVERIFY(upd.conflicts.isEmpty());
+        QCOMPARE(b.memoFor(MemoTarget::Document, doc).body, QString("Seconda versione"));
+        QCOMPARE(b.memos().size(), 1);
+        bool found = false;
+        for (const Segment &s : b.allSegments())
+            if (s.author == "Anna" && s.start == 0)
+                found = s.comment == "commento A rivisto";
+        QVERIFY(found);
+
+        // Both sides edit the same memo: both texts are kept, and the case is reported (once per change).
+        Memo mine = b.memoFor(MemoTarget::Document, doc);
+        mine.body = "Seconda versione, con la mia aggiunta";
+        QVERIFY(b.saveMemo(mine));
+        m2 = a.memo(memoA);
+        m2.body = "Terza versione";
+        QVERIFY(a.saveMemo(m2));
+        QVERIFY(TeamSync::publish(a, shared).ok);
+        const TeamSync::SyncReport conflict = TeamSync::synchronize(b, shared);
+        QCOMPARE(conflict.members.first().conflicts, 1);
+        QCOMPARE(conflict.conflicts.size(), 1);
+        const QString joined = b.memoFor(MemoTarget::Document, doc).body;
+        QVERIFY(joined.contains("con la mia aggiunta") && joined.contains("Terza versione"));
+        QCOMPARE(TeamSync::synchronize(b, shared, false, true).conflicts.size(), 0); // not reported again
+
+        // What Bruno deleted after it was applied does not come back.
+        const qint64 anna2 = b.allSegments().first().id;
+        for (const Segment &s : b.allSegments())
+            if (s.author == "Anna" && s.start == 15)
+                QVERIFY(b.deleteSegment(s.id));
+        Q_UNUSED(anna2)
+        QCOMPARE(b.allSegments().size(), 2);
+        QCOMPARE(TeamSync::synchronize(b, shared, false, true).changes(), 0);
+        QCOMPARE(b.allSegments().size(), 2);
+
+        // Bruno's work reaches Anna, and the ordering of the two publications does not matter.
+        const TeamSync::SyncReport toAnna = TeamSync::synchronize(a, shared);
+        QVERIFY2(toAnna.ok, qPrintable(toAnna.error));
+        QCOMPARE(toAnna.members.first().segmentsNew, 1);
+        QCOMPARE(a.segment(a.allSegments().last().id).author, QString("Bruno"));
+        Q_UNUSED(segB)
+
+        // Damaged inputs are ignored with a warning and do not stop the others.
+        const QString dir = TeamSync::syncFolder(shared, a.meta("project_uuid"));
+        const QByteArray good = [&] {
+            QFile f(QDir(dir).filePath(TeamSync::logFileName("Anna")));
+            f.open(QIODevice::ReadOnly);
+            return f.readAll();
+        }();
+        auto writeFile = [&](const QString &name, const QByteArray &data) {
+            QFile f(QDir(dir).filePath(name));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(data);
+        };
+        QByteArray truncated = good.left(good.lastIndexOf('\n', good.size() - 3));
+        auto retitle = [&](const QByteArray &data, const QByteArray &from, const QByteArray &to) {
+            QByteArray copy = data;
+            copy.replace(from, to);
+            return copy;
+        };
+        writeFile("Carla.tsrlog", retitle(truncated, "\"member\":\"Anna\"", "\"member\":\"Carla\""));       // no end line
+        writeFile("Dario.tsrlog", "this is not a log\n");
+        writeFile("Elena.tsrlog", retitle(good, "\"member\":\"Anna\"", "\"member\":\"Elena\"")
+                                      .replace("\"project\":\"", "\"project\":\"x"));                    // another project
+        writeFile("Franca.tsrlog", retitle(good, "\"member\":\"Anna\"", "\"member\":\"Franca\"")
+                                       .replace("\"v\":1", "\"v\":99"));                                  // newer format
+        // A damaged line in the middle of an otherwise complete file: that record is lost, the others are read.
+        QList<QByteArray> lines = good.split('\n');
+        int segLine = -1;
+        for (int i = 0; i < lines.size(); ++i)
+            if (lines[i].contains("\"t\":\"seg\"") && segLine < 0)
+                segLine = i;
+        QVERIFY(segLine > 0);
+        lines[segLine] = "{\"t\":\"seg\",\"id\":";
+        writeFile("Gina.tsrlog", retitle(lines.join('\n'), "\"member\":\"Anna\"", "\"member\":\"Gina\""));
+        const int before = b.allSegments().size();
+        const TeamSync::SyncReport bad = TeamSync::synchronize(b, shared);
+        QVERIFY2(bad.ok, qPrintable(bad.error));
+        QCOMPARE(bad.ignoredFiles(), 4);
+        QVERIFY(bad.warnings.size() >= 5);
+        QVERIFY(b.allSegments().size() <= before + 1); // Gina's one good coding at most
+        for (const TeamSync::MemberReport &m : bad.members)
+            if (m.member == "Gina")
+                QVERIFY(!m.ignored);
+
+        // A document with another content on the two sides: its codings are not applied.
+        {
+            Project c;
+            QVERIFY(c.open(files["Carla"]));
+            c.setAuthor("Carla");
+            QVERIFY(c.updateDocumentText(c.documents().first().id, "Un testo tutto diverso da quello degli altri.", {}, {}));
+            QVERIFY(TeamSync::synchronize(c, shared).ok);
+            QCOMPARE(c.allSegments().size(), 0);
+        }
+        // Two members whose names give the same file name: the second one does not overwrite the first.
+        {
+            Project x, y;
+            QVERIFY(x.open(files["Carla"]));
+            QVERIFY(y.open(files["Carla"]));
+            x.setAuthor("A:b");
+            y.setAuthor("A/b");
+            QVERIFY(TeamSync::publish(x, shared).ok);
+            const TeamSync::PublishResult clash = TeamSync::publish(y, shared);
+            QVERIFY(!clash.ok);
+            QVERIFY(TeamSync::publish(x, shared).ok); // the owner can publish again
+        }
+        QCOMPARE(TeamSync::logFileName("A:b"), QString("A_b.tsrlog"));
     }
 
     void mergeMediaAndOlderSchemas()

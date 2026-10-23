@@ -29,6 +29,7 @@
 #include "ui/MatrixDialog.h"
 #include "ui/MergeDialog.h"
 #include "ui/TeamDialog.h"
+#include "ui/TeamSyncDialog.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/LinksDialog.h"
@@ -448,6 +449,9 @@ void MainWindow::connectProject()
         refreshAll();
         updateActions();
         updateTitle();
+        const QString synced = TeamSyncDialog::runAutoSync(*m_project); // only if the user asked for it (issue #24)
+        if (!synced.isEmpty())
+            statusBar()->showMessage(synced, 10000);
     });
     connect(m_project, &Project::closed, this, [this] {
         m_view->closeDocument();

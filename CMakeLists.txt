@@ -31,6 +31,7 @@ qt_add_library(tessera_core STATIC
     src/core/Report.h src/core/Report.cpp
     src/core/Merge.h src/core/Merge.cpp
     src/core/Team.h src/core/Team.cpp
+    src/core/TeamSync.h src/core/TeamSync.cpp
     src/core/VariableFilter.h src/core/VariableFilter.cpp
     src/core/Xlsx.h src/core/Xlsx.cpp
     src/core/Survey.h src/core/Survey.cpp
@@ -90,6 +91,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/ReportDialog.h src/ui/ReportDialog.cpp
     src/ui/MergeDialog.h src/ui/MergeDialog.cpp
     src/ui/TeamDialog.h src/ui/TeamDialog.cpp
+    src/ui/TeamSyncDialog.h src/ui/TeamSyncDialog.cpp
     src/ui/VariableFilterDialog.h src/ui/VariableFilterDialog.cpp
     src/ui/SurveyImportDialog.h src/ui/SurveyImportDialog.cpp
     src/ui/DictionaryDialog.h src/ui/DictionaryDialog.cpp

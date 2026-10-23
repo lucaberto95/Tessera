@@ -3058,491 +3058,491 @@ In NVivo choose File &gt; Export &gt; Export Project (REFI-QDA format, .qdpx) or
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="150"/>
+        <location filename="../src/ui/MainWindow.cpp" line="151"/>
         <source>&amp;Nuovo progetto…</source>
         <translation>&amp;New project…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="152"/>
+        <location filename="../src/ui/MainWindow.cpp" line="153"/>
         <source>&amp;Apri progetto…</source>
         <translation>&amp;Open project…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="154"/>
+        <location filename="../src/ui/MainWindow.cpp" line="155"/>
         <source>Salva una &amp;copia come…</source>
         <translation>Save a &amp;copy as…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="155"/>
+        <location filename="../src/ui/MainWindow.cpp" line="156"/>
         <source>&amp;Chiudi progetto</source>
         <translation>&amp;Close project</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="156"/>
+        <location filename="../src/ui/MainWindow.cpp" line="157"/>
         <source>Importa progetto &amp;QDPX / libro dei codici (REFI-QDA, da MAXQDA, NVivo…)…</source>
         <translation>Import &amp;QDPX project / codebook (REFI-QDA, from MAXQDA, NVivo…)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="157"/>
+        <location filename="../src/ui/MainWindow.cpp" line="158"/>
         <source>&amp;Unisci un altro progetto…</source>
         <translation>&amp;Merge another project…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="158"/>
+        <location filename="../src/ui/MainWindow.cpp" line="159"/>
         <source>&amp;Esporta come QDPX (REFI-QDA)…</source>
         <translation>&amp;Export as QDPX (REFI-QDA)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="159"/>
+        <location filename="../src/ui/MainWindow.cpp" line="160"/>
         <source>Esporta tutto il progetto in E&amp;xcel…</source>
         <translation>Export the whole project to E&amp;xcel…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="160"/>
+        <location filename="../src/ui/MainWindow.cpp" line="161"/>
         <source>Crea progetto di &amp;esempio…</source>
         <translation>Create &amp;example project…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="161"/>
+        <location filename="../src/ui/MainWindow.cpp" line="162"/>
         <source>&amp;Esci</source>
         <translation>E&amp;xit</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="163"/>
-        <location filename="../src/ui/MainWindow.cpp" line="529"/>
+        <location filename="../src/ui/MainWindow.cpp" line="164"/>
+        <location filename="../src/ui/MainWindow.cpp" line="533"/>
         <source>&amp;Annulla</source>
         <translation>&amp;Undo</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="167"/>
-        <location filename="../src/ui/MainWindow.cpp" line="530"/>
+        <location filename="../src/ui/MainWindow.cpp" line="168"/>
+        <location filename="../src/ui/MainWindow.cpp" line="534"/>
         <source>&amp;Ripeti</source>
         <translation>&amp;Redo</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="173"/>
+        <location filename="../src/ui/MainWindow.cpp" line="174"/>
         <source>&amp;Importa documenti…</source>
         <translation>&amp;Import documents…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="175"/>
+        <location filename="../src/ui/MainWindow.cpp" line="176"/>
         <source>Importa dati di &amp;sondaggio (Excel/CSV)…</source>
         <translation>Import &amp;survey data (Excel/CSV)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="176"/>
+        <location filename="../src/ui/MainWindow.cpp" line="177"/>
         <source>Nuovo documento di &amp;testo…</source>
         <translation>New &amp;text document…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="177"/>
+        <location filename="../src/ui/MainWindow.cpp" line="178"/>
         <source>Nuovo &amp;gruppo di documenti…</source>
         <translation>New document &amp;group…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="178"/>
+        <location filename="../src/ui/MainWindow.cpp" line="179"/>
         <source>Nuovo gruppo</source>
         <translation>New group</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="178"/>
+        <location filename="../src/ui/MainWindow.cpp" line="179"/>
         <source>Nome del gruppo:</source>
         <translation>Name of the group:</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="182"/>
+        <location filename="../src/ui/MainWindow.cpp" line="183"/>
         <source>Nuovo &amp;set di documenti…</source>
         <translation>New document &amp;set…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="183"/>
+        <location filename="../src/ui/MainWindow.cpp" line="184"/>
         <source>Crea set dai documenti &amp;attivi…</source>
         <translation>Create set from &amp;active documents…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="185"/>
+        <location filename="../src/ui/MainWindow.cpp" line="186"/>
         <source>&amp;Variabili dei documenti…</source>
         <translation>Document &amp;variables…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="186"/>
+        <location filename="../src/ui/MainWindow.cpp" line="187"/>
         <source>Attiva per &amp;variabili…</source>
         <translation>Activate by &amp;variables…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="188"/>
+        <location filename="../src/ui/MainWindow.cpp" line="189"/>
         <source>&amp;Nuovo codice…</source>
         <translation>&amp;New code…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="189"/>
+        <location filename="../src/ui/MainWindow.cpp" line="190"/>
         <source>Nuovo &amp;sottocodice…</source>
         <translation>New &amp;subcode…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="193"/>
+        <location filename="../src/ui/MainWindow.cpp" line="194"/>
         <source>Seleziona prima il codice superiore.</source>
         <translation>First select the parent code.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="195"/>
+        <location filename="../src/ui/MainWindow.cpp" line="196"/>
         <source>&amp;Codifica selezione con il codice selezionato</source>
         <translation>&amp;Code selection with the selected code</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="197"/>
+        <location filename="../src/ui/MainWindow.cpp" line="198"/>
         <source>Codifica selezione con un &amp;nuovo codice…</source>
         <translation>Code selection with a &amp;new code…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="199"/>
+        <location filename="../src/ui/MainWindow.cpp" line="200"/>
         <source>&amp;Modifica testo del documento</source>
         <translation>&amp;Edit document text</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="201"/>
+        <location filename="../src/ui/MainWindow.cpp" line="202"/>
         <source>&amp;Inizia collegamento</source>
         <translation>&amp;Start link</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="202"/>
+        <location filename="../src/ui/MainWindow.cpp" line="203"/>
         <source>Completa co&amp;llegamento</source>
         <translation>Complete &amp;link</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="204"/>
+        <location filename="../src/ui/MainWindow.cpp" line="205"/>
         <source>C&amp;ollegamenti…</source>
         <translation>&amp;Links…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="205"/>
+        <location filename="../src/ui/MainWindow.cpp" line="206"/>
         <source>Esporta &amp;codebook…</source>
         <translation>Export &amp;codebook…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="206"/>
+        <location filename="../src/ui/MainWindow.cpp" line="207"/>
         <source>Crea &amp;report (Word, PDF, HTML)…</source>
         <translation>Create &amp;report (Word, PDF, HTML)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="208"/>
+        <location filename="../src/ui/MainWindow.cpp" line="209"/>
         <source>&amp;Ricerca lessicale…</source>
         <translation>Lexical &amp;search…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="211"/>
+        <location filename="../src/ui/MainWindow.cpp" line="212"/>
         <source>&amp;Matrice codici × documenti…</source>
         <translation>Codes × documents &amp;matrix…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="212"/>
+        <location filename="../src/ui/MainWindow.cpp" line="213"/>
         <source>Recupero &amp;complesso…</source>
         <translation>&amp;Complex retrieval…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="213"/>
+        <location filename="../src/ui/MainWindow.cpp" line="214"/>
         <source>Co-&amp;occorrenze dei codici…</source>
         <translation>Code co-&amp;occurrences…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="214"/>
+        <location filename="../src/ui/MainWindow.cpp" line="215"/>
         <source>Lavoro di &amp;gruppo…</source>
         <translation>&amp;Teamwork…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="215"/>
+        <location filename="../src/ui/MainWindow.cpp" line="216"/>
         <source>Accordo tra codi&amp;ficatori…</source>
         <translation>Inter&amp;coder agreement…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="216"/>
+        <location filename="../src/ui/MainWindow.cpp" line="217"/>
         <source>&amp;Statistiche e tabelle incrociate…</source>
         <translation>&amp;Statistics and cross-tabulations…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="217"/>
+        <location filename="../src/ui/MainWindow.cpp" line="218"/>
         <source>&amp;Griglia delle sintesi…</source>
         <translation>Summary &amp;grid…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="218"/>
+        <location filename="../src/ui/MainWindow.cpp" line="219"/>
         <source>Tabelle &amp;riassuntive…</source>
         <translation>Summary &amp;tables…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="219"/>
+        <location filename="../src/ui/MainWindow.cpp" line="220"/>
         <source>&amp;Frequenze di parole, nuvola e parole in contesto…</source>
         <translation>Word &amp;frequencies, cloud and keywords in context…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="220"/>
+        <location filename="../src/ui/MainWindow.cpp" line="221"/>
         <source>&amp;Dizionari e analisi del contenuto…</source>
         <translation>&amp;Dictionaries and content analysis…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="221"/>
+        <location filename="../src/ui/MainWindow.cpp" line="222"/>
         <source>Esporta segmenti recuperati (&amp;HTML)…</source>
         <translation>Export retrieved segments (&amp;HTML)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="222"/>
+        <location filename="../src/ui/MainWindow.cpp" line="223"/>
         <source>Esporta segmenti recuperati (&amp;Excel .xlsx)…</source>
         <translation>Export retrieved segments (&amp;Excel .xlsx)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="223"/>
+        <location filename="../src/ui/MainWindow.cpp" line="224"/>
         <source>Esporta segmenti recuperati (CS&amp;V per Excel)…</source>
         <translation>Export retrieved segments (CS&amp;V for Excel)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="225"/>
+        <location filename="../src/ui/MainWindow.cpp" line="226"/>
         <source>Memo del &amp;progetto…</source>
         <translation>&amp;Project memo…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="226"/>
+        <location filename="../src/ui/MainWindow.cpp" line="227"/>
         <source>&amp;Tutti i memo…</source>
         <translation>&amp;All memos…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="229"/>
+        <location filename="../src/ui/MainWindow.cpp" line="230"/>
         <source>&amp;Nome utente…</source>
         <translation>&amp;User name…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="230"/>
+        <location filename="../src/ui/MainWindow.cpp" line="231"/>
         <source>&amp;AI…</source>
         <translation>&amp;AI…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="231"/>
+        <location filename="../src/ui/MainWindow.cpp" line="232"/>
         <source>&amp;Riassumi il documento aperto…</source>
         <translation>&amp;Summarize the open document…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="232"/>
+        <location filename="../src/ui/MainWindow.cpp" line="233"/>
         <source>Riassumi i &amp;segmenti del codice selezionato…</source>
         <translation>Summarize the &amp;segments of the selected code…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="234"/>
+        <location filename="../src/ui/MainWindow.cpp" line="235"/>
         <source>&amp;Spiega la selezione…</source>
         <translation>&amp;Explain the selection…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="235"/>
+        <location filename="../src/ui/MainWindow.cpp" line="236"/>
         <source>&amp;Traduci la selezione…</source>
         <translation>&amp;Translate the selection…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="237"/>
+        <location filename="../src/ui/MainWindow.cpp" line="238"/>
         <source>Suggerisci &amp;codici per il documento aperto…</source>
         <translation>Suggest &amp;codes for the open document…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="239"/>
+        <location filename="../src/ui/MainWindow.cpp" line="240"/>
         <source>Suggerisci codici per la s&amp;elezione…</source>
         <translation>Suggest codes for the s&amp;election…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="241"/>
+        <location filename="../src/ui/MainWindow.cpp" line="242"/>
         <source>Suggerisci so&amp;ttocodici del codice selezionato…</source>
         <translation>Suggest su&amp;bcodes of the selected code…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="243"/>
+        <location filename="../src/ui/MainWindow.cpp" line="244"/>
         <source>&amp;Raggruppa i sottocodici del codice selezionato (o i codici di primo livello)…</source>
         <translation>&amp;Group the subcodes of the selected code (or the top-level codes)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="245"/>
+        <location filename="../src/ui/MainWindow.cpp" line="246"/>
         <source>&amp;Informazioni su Tessera</source>
         <translation>&amp;About Tessera</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="246"/>
+        <location filename="../src/ui/MainWindow.cpp" line="247"/>
         <source>Verifica &amp;aggiornamenti…</source>
         <translation>Check for &amp;updates…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="247"/>
+        <location filename="../src/ui/MainWindow.cpp" line="248"/>
         <source>Cerca aggiornamenti &amp;all&apos;avvio</source>
         <translation>Check for updates at &amp;startup</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="257"/>
+        <location filename="../src/ui/MainWindow.cpp" line="258"/>
         <source>&amp;File</source>
         <translation>&amp;File</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="260"/>
+        <location filename="../src/ui/MainWindow.cpp" line="261"/>
         <source>Progetti &amp;recenti</source>
         <translation>&amp;Recent projects</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="266"/>
+        <location filename="../src/ui/MainWindow.cpp" line="267"/>
         <source>&amp;Importa</source>
         <translation>&amp;Import</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="269"/>
+        <location filename="../src/ui/MainWindow.cpp" line="270"/>
         <source>Es&amp;porta</source>
         <translation>E&amp;xport</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="278"/>
+        <location filename="../src/ui/MainWindow.cpp" line="279"/>
         <source>&amp;Modifica</source>
         <translation>&amp;Edit</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="282"/>
+        <location filename="../src/ui/MainWindow.cpp" line="283"/>
         <source>&amp;Documenti</source>
         <translation>&amp;Documents</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="300"/>
+        <location filename="../src/ui/MainWindow.cpp" line="301"/>
         <source>Attiva tutti i documenti</source>
         <translation>Activate all documents</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="301"/>
+        <location filename="../src/ui/MainWindow.cpp" line="302"/>
         <source>Disattiva tutti i documenti</source>
         <translation>Deactivate all documents</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="303"/>
+        <location filename="../src/ui/MainWindow.cpp" line="304"/>
         <source>&amp;Codici</source>
         <translation>&amp;Codes</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="310"/>
+        <location filename="../src/ui/MainWindow.cpp" line="311"/>
         <source>Attiva tutti i codici</source>
         <translation>Activate all codes</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="311"/>
+        <location filename="../src/ui/MainWindow.cpp" line="312"/>
         <source>Disattiva tutti i codici</source>
         <translation>Deactivate all codes</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="315"/>
+        <location filename="../src/ui/MainWindow.cpp" line="316"/>
         <source>&amp;Analisi</source>
         <translation>&amp;Analysis</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="333"/>
+        <location filename="../src/ui/MainWindow.cpp" line="334"/>
         <source>AI</source>
         <translation>AI</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="346"/>
+        <location filename="../src/ui/MainWindow.cpp" line="347"/>
         <source>&amp;Memo</source>
         <translation>&amp;Memo</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="350"/>
+        <location filename="../src/ui/MainWindow.cpp" line="351"/>
         <source>&amp;Impostazioni</source>
         <translation>&amp;Settings</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="355"/>
+        <location filename="../src/ui/MainWindow.cpp" line="356"/>
         <source>&amp;Aiuto</source>
         <translation>&amp;Help</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="364"/>
+        <location filename="../src/ui/MainWindow.cpp" line="365"/>
         <source>&amp;Lingua dell&apos;interfaccia</source>
         <translation>Interface &amp;language</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="376"/>
+        <location filename="../src/ui/MainWindow.cpp" line="377"/>
         <source>Lingua dell&apos;interfaccia</source>
         <translation>Interface language</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="377"/>
+        <location filename="../src/ui/MainWindow.cpp" line="378"/>
         <source>La nuova lingua verrà usata al prossimo avvio di Tessera.</source>
         <translation>The new language will be used the next time Tessera starts.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="380"/>
+        <location filename="../src/ui/MainWindow.cpp" line="381"/>
         <source>Lingua del sistema</source>
         <translation>System language</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="386"/>
+        <location filename="../src/ui/MainWindow.cpp" line="387"/>
         <source>Strumenti</source>
         <translation>Tools</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="394"/>
-        <location filename="../src/ui/MainWindow.cpp" line="804"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1491"/>
+        <location filename="../src/ui/MainWindow.cpp" line="395"/>
+        <location filename="../src/ui/MainWindow.cpp" line="808"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1495"/>
         <source>Annulla</source>
         <translation>Undo</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="395"/>
+        <location filename="../src/ui/MainWindow.cpp" line="396"/>
         <source>Annulla (Ctrl+Z)</source>
         <translation>Undo (Ctrl+Z)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="401"/>
+        <location filename="../src/ui/MainWindow.cpp" line="402"/>
         <source>Ripeti</source>
         <translation>Redo</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="412"/>
+        <location filename="../src/ui/MainWindow.cpp" line="413"/>
         <source>Nuovo codice</source>
         <translation>New code</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="416"/>
+        <location filename="../src/ui/MainWindow.cpp" line="417"/>
         <source>Codifica</source>
         <translation>Code</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="417"/>
+        <location filename="../src/ui/MainWindow.cpp" line="418"/>
         <source>Codifica la selezione (Ctrl+E)</source>
         <translation>Code the selection (Ctrl+E)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="423"/>
+        <location filename="../src/ui/MainWindow.cpp" line="424"/>
         <source>Matrice</source>
         <translation>Matrix</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="427"/>
+        <location filename="../src/ui/MainWindow.cpp" line="428"/>
         <source>Variabili</source>
         <translation>Variables</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="431"/>
+        <location filename="../src/ui/MainWindow.cpp" line="432"/>
         <source>Memo</source>
         <translation>Memo</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="529"/>
+        <location filename="../src/ui/MainWindow.cpp" line="533"/>
         <source>&amp;Annulla: %1</source>
         <translation>&amp;Undo: %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="530"/>
+        <location filename="../src/ui/MainWindow.cpp" line="534"/>
         <source>&amp;Ripeti: %1</source>
         <translation>&amp;Redo: %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="535"/>
+        <location filename="../src/ui/MainWindow.cpp" line="539"/>
         <source>%1 — Tessera</source>
         <translation>%1 — Tessera</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="535"/>
+        <location filename="../src/ui/MainWindow.cpp" line="539"/>
         <source>Tessera</source>
         <translation>Tessera</translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/ui/MainWindow.cpp" line="545"/>
+        <location filename="../src/ui/MainWindow.cpp" line="549"/>
         <source>%n documenti</source>
         <translation>
             <numerusform>%n document</numerusform>
@@ -3550,7 +3550,7 @@ In NVivo choose File &gt; Export &gt; Export Project (REFI-QDA format, .qdpx) or
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/ui/MainWindow.cpp" line="546"/>
+        <location filename="../src/ui/MainWindow.cpp" line="550"/>
         <source>%n codici</source>
         <translation>
             <numerusform>%n code</numerusform>
@@ -3558,7 +3558,7 @@ In NVivo choose File &gt; Export &gt; Export Project (REFI-QDA format, .qdpx) or
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/ui/MainWindow.cpp" line="547"/>
+        <location filename="../src/ui/MainWindow.cpp" line="551"/>
         <source>%n segmenti</source>
         <translation>
             <numerusform>%n segment</numerusform>
@@ -3566,19 +3566,19 @@ In NVivo choose File &gt; Export &gt; Export Project (REFI-QDA format, .qdpx) or
         </translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="581"/>
+        <location filename="../src/ui/MainWindow.cpp" line="585"/>
         <source>Impossibile aprire il progetto:
 %1</source>
         <translation>Unable to open the project:
 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="586"/>
+        <location filename="../src/ui/MainWindow.cpp" line="590"/>
         <source>Progetto aggiornato</source>
         <translation>Project updated</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="587"/>
+        <location filename="../src/ui/MainWindow.cpp" line="591"/>
         <source>Il progetto è stato aggiornato al formato di questa versione di Tessera.
 Una copia del file originale è stata salvata in:
 %1</source>
@@ -3587,133 +3587,133 @@ A copy of the original file has been saved in:
 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="591"/>
+        <location filename="../src/ui/MainWindow.cpp" line="595"/>
         <source>Progetto aperto: %1</source>
         <translation>Project opened: %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="604"/>
+        <location filename="../src/ui/MainWindow.cpp" line="608"/>
         <source>Nuovo progetto</source>
         <translation>New project</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="604"/>
+        <location filename="../src/ui/MainWindow.cpp" line="608"/>
         <source>Nuovo progetto.tsra</source>
         <translation>New project.tsra</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="610"/>
+        <location filename="../src/ui/MainWindow.cpp" line="614"/>
         <source>Impossibile creare il progetto:
 %1</source>
         <translation>Unable to create the project:
 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="614"/>
+        <location filename="../src/ui/MainWindow.cpp" line="618"/>
         <source>Nuovo progetto creato. Importa i documenti con Ctrl+I.</source>
         <translation>New project created. Import documents with Ctrl+I.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="619"/>
+        <location filename="../src/ui/MainWindow.cpp" line="623"/>
         <source>Apri progetto</source>
         <translation>Open project</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="620"/>
+        <location filename="../src/ui/MainWindow.cpp" line="624"/>
         <source>Tutti i file (*)</source>
         <translation>All files (*)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="634"/>
+        <location filename="../src/ui/MainWindow.cpp" line="638"/>
         <source>Salva una copia del progetto</source>
         <translation>Save a copy of the project</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="634"/>
+        <location filename="../src/ui/MainWindow.cpp" line="638"/>
         <source> - copia.tsra</source>
         <translation> - copy.tsra</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="638"/>
+        <location filename="../src/ui/MainWindow.cpp" line="642"/>
         <source>Scegli un file diverso da quello del progetto aperto.</source>
         <translation>Choose a file different from the open project&apos;s file.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="642"/>
+        <location filename="../src/ui/MainWindow.cpp" line="646"/>
         <source>Copia salvata in %1</source>
         <translation>Copy saved to %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="652"/>
+        <location filename="../src/ui/MainWindow.cpp" line="656"/>
         <source>Impossibile creare il progetto di esempio:
 %1</source>
         <translation>Unable to create the example project:
 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="662"/>
+        <location filename="../src/ui/MainWindow.cpp" line="666"/>
         <source>Crea progetto di esempio</source>
         <translation>Create example project</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="662"/>
+        <location filename="../src/ui/MainWindow.cpp" line="666"/>
         <source>Esempio lavoro da remoto.tsra</source>
         <translation>Remote work example.tsra</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="681"/>
+        <location filename="../src/ui/MainWindow.cpp" line="685"/>
         <source>Importa progetto QDPX</source>
         <translation>Import QDPX project</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="685"/>
+        <location filename="../src/ui/MainWindow.cpp" line="689"/>
         <source>Salva il progetto importato come</source>
         <translation>Save the imported project as</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="702"/>
-        <location filename="../src/ui/MainWindow.cpp" line="886"/>
+        <location filename="../src/ui/MainWindow.cpp" line="706"/>
+        <location filename="../src/ui/MainWindow.cpp" line="890"/>
         <source>Importazione non riuscita:
 %1</source>
         <translation>Import failed:
 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="707"/>
+        <location filename="../src/ui/MainWindow.cpp" line="711"/>
         <source>Importa QDPX</source>
         <translation>Import QDPX</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="712"/>
+        <location filename="../src/ui/MainWindow.cpp" line="716"/>
         <source>Unisci un altro progetto</source>
         <translation>Merge another project</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="713"/>
+        <location filename="../src/ui/MainWindow.cpp" line="717"/>
         <source>Progetti Tessera e REFI-QDA (*.tsra *.qdpx);;Tutti i file (*)</source>
         <translation>Tessera and REFI-QDA projects (*.tsra *.qdpx);;All files (*)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="723"/>
+        <location filename="../src/ui/MainWindow.cpp" line="727"/>
         <source>Impossibile leggere il progetto:
 %1</source>
         <translation>Unable to read the project:
 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="733"/>
+        <location filename="../src/ui/MainWindow.cpp" line="737"/>
         <source>Unione non riuscita (il progetto non è stato modificato):
 %1</source>
         <translation>Merge failed (the project has not been modified):
 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="736"/>
+        <location filename="../src/ui/MainWindow.cpp" line="740"/>
         <source>Unione completata</source>
         <translation>Merge completed</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="737"/>
+        <location filename="../src/ui/MainWindow.cpp" line="741"/>
         <source>
 
 L&apos;unione si può annullare con Modifica ▸ Annulla.</source>
@@ -3722,49 +3722,49 @@ L&apos;unione si può annullare con Modifica ▸ Annulla.</source>
 The merge can be undone with Edit ▸ Undo.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="743"/>
+        <location filename="../src/ui/MainWindow.cpp" line="747"/>
         <source>Esporta come QDPX</source>
         <translation>Export as QDPX</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="744"/>
+        <location filename="../src/ui/MainWindow.cpp" line="748"/>
         <source>Progetto REFI-QDA (*.qdpx)</source>
         <translation>REFI-QDA project (*.qdpx)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="749"/>
-        <location filename="../src/ui/MainWindow.cpp" line="768"/>
+        <location filename="../src/ui/MainWindow.cpp" line="753"/>
+        <location filename="../src/ui/MainWindow.cpp" line="772"/>
         <source>Progetto esportato in %1</source>
         <translation>Project exported to %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="759"/>
+        <location filename="../src/ui/MainWindow.cpp" line="763"/>
         <source>Report creato</source>
         <translation>Report created</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="765"/>
+        <location filename="../src/ui/MainWindow.cpp" line="769"/>
         <source>Esporta il progetto in Excel</source>
         <translation>Export the project to Excel</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="766"/>
+        <location filename="../src/ui/MainWindow.cpp" line="770"/>
         <source>Cartella di lavoro Excel (*.xlsx)</source>
         <translation>Excel workbook (*.xlsx)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="775"/>
-        <location filename="../src/ui/MainWindow.cpp" line="809"/>
+        <location filename="../src/ui/MainWindow.cpp" line="779"/>
+        <location filename="../src/ui/MainWindow.cpp" line="813"/>
         <source>Importa documenti</source>
         <translation>Import documents</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="786"/>
+        <location filename="../src/ui/MainWindow.cpp" line="790"/>
         <source>Importa PDF</source>
         <translation>Import PDF</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="787"/>
+        <location filename="../src/ui/MainWindow.cpp" line="791"/>
         <source>Come vuoi importare i file PDF?
 
 Come PDF: le pagine si vedono com&apos;erano e si codificano il testo selezionato e le aree (figure, tabelle).
@@ -3775,22 +3775,22 @@ As PDF: the pages look as they were and you can code the selected text and areas
 Text only: the extracted text becomes a text document, without layout.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="792"/>
+        <location filename="../src/ui/MainWindow.cpp" line="796"/>
         <source>Come PDF (consigliato)</source>
         <translation>As PDF (recommended)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="793"/>
+        <location filename="../src/ui/MainWindow.cpp" line="797"/>
         <source>Solo testo</source>
         <translation>Text only</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="804"/>
+        <location filename="../src/ui/MainWindow.cpp" line="808"/>
         <source>Importazione dei documenti…</source>
         <translation>Importing documents…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="859"/>
+        <location filename="../src/ui/MainWindow.cpp" line="863"/>
         <source>Alcuni file non sono stati importati:
 
 %1</source>
@@ -3799,276 +3799,276 @@ Text only: the extracted text becomes a text document, without layout.</translat
 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="864"/>
-        <location filename="../src/ui/MainWindow.cpp" line="891"/>
+        <location filename="../src/ui/MainWindow.cpp" line="868"/>
+        <location filename="../src/ui/MainWindow.cpp" line="895"/>
         <source>Importa dati di sondaggio</source>
         <translation>Import survey data</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="865"/>
+        <location filename="../src/ui/MainWindow.cpp" line="869"/>
         <source>Dati di sondaggio (*.xlsx *.csv *.txt);;Excel (*.xlsx);;CSV (*.csv *.txt);;Tutti i file (*)</source>
         <translation>Survey data (*.xlsx *.csv *.txt);;Excel (*.xlsx);;CSV (*.csv *.txt);;All files (*)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="876"/>
+        <location filename="../src/ui/MainWindow.cpp" line="880"/>
         <source>Il file non contiene righe di dati sotto l&apos;intestazione.</source>
         <translation>The file contains no data rows below the header.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="897"/>
+        <location filename="../src/ui/MainWindow.cpp" line="901"/>
         <source>Nuovo documento di testo</source>
         <translation>New text document</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="899"/>
+        <location filename="../src/ui/MainWindow.cpp" line="903"/>
         <source>Nuovo documento</source>
         <translation>New document</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="901"/>
+        <location filename="../src/ui/MainWindow.cpp" line="905"/>
         <source>Incolla o scrivi qui il testo (es. una trascrizione)…</source>
         <translation>Paste or type the text here (e.g. a transcript)…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="906"/>
+        <location filename="../src/ui/MainWindow.cpp" line="910"/>
         <source>Nome</source>
         <translation>Name</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="931"/>
+        <location filename="../src/ui/MainWindow.cpp" line="935"/>
         <source>Seleziona un codice nel pannello Codici.</source>
         <translation>Select a code in the Codes panel.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="935"/>
-        <location filename="../src/ui/MainWindow.cpp" line="944"/>
+        <location filename="../src/ui/MainWindow.cpp" line="939"/>
+        <location filename="../src/ui/MainWindow.cpp" line="948"/>
         <source>Seleziona prima del testo o un&apos;area nel documento.</source>
         <translation>First select some text or an area in the document.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="948"/>
+        <location filename="../src/ui/MainWindow.cpp" line="952"/>
         <source>Codifica con un nuovo codice</source>
         <translation>Code with a new code</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="949"/>
+        <location filename="../src/ui/MainWindow.cpp" line="953"/>
         <source>Nome del nuovo codice (creato al primo livello):</source>
         <translation>Name of the new code (created at the top level):</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="953"/>
+        <location filename="../src/ui/MainWindow.cpp" line="957"/>
         <source>Codifica con nuovo codice</source>
         <translation>Code with new code</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="967"/>
+        <location filename="../src/ui/MainWindow.cpp" line="971"/>
         <source>Esporta codebook</source>
         <translation>Export codebook</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="967"/>
+        <location filename="../src/ui/MainWindow.cpp" line="971"/>
         <source> - codebook.html</source>
         <translation> - codebook.html</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="968"/>
+        <location filename="../src/ui/MainWindow.cpp" line="972"/>
         <source>Pagina HTML (*.html);;Cartella di lavoro Excel (*.xlsx);;CSV per Excel (*.csv)</source>
         <translation>HTML page (*.html);;Excel workbook (*.xlsx);;CSV for Excel (*.csv)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1178"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1182"/>
         <source>Nome utente</source>
         <translation>User name</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1179"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1183"/>
         <source>Nome registrato come autore di codifiche e memo:</source>
         <translation>Name recorded as the author of codings and memos:</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1195"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1258"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1291"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1199"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1262"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1295"/>
         <source>Apri prima un documento.</source>
         <translation>Open a document first.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1200"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1204"/>
         <source>Il riassunto con l&apos;AI funziona sui documenti di testo e sui PDF.</source>
         <translation>AI summarization works on text documents and PDFs.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1205"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1302"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1209"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1306"/>
         <source>Il documento non contiene testo.</source>
         <translation>The document contains no text.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1209"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1311"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1213"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1315"/>
         <source>Documento: %1</source>
         <translation>Document: %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1216"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1318"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1220"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1322"/>
         <source>Seleziona prima un codice.</source>
         <translation>Select a code first.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1243"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1247"/>
         <source>Il codice non ha segmenti con testo da riassumere.</source>
         <translation>The code has no segments with text to summarize.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1247"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1347"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1251"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1351"/>
         <source>Codice: %1</source>
         <translation>Code: %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1279"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1302"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1283"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1306"/>
         <source>Seleziona prima un brano di testo.</source>
         <translation>First select a passage of text.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1282"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1286"/>
         <source>%1: %2</source>
         <translation>%1: %2</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1282"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1286"/>
         <source>Segmento</source>
         <translation>Segment</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1282"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1286"/>
         <source>Brano selezionato</source>
         <translation>Selected passage</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1296"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1300"/>
         <source>Il suggerimento di codici funziona sui documenti di testo e sui PDF.</source>
         <translation>Code suggestion works on text documents and PDFs.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1311"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1315"/>
         <source>Brano selezionato di «%1»</source>
         <translation>Selected passage of &quot;%1&quot;</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1341"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1345"/>
         <source>Servono almeno due segmenti con testo codificati con questo codice.</source>
         <translation>At least two segments with text coded with this code are needed.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1362"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1366"/>
         <source>Servono almeno tre codici da raggruppare.</source>
         <translation>At least three codes to group are needed.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1366"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1370"/>
         <source>Sottocodici di: %1</source>
         <translation>Subcodes of: %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1366"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1370"/>
         <source>Codici di primo livello</source>
         <translation>Top-level codes</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1375"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1379"/>
         <source>Benvenuto in Tessera</source>
         <translation>Welcome to Tessera</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1376"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1380"/>
         <source>Come ti chiami? Il nome viene registrato come autore di codifiche e memo e permette di distinguere il lavoro di ciascuno quando si uniscono i progetti.</source>
         <translation>What is your name? The name is recorded as the author of codings and memos and lets you tell everyone&apos;s work apart when projects are merged.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1388"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1392"/>
         <source>Informazioni su Tessera</source>
         <translation>About Tessera</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1403"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1407"/>
         <source>Informazioni</source>
         <translation>About</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1404"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1408"/>
         <source>&lt;h3&gt;Tessera %1&lt;/h3&gt;&lt;p&gt;Software per l&apos;analisi qualitativa dei dati: documenti, sistema di codici, codifica, memo, variabili, ricerca e matrici.&lt;/p&gt;&lt;p&gt;I progetti sono file SQLite (.tsra) salvati automaticamente a ogni modifica. Lo scambio con altri software QDA avviene tramite lo standard aperto REFI-QDA (.qdpx).&lt;/p&gt;&lt;p&gt;Realizzato con Qt %2.&lt;/p&gt;</source>
         <translation>&lt;h3&gt;Tessera %1&lt;/h3&gt;&lt;p&gt;Software for qualitative data analysis: documents, code system, coding, memos, variables, search and matrices.&lt;/p&gt;&lt;p&gt;Projects are SQLite files (.tsra) saved automatically after every change. Exchange with other QDA software uses the open REFI-QDA standard (.qdpx).&lt;/p&gt;&lt;p&gt;Built with Qt %2.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1411"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1415"/>
         <source>Crediti</source>
         <translation>Credits</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1412"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1416"/>
         <source>&lt;h3&gt;Crediti&lt;/h3&gt;&lt;p&gt;&lt;b&gt;Ideazione e sviluppo&lt;/b&gt;&lt;br&gt;Luca Bertocchi&lt;/p&gt;&lt;p&gt;&lt;b&gt;Componenti di terze parti&lt;/b&gt;&lt;br&gt;Qt (&lt;a href=&quot;https://www.qt.io&quot;&gt;qt.io&lt;/a&gt;), distribuito con licenza LGPL v3.&lt;/p&gt;&lt;p&gt;Codice sorgente: &lt;a href=&quot;https://github.com/lucaberto95/Tessera&quot;&gt;github.com/lucaberto95/Tessera&lt;/a&gt;&lt;/p&gt;</source>
         <translation>&lt;h3&gt;Credits&lt;/h3&gt;&lt;p&gt;&lt;b&gt;Concept and development&lt;/b&gt;&lt;br&gt;Luca Bertocchi&lt;/p&gt;&lt;p&gt;&lt;b&gt;Third-party components&lt;/b&gt;&lt;br&gt;Qt (&lt;a href=&quot;https://www.qt.io&quot;&gt;qt.io&lt;/a&gt;), distributed under the LGPL v3 license.&lt;/p&gt;&lt;p&gt;Source code: &lt;a href=&quot;https://github.com/lucaberto95/Tessera&quot;&gt;github.com/lucaberto95/Tessera&lt;/a&gt;&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1417"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1421"/>
         <source>Licenza</source>
         <translation>License</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1418"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1422"/>
         <source>&lt;h3&gt;Licenza MIT&lt;/h3&gt;&lt;p&gt;Copyright © 2026 Luca Bertocchi&lt;/p&gt;&lt;p&gt;Tessera è software libero, distribuito con licenza MIT: puoi usarlo, copiarlo, modificarlo e ridistribuirlo, anche a fini commerciali, purché venga mantenuta questa nota di copyright. Il software è fornito «così com&apos;è», senza garanzie di alcun tipo. Il testo completo è nel file LICENSE.&lt;/p&gt;</source>
         <translation>&lt;h3&gt;MIT License&lt;/h3&gt;&lt;p&gt;Copyright © 2026 Luca Bertocchi&lt;/p&gt;&lt;p&gt;Tessera is free software, distributed under the MIT license: you may use, copy, modify and redistribute it, including for commercial purposes, provided this copyright notice is kept. The software is provided &quot;as is&quot;, without warranties of any kind. The full text is in the LICENSE file.&lt;/p&gt;</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1447"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1451"/>
         <source>Controllo degli aggiornamenti…</source>
         <translation>Checking for updates…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1460"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1464"/>
         <source>Aggiornamenti</source>
         <translation>Updates</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1461"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1465"/>
         <source>Hai già l&apos;ultima versione di Tessera (%1).</source>
         <translation>You already have the latest version of Tessera (%1).</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1464"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1468"/>
         <source>Aggiornamento disponibile</source>
         <translation>Update available</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1465"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1469"/>
         <source>È disponibile Tessera %1 (hai la %2). Vuoi scaricarla e installarla ora?</source>
         <translation>Tessera %1 is available (you have %2). Do you want to download and install it now?</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1470"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1474"/>
         <source>Aggiorna ora</source>
         <translation>Update now</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1471"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1475"/>
         <source>Più tardi</source>
         <translation>Later</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1478"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1482"/>
         <source>Aggiornamento manuale</source>
         <translation>Manual update</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1479"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1483"/>
         <source>Tessera non può aggiornarsi da sola in questa cartella. Scarica la nuova versione dalla pagina della release: si aprirà nel browser.</source>
         <translation>Tessera cannot update itself in this folder. Download the new version from the release page: it will open in the browser.</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1491"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1495"/>
         <source>Download di Tessera %1…</source>
         <translation>Downloading Tessera %1…</translation>
     </message>
@@ -5682,7 +5682,7 @@ The file has not been modified.</translation>
         <translation>Saves an image of the window and exits (for testing)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="70"/>
+        <location filename="../src/ui/MainWindow.cpp" line="71"/>
         <source>Progetto Tessera (*.tsra)</source>
         <translation>Tessera project (*.tsra)</translation>
     </message>
@@ -7060,7 +7060,7 @@ The file has not been modified.</translation>
     <message>
         <location filename="../src/core/Team.cpp" line="48"/>
         <source>Il membro «%1» è ripetuto</source>
-        <translation>The member "%1" is repeated</translation>
+        <translation>The member &quot;%1&quot; is repeated</translation>
     </message>
     <message>
         <location filename="../src/core/Team.cpp" line="52"/>
@@ -7106,142 +7106,152 @@ The file has not been modified.</translation>
 <context>
     <name>TeamDialog</name>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="33"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="34"/>
         <source>Lavoro di gruppo</source>
         <translation>Teamwork</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="36"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="37"/>
         <source>Il responsabile avvia un ciclo: Tessera scrive una copia del progetto per ogni membro in una cartella condivisa. I membri codificano la propria copia e la rimandano; il responsabile importa le copie rientrate, che aggiungono al progetto solo il lavoro del rispettivo membro.</source>
-        <translation>The manager starts a round: Tessera writes a copy of the project for each member in a shared folder. Members code their own copy and send it back; the manager imports the returned copies, which add only the respective member's work to the project.</translation>
+        <translation>The manager starts a round: Tessera writes a copy of the project for each member in a shared folder. Members code their own copy and send it back; the manager imports the returned copies, which add only the respective member&apos;s work to the project.</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="44"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="45"/>
         <source>Ciclo</source>
         <translation>Round</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="44"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="45"/>
         <source>Membro</source>
         <translation>Member</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="44"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="45"/>
         <source>File</source>
         <translation>File</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="44"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="45"/>
         <source>Stato</source>
         <translation>Status</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="44"/>
-        <location filename="../src/ui/TeamDialog.cpp" line="109"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="45"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="117"/>
         <source>Inviata</source>
         <translation>Sent</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="45"/>
-        <location filename="../src/ui/TeamDialog.cpp" line="110"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="46"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="118"/>
         <source>Rientrata</source>
         <translation>Returned</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="45"/>
-        <location filename="../src/ui/TeamDialog.cpp" line="111"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="46"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="119"/>
         <source>Unita</source>
         <translation>Merged</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="45"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="46"/>
         <source>Esito</source>
         <translation>Result</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="53"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="54"/>
         <source>Nuovo ciclo…</source>
         <translation>New round…</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="54"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="55"/>
         <source>Importa copie rientrate…</source>
         <translation>Import returned copies…</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="55"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="56"/>
         <source>Confronta i codificatori…</source>
         <translation>Compare coders…</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="56"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="57"/>
+        <source>Sincronizzazione continua…</source>
+        <translation>Continuous synchronisation…</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamDialog.cpp" line="58"/>
+        <source>Lavoro di gruppo senza cicli: ognuno pubblica le proprie modifiche nella cartella condivisa e legge quelle degli altri.</source>
+        <translation>Teamwork without rounds: everyone publishes their own changes in the shared folder and reads the others' changes.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamDialog.cpp" line="59"/>
         <source>Segna come inviata</source>
         <translation>Mark as sent</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="57"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="60"/>
         <source>Se hai annullato un&apos;unione: la copia potrà essere importata di nuovo.</source>
         <translation>If you undid a merge: the copy can be imported again.</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="58"/>
-        <location filename="../src/ui/TeamDialog.cpp" line="226"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="61"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="234"/>
         <source>Rimuovi voce</source>
         <translation>Remove entry</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="59"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="62"/>
         <source>Chiudi</source>
         <translation>Close</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="102"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="110"/>
         <source>Il tuo nome (autore delle codifiche): %1</source>
         <translation>Your name (author of codings): %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="144"/>
-        <location filename="../src/ui/TeamDialog.cpp" line="175"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="152"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="183"/>
         <source>Nuovo ciclo</source>
         <translation>New round</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="147"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="155"/>
         <source>Sfoglia…</source>
         <translation>Browse…</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="150"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="158"/>
         <source>Cartella delle copie</source>
         <translation>Folder of the copies</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="161"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="169"/>
         <source>Membri del gruppo (un nome per riga, come compare come autore):</source>
         <translation>Group members (one name per line, as it appears as author):</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="163"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="171"/>
         <source>Cartella in cui scrivere le copie (per esempio quella condivisa):</source>
         <translation>Folder to write the copies in (for example the shared one):</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="176"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="184"/>
         <source>Ciclo %1 avviato: %2 copie scritte in %3.</source>
         <translation>Round %1 started: %2 copies written to %3.</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="188"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="196"/>
         <source>%1: non importata (%2)</source>
         <translation>%1: not imported (%2)</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="192"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="200"/>
         <source>Copia di %1 (ciclo %2): %3.</source>
         <translation>Copy by %1 (round %2): %3.</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="194"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="202"/>
         <source>
 
 La copia non contiene lavoro di questo membro: controlla che abbia usato il proprio nome come autore.</source>
@@ -7250,7 +7260,7 @@ La copia non contiene lavoro di questo membro: controlla che abbia usato il prop
 The copy contains no work by this member: check that they used their own name as author.</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="196"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="204"/>
         <source>
 
 Unire?</source>
@@ -7259,42 +7269,42 @@ Unire?</source>
 Merge?</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="197"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="205"/>
         <source>Importa copia rientrata</source>
         <translation>Import returned copy</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="198"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="206"/>
         <source>%1: saltata</source>
         <translation>%1: skipped</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="205"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="213"/>
         <source>%1: unita (%2)</source>
         <translation>%1: merged (%2)</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="206"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="214"/>
         <source>%1: unione non riuscita (%2)</source>
         <translation>%1: merge failed (%2)</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="213"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="221"/>
         <source>Copie rientrate</source>
         <translation>Returned copies</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="213"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="221"/>
         <source>Progetti Tessera (*.tsra);;Tutti i file (*)</source>
         <translation>Tessera projects (*.tsra);;All files (*)</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="217"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="225"/>
         <source>Importa copie rientrate</source>
         <translation>Import returned copies</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="218"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="226"/>
         <source>
 
 Ogni unione si può annullare con Modifica ▸ Annulla.</source>
@@ -7303,9 +7313,324 @@ Ogni unione si può annullare con Modifica ▸ Annulla.</source>
 Each merge can be undone with Edit ▸ Undo.</translation>
     </message>
     <message>
-        <location filename="../src/ui/TeamDialog.cpp" line="226"/>
+        <location filename="../src/ui/TeamDialog.cpp" line="234"/>
         <source>Rimuovere la voce dalla cronologia? I file non vengono toccati.</source>
         <translation>Remove the entry from the history? The files are not touched.</translation>
+    </message>
+</context>
+<context>
+    <name>TeamSync</name>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="154"/>
+        <source>impossibile aprire il file</source>
+        <translation>cannot open the file</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="164"/>
+        <source>file vuoto (forse ancora in copia dal servizio cloud)</source>
+        <translation>empty file (perhaps still being copied by the cloud service)</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="170"/>
+        <source>non è un file di sincronizzazione di Tessera</source>
+        <translation>not a Tessera synchronisation file</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="175"/>
+        <source>formato più recente di questa versione di Tessera: aggiorna il programma</source>
+        <translation>format newer than this version of Tessera: update the program</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="179"/>
+        <source>manca il nome del membro</source>
+        <translation>the member name is missing</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="183"/>
+        <source>appartiene a un altro progetto</source>
+        <translation>belongs to another project</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="188"/>
+        <source>file incompleto (forse ancora in copia dal servizio cloud): riprova tra poco</source>
+        <translation>incomplete file (perhaps still being copied by the cloud service): try again shortly</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="376"/>
+        <source>%1: il documento «%2» ha un contenuto diverso nelle due copie: le sue codifiche non vengono applicate (le posizioni non coinciderebbero).</source>
+        <translation>%1: the document "%2" has a different content in the two copies: its codings are not applied (the positions would not match).</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="378"/>
+        <source>%1: il documento «%2» non c&apos;è in questo progetto: le sue codifiche non vengono applicate.</source>
+        <translation>%1: the document &quot;%2&quot; is not in this project: its codings are not applied.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="403"/>
+        <source>Codice «%1» di %2: qui si chiama «%3». Resta il nome locale.</source>
+        <translation>Code "%1" by %2: here it is called "%3". The local name is kept.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="458"/>
+        <source>Commento di una codifica di %1 in «%2» (codice «%3»): cambiato anche qui, tenuti entrambi i testi.</source>
+        <translation>Comment of a coding by %1 in "%2" (code "%3"): also changed here, both texts kept.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="549"/>
+        <source>Commento di un collegamento di %1 tra «%2» e «%3»: cambiato anche qui, tenuti entrambi i testi.</source>
+        <translation>Comment of a link by %1 between "%2" and "%3": also changed here, both texts kept.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="631"/>
+        <source>Memo «%1» di %2: cambiato anche qui, tenuti entrambi i testi.</source>
+        <translation>Memo "%1" by %2: also changed here, both texts kept.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="763"/>
+        <source>Sintesi di «%1» per il codice «%2» (di %3): cambiata anche qui, tenuti entrambi i testi.</source>
+        <translation>Summary of "%1" for code "%2" (by %3): also changed here, both texts kept.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="830"/>
+        <location filename="../src/core/TeamSync.cpp" line="1008"/>
+        <source>Nessun progetto aperto</source>
+        <translation>No project open</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="833"/>
+        <location filename="../src/core/TeamSync.cpp" line="1011"/>
+        <source>Imposta prima il tuo nome (autore delle codifiche): senza nome non si può sincronizzare.</source>
+        <translation>Set your name (author of the codings) first: without a name synchronisation is not possible.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="836"/>
+        <location filename="../src/core/TeamSync.cpp" line="1014"/>
+        <source>Il progetto non ha un identificativo: salvalo di nuovo con questa versione di Tessera.</source>
+        <translation>The project has no identifier: save it again with this version of Tessera.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="838"/>
+        <source>Scegli la cartella condivisa.</source>
+        <translation>Choose the shared folder.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="840"/>
+        <location filename="../src/core/TeamSync.cpp" line="1018"/>
+        <source>Il file del progetto è dentro la cartella condivisa. Un file .tsra non va tenuto in una cartella sincronizzata (OneDrive, Dropbox...): si può danneggiare. Spostalo in una cartella locale.</source>
+        <translation>The project file is inside the shared folder. A .tsra file must not be kept in a synchronised folder (OneDrive, Dropbox...): it can get corrupted. Move it to a local folder.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="844"/>
+        <source>Impossibile creare la cartella %1</source>
+        <translation>Cannot create the folder %1</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="854"/>
+        <source>Il file %1 appartiene a un altro membro («%2»): i nomi danno lo stesso nome di file.</source>
+        <translation>The file %1 belongs to another member ("%2"): the names give the same file name.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="976"/>
+        <location filename="../src/core/TeamSync.cpp" line="989"/>
+        <source>Impossibile scrivere %1</source>
+        <translation>Cannot write %1</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="1016"/>
+        <source>La cartella condivisa non esiste.</source>
+        <translation>The shared folder does not exist.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="1022"/>
+        <source>Nella cartella condivisa non c&apos;è ancora nessun file di sincronizzazione di questo progetto.</source>
+        <translation>There is no synchronisation file for this project in the shared folder yet.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="1027"/>
+        <source>Sincronizzazione del gruppo</source>
+        <translation>Team synchronisation</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="1042"/>
+        <source>%1: file ignorato (%2).</source>
+        <translation>%1: file ignored (%2).</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="1055"/>
+        <source>%1: il file è più vecchio di quello già letto (generazione %2, letta %3). Riletto comunque.</source>
+        <translation>%1: the file is older than the one already read (version %2, read %3). Read again anyway.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="1058"/>
+        <source>%1: il nome del file non corrisponde al membro «%2» (copia creata dal servizio cloud?). Letto comunque.</source>
+        <translation>%1: the file name does not match the member "%2" (copy made by the cloud service?). Read anyway.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="1061"/>
+        <source>%1: %2 righe illeggibili ignorate.</source>
+        <translation>%1: %2 unreadable lines ignored.</translation>
+    </message>
+    <message>
+        <location filename="../src/core/TeamSync.cpp" line="1120"/>
+        <source>%1 codifiche, %2 collegamenti, %3 memo, %4 sintesi, %5 codici nuovi; %6 aggiornamenti, %7 conflitti</source>
+        <translation>%1 codings, %2 links, %3 memos, %4 summaries, %5 new codes; %6 updates, %7 conflicts</translation>
+    </message>
+</context>
+<context>
+    <name>TeamSyncDialog</name>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="29"/>
+        <source>Sincronizza automaticamente quando apro il progetto</source>
+        <translation>Synchronise automatically when I open the project</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="32"/>
+        <source>Sincronizzazione del gruppo</source>
+        <translation>Team synchronisation</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="35"/>
+        <source>Ognuno lavora sul proprio file di progetto, che resta sul proprio computer. Tessera scrive il tuo lavoro (codifiche, codici, memo, collegamenti, sintesi) in un file di modifiche nella cartella condivisa e legge quelli degli altri membri, applicando le novità in un unico passo annullabile.</source>
+        <translation>Everyone works on their own project file, which stays on their own computer. Tessera writes your work (codings, codes, memos, links, summaries) to a change file in the shared folder and reads the other members' files, applying what is new in a single undoable step.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="40"/>
+        <source>Attenzione: non mettere mai il file del progetto (.tsra) nella cartella condivisa (OneDrive, Dropbox, rete...): i servizi di sincronizzazione possono danneggiare un database aperto. Nella cartella condivisa vanno solo i file di modifiche (.tsrlog) che scrive Tessera. Non vengono sincronizzati documenti nuovi o modificati, né le eliminazioni.</source>
+        <translation>Warning: never put the project file (.tsra) in the shared folder (OneDrive, Dropbox, network...): synchronisation services can corrupt an open database. Only the change files (.tsrlog) written by Tessera belong in the shared folder. New or modified documents and deletions are not synchronised.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="45"/>
+        <source>Il tuo nome (autore delle codifiche): %1</source>
+        <translation>Your name (author of the codings): %1</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="48"/>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="104"/>
+        <source>Cartella condivisa</source>
+        <translation>Shared folder</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="49"/>
+        <source>Sfoglia…</source>
+        <translation>Browse…</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="50"/>
+        <source>Sincronizza ora</source>
+        <translation>Synchronise now</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="51"/>
+        <source>Anteprima</source>
+        <translation>Preview</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="52"/>
+        <source>Mostra cosa cambierebbe senza modificare il progetto.</source>
+        <translation>Shows what would change without modifying the project.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="53"/>
+        <source>Solo pubblica il mio lavoro</source>
+        <translation>Only publish my work</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="54"/>
+        <source>Rileggi tutto</source>
+        <translation>Read everything again</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="55"/>
+        <source>Dimentica quanto è già stato letto e rilegge tutti i file (utile dopo aver annullato una sincronizzazione).</source>
+        <translation>Forgets what has already been read and reads all the files again (useful after undoing a synchronisation).</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="56"/>
+        <source>Chiudi</source>
+        <translation>Close</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="115"/>
+        <source>Pubblicazione non riuscita: %1</source>
+        <translation>Publishing failed: %1</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="116"/>
+        <source>Pubblicato il tuo lavoro: %1 elementi (versione %2).</source>
+        <translation>Your work has been published: %1 items (version %2).</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="125"/>
+        <source>Pubblicazione non riuscita</source>
+        <translation>Publishing failed</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="131"/>
+        <source>ANTEPRIMA (non è stato modificato nulla)
+</source>
+        <translation>PREVIEW (nothing has been modified)
+</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="137"/>
+        <source>Sincronizzazione non riuscita: %1</source>
+        <translation>Synchronisation failed: %1</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="141"/>
+        <source>%1: ignorato (%2)</source>
+        <translation>%1: ignored (%2)</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="143"/>
+        <source>%1: nessuna novità (versione %2)</source>
+        <translation>%1: nothing new (version %2)</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="145"/>
+        <source>%1 (versione %2): %3 codifiche, %4 collegamenti, %5 memo, %6 sintesi, %7 codici nuovi, %8 aggiornati, %9 in conflitto, %10 non applicati</source>
+        <translation>%1 (version %2): %3 codings, %4 links, %5 memos, %6 summaries, %7 new codes, %8 updated, %9 in conflict, %10 not applied</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="151"/>
+        <source>Nessun file di altri membri.</source>
+        <translation>No files from other members.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="153"/>
+        <source>Conflitti (il testo è cambiato da entrambe le parti: sono stati tenuti i due testi, controllali):</source>
+        <translation>Conflicts (the text changed on both sides: both texts were kept, please check them):</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="159"/>
+        <source>Avvisi:</source>
+        <translation>Warnings:</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="163"/>
+        <source>Totale: %1</source>
+        <translation>Total: %1</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="165"/>
+        <source>La sincronizzazione si può annullare con Modifica ▸ Annulla.</source>
+        <translation>The synchronisation can be undone with Edit ▸ Undo.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="198"/>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="201"/>
+        <source>Sincronizzazione del gruppo non riuscita: %1</source>
+        <translation>Team synchronisation failed: %1</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="202"/>
+        <source>Sincronizzazione del gruppo: %1</source>
+        <translation>Team synchronisation: %1</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/TeamSyncDialog.cpp" line="204"/>
+        <source> - %1 conflitti, %2 avvisi: in Lavoro di gruppo, Sincronizzazione, «Rileggi tutto» li mostra</source>
+        <translation> - %1 conflicts, %2 warnings: Teamwork, Synchronisation, "Read everything again" shows them</translation>
     </message>
 </context>
 <context>
