@@ -164,7 +164,7 @@ bool launchReplacement(const QString &sourceDir, const QString &appDir, qint64 p
     };
     const QString src = QDir::toNativeSeparators(sourceDir), app = QDir::toNativeSeparators(appDir);
     // cmd.exe expands these inside quotes too; real installation paths never contain them.
-    for (const QString &p : {src, app}) {
+    for (const QString &p : {src, app, QDir::toNativeSeparators(workDir)}) {
         if (p.contains(QLatin1Char('%')) || p.contains(QLatin1Char('!')) || p.contains(QLatin1Char('"')))
             return fail(QCoreApplication::translate("Update", "Il percorso dell'applicazione non è supportato."));
     }
@@ -175,26 +175,27 @@ bool launchReplacement(const QString &sourceDir, const QString &appDir, qint64 p
         return fail(QCoreApplication::translate("Update", "Impossibile preparare l'aggiornamento."));
     const QString text = QStringLiteral(
         "@echo off\r\n"
+        "cd /d \"%3\"\r\n"
         "set /a tries=0\r\n"
         ":wait\r\n"
-        "tasklist /FI \"PID eq %1\" 2>nul | find \"%1\" >nul\r\n"
+        "tasklist /FI \"PID eq %1\" /FI \"IMAGENAME eq Tessera.exe\" /NH 2>nul | find /I \"Tessera.exe\" >nul\r\n"
         "if errorlevel 1 goto copy\r\n"
         "set /a tries+=1\r\n"
-        "if %tries% GEQ 60 exit /b 1\r\n"
+        "if %tries% GEQ 60 goto done\r\n"
         "ping -n 2 127.0.0.1 >nul\r\n"
         "goto wait\r\n"
         ":copy\r\n"
         "set /a tries=0\r\n"
         ":again\r\n"
-        "xcopy \"%2\\*\" \"%3\\\" /E /Y /I /Q >nul\r\n"
+        "xcopy \"%2\\*\" \"%3\\\" /E /Y /I /Q >nul 2>>\"%4\\update.log\"\r\n"
         "if not errorlevel 1 goto done\r\n"
         "set /a tries+=1\r\n"
         "if %tries% GEQ 10 goto done\r\n"
         "ping -n 2 127.0.0.1 >nul\r\n"
         "goto again\r\n"
         ":done\r\n"
-        "start \"\" \"%3\\Tessera.exe\"\r\n")
-        .arg(QString::number(pid), src, app);
+        "start \"\" /D \"%3\" \"%3\\Tessera.exe\"\r\n")
+        .arg(QString::number(pid), src, app, QDir::toNativeSeparators(workDir));
     script.write(text.toLocal8Bit());
     script.close();
 

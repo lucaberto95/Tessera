@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.29.3] - 2026-10-23 — Riavvio dopo l'aggiornamento
+
+- Lo script di aggiornamento ora individua la chiusura di Tessera filtrando per PID e nome del processo, riavvia l'app anche se l'attesa scade e la lancia dalla sua cartella. Gli errori di copia sono registrati in `update.log` nella cartella temporanea `tessera-update`.
+
 ## [0.29.2] - 2026-10-23 — Correzione dell'aggiornamento automatico
 
 - L'aggiornamento estraeva file vuoti: lo zip creato da `Compress-Archive` (PowerShell 5.1) usa le barre rovesciate nei nomi e il lettore non trovava i dati. L'estrazione prova entrambe le grafie e rifiuta qualunque file la cui dimensione non corrisponde all'archivio.
