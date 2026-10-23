@@ -6,6 +6,7 @@
 #include "core/Importers.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
+#include "core/ForeignImport.h"
 #include "core/Qdpx.h"
 #include "core/Survey.h"
 #include "core/TextUtils.h"
@@ -150,7 +151,7 @@ void MainWindow::createActions()
                          QStyle::SP_DialogOpenButton);
     m_saveCopy = make(tr("Salva una &copia come…"), &MainWindow::saveCopyAs, QKeySequence::SaveAs);
     m_closeProject = make(tr("&Chiudi progetto"), &MainWindow::closeProject);
-    m_importQdpx = make(tr("Importa progetto &QDPX (REFI-QDA)…"), &MainWindow::importQdpx, {}, false);
+    m_importQdpx = make(tr("Importa progetto &QDPX / libro dei codici (REFI-QDA, da MAXQDA, NVivo…)…"), &MainWindow::importQdpx, {}, false);
     m_mergeProject = make(tr("&Unisci un altro progetto…"), &MainWindow::mergeProject);
     m_exportQdpx = make(tr("&Esporta come QDPX (REFI-QDA)…"), &MainWindow::exportQdpx);
     m_exportProjectXlsx = make(tr("Esporta tutto il progetto in E&xcel…"), &MainWindow::exportProjectXlsx);
@@ -666,7 +667,7 @@ void MainWindow::showOverview()
 void MainWindow::importQdpx()
 {
     const QString source = Ui::openFileName(this, tr("Importa progetto QDPX"),
-                                            tr("Progetto REFI-QDA (*.qdpx);;Tutti i file (*)"));
+                                            ForeignImport::fileDialogFilter());
     if (source.isEmpty())
         return;
     const QString target = askNewProjectPath(tr("Salva il progetto importato come"),
@@ -681,7 +682,7 @@ void MainWindow::importQdpx()
     }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QString report, error;
-    const bool ok = Qdpx::importProject(*m_project, source, &report, &error);
+    const bool ok = ForeignImport::importFile(*m_project, source, &report, &error);
     QApplication::restoreOverrideCursor();
     if (!ok) {
         m_project->close();
