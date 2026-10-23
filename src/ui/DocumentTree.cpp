@@ -90,6 +90,8 @@ void DocumentTree::rebuild()
         di->setText(0, d.name);
         di->setIcon(0, d.kind == DocumentKind::Image ? Ui::imageIcon()
                            : d.kind == DocumentKind::Pdf ? Ui::pdfIcon()
+                           : d.kind == DocumentKind::Audio ? Ui::mediaIcon(false)
+                           : d.kind == DocumentKind::Video ? Ui::mediaIcon(true)
                            : kind == DocumentItem        ? docIcon
                                                          : memberIcon);
         di->setData(0, KindRole, kind);

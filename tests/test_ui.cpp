@@ -26,6 +26,8 @@
 #include "ui/ImageView.h"
 #include "ui/PdfView.h"
 #include "ui/LinksDialog.h"
+#include "ui/MediaPlayerWidget.h"
+#include "core/Media.h"
 #include "ui/TranscriptDialog.h"
 #include "ui/Language.h"
 #include "ui/MainWindow.h"
@@ -46,6 +48,8 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QJsonArray>
+#include <QSettings>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -560,6 +564,342 @@ private slots:
         QCOMPARE(table->rowCount(), 2);
         QVERIFY(p.undo());
         QCOMPARE(table->rowCount(), 3);
+    }
+    // A WAV of silence (8 kHz, 8 bit, mono) to give the player something real to open.
+    static QString writeWav(const QString &file, int seconds)
+    {
+        const quint32 rate = 8000, n = rate * quint32(seconds);
+        QByteArray header;
+        QDataStream ds(&header, QIODevice::WriteOnly);
+        ds.setByteOrder(QDataStream::LittleEndian);
+        ds.writeRawData("RIFF", 4);
+        ds << quint32(36 + n);
+        ds.writeRawData("WAVEfmt ", 8);
+        ds << quint32(16) << quint16(1) << quint16(1) << rate << rate << quint16(1) << quint16(8);
+        ds.writeRawData("data", 4);
+        ds << n;
+        QFile f(file);
+        if (!f.open(QIODevice::WriteOnly))
+            return {};
+        f.write(header);
+        f.write(QByteArray(int(n), char(128)));
+        return file;
+    }
+    void useTemporarySettings()
+    {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_dir.filePath("settings"));
+    }
+
+    void mediaPlayerLogic()
+    {
+        useTemporarySettings();
+        MediaPlayerWidget w;
+        w.resize(640, 220);
+        w.show();
+        // Nothing to play: the message offers to relink the file.
+        QVERIFY(!w.setMedia(QString(), "rec/mancante.mp3"));
+        QVERIFY(w.problem().contains("mancante.mp3"));
+        QPushButton *relink = nullptr;
+        for (QPushButton *b : w.findChildren<QPushButton *>())
+            if (b->text().startsWith("Ricollega"))
+                relink = b;
+        QVERIFY(relink && relink->isVisible());
+        QSignalSpy relinkSpy(&w, &MediaPlayerWidget::relinkRequested);
+        relink->click();
+        QCOMPARE(relinkSpy.count(), 1);
+        w.seek(5000); // ignored without a recording
+        QCOMPARE(w.position(), qint64(0));
+
+        // A path that does not exist makes the backend complain later, but the logic below does not depend on it.
+        QVERIFY(w.setMedia(m_dir.filePath("logica.wav")));
+        QVERIFY(w.hasMedia());
+        w.handleDuration(10000);
+        w.seek(4000);
+        QCOMPARE(w.position(), qint64(4000));
+        w.skip(-5);
+        QCOMPARE(w.position(), qint64(0)); // never before the start
+        w.setRewindSeconds(2);
+        w.seek(4000);
+        w.rewind();
+        QCOMPARE(w.position(), qint64(2000));
+        w.skip(3);
+        QCOMPARE(w.position(), qint64(5000));
+        w.seek(99999);
+        QCOMPARE(w.position(), qint64(10000)); // nor after the end
+        w.setSpeed(1.5);
+        QCOMPARE(w.speed(), 1.5);
+
+        // Marks "Inizio qui" / "Fine qui" make the interval to code.
+        QPushButton *in = nullptr, *out = nullptr;
+        for (QPushButton *b : w.findChildren<QPushButton *>()) {
+            if (b->text() == "Inizio qui")
+                in = b;
+            if (b->text() == "Fine qui")
+                out = b;
+        }
+        QVERIFY(in && out);
+        QSignalSpy selSpy(&w, &MediaPlayerWidget::selectionChanged);
+        w.seek(2000);
+        in->click();
+        QVERIFY(!w.hasSelection()); // the end is still missing
+        w.seek(6000);
+        out->click();
+        QVERIFY(w.hasSelection());
+        QCOMPARE(w.selectionStart(), qint64(2000));
+        QCOMPARE(w.selectionEnd(), qint64(6000));
+        QVERIFY(selSpy.count() >= 1);
+
+        // Playing a range stops at its end; positions reported before the seek took effect do not stop it.
+        w.playRange(1000, 3000);
+        QCOMPARE(w.rangeEnd(), qint64(3000));
+        w.handlePosition(9000); // stale
+        QCOMPARE(w.rangeEnd(), qint64(3000));
+        w.handlePosition(1500);
+        QCOMPARE(w.rangeEnd(), qint64(3000));
+        w.handlePosition(3000);
+        QCOMPARE(w.rangeEnd(), qint64(-1));
+        w.playRange(4000, -1); // to the end of the recording
+        QCOMPARE(w.rangeEnd(), qint64(-1));
+        w.pause();
+
+        // Timeline: clicking seeks, dragging selects, coded intervals become bands in rows.
+        MediaTimeline *tl = w.timeline();
+        QCOMPARE(tl->duration(), qint64(10000));
+        QVERIFY(qAbs(tl->msAtX(tl->xAtMs(5000)) - 5000) < 40);
+        const int flatHeight = tl->sizeHint().height();
+        tl->setBands({{1, 1000, 5000, Qt::red, "a"}, {2, 3000, 8000, Qt::blue, "b"}, {3, 9000, 9500, Qt::green, QString()}});
+        QVERIFY(tl->sizeHint().height() > flatHeight); // overlapping intervals take two rows
+        QCOMPARE(tl->bandsAt(4000), (QList<qint64>{2, 1}));
+        QCOMPARE(tl->bandsAt(9200), (QList<qint64>{3}));
+        QVERIFY(tl->bandsAt(8500).isEmpty());
+        QSignalSpy seekSpy(tl, &MediaTimeline::seekRequested);
+        QTest::mouseClick(tl, Qt::LeftButton, Qt::NoModifier, QPoint(tl->xAtMs(7000), 6));
+        QCOMPARE(seekSpy.count(), 1);
+        QVERIFY(qAbs(w.position() - 7000) < 40);
+        QTest::mousePress(tl, Qt::LeftButton, Qt::NoModifier, QPoint(tl->xAtMs(2000), 6));
+        QTest::mouseMove(tl, QPoint(tl->xAtMs(4500), 6));
+        QTest::mouseRelease(tl, Qt::LeftButton, Qt::NoModifier, QPoint(tl->xAtMs(4500), 6));
+        QCOMPARE(seekSpy.count(), 1); // a drag is not a click
+        QVERIFY(qAbs(w.selectionStart() - 2000) < 40 && qAbs(w.selectionEnd() - 4500) < 40);
+        w.pause();
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void mediaPlayerRealFile()
+    {
+        useTemporarySettings();
+        MediaPlayerWidget w;
+        w.show();
+        QVERIFY(w.setMedia(writeWav(m_dir.filePath("real.wav"), 2)));
+        QElapsedTimer timer;
+        timer.start();
+        while (w.duration() == 0 && timer.elapsed() < 8000)
+            QTest::qWait(50);
+        if (w.duration() == 0)
+            QSKIP("Il backend multimediale non ha aperto il file: riproduzione non verificabile qui");
+        QVERIFY2(qAbs(w.duration() - 2000) < 150, qPrintable(QString::number(w.duration())));
+        QVERIFY(w.problem().isEmpty());
+        w.playRange(200, 900);
+        timer.restart();
+        while (!w.isPlaying() && timer.elapsed() < 3000)
+            QTest::qWait(50);
+        if (!w.isPlaying())
+            QSKIP("Nessun dispositivo audio: la riproduzione non parte");
+        timer.restart();
+        while (w.isPlaying() && timer.elapsed() < 4000)
+            QTest::qWait(50);
+        QVERIFY(!w.isPlaying()); // it paused at the end of the range
+        QVERIFY(w.position() >= 850 && w.position() < 1500);
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void mediaDocumentView()
+    {
+        useTemporarySettings();
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("mediadoc.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 audio = p.addRecordingDocument(g, m_dir.filePath("mancante.mp3"));
+        QVERIFY(audio > 0);
+        DocumentView view(&p);
+        view.resize(800, 520);
+        view.show();
+        view.openDocument(audio);
+        QVERIFY(view.isMedia() && !view.isImage() && !view.isPdf());
+        QVERIFY(view.player()->isVisible());
+        QVERIFY(!view.player()->hasMedia()); // the file is not there
+        QVERIFY(view.player()->problem().contains("mancante.mp3"));
+        QCOMPARE(view.cursorPosition(), -1);
+        QVERIFY(!view.hasSelection());
+
+        // Relinking (setDocumentMediaPath) makes the player load the file.
+        const QString wav = writeWav(m_dir.filePath("mediadoc.wav"), 10);
+        QVERIFY(p.setDocumentMediaPath(audio, p.storableMediaPath(wav)));
+        QVERIFY(view.player()->hasMedia());
+        view.player()->handleDuration(10000);
+
+        // An interval chosen on the timeline is coded as a time segment.
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        QCOMPARE(view.codeSelection(code), qint64(0)); // nothing selected
+        view.player()->setSelection(2000, 4000);
+        QVERIFY(view.hasSelection());
+        const qint64 seg = view.codeSelection(code);
+        QVERIFY(seg > 0);
+        const QList<Segment> segs = p.segmentsForDocument(audio, true);
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(segs[0].kind, SegmentKind::Time);
+        QCOMPARE(segs[0].tStartMs, qint64(2000));
+        QCOMPARE(segs[0].tEndMs, qint64(4000));
+        QVERIFY(!view.player()->timeline()->bandsAt(3000).isEmpty()); // shown under the timeline
+        view.player()->setSelection(0, 0);
+        view.selectRange(0, 1, seg); // "show in document": selects the interval and moves the playhead
+        QCOMPARE(view.player()->selectionStart(), qint64(2000));
+        QCOMPARE(view.player()->position(), qint64(2000));
+        QVERIFY(view.playSegment(segs[0]));
+        QCOMPARE(view.player()->rangeEnd(), qint64(4000));
+        view.player()->setSelection(5000, 7000);
+        QTest::qWait(50);
+        shot(&view, "media_player");
+        view.player()->pause();
+
+        // The segments panel shows the interval and can play it.
+        SegmentsPanel panel(&p);
+        panel.resize(900, 300);
+        panel.show();
+        panel.setActivation({}, {code});
+        auto *table = panel.findChild<QTableWidget *>();
+        QCOMPARE(table->rowCount(), 1);
+        QCOMPARE(table->item(0, 2)->text(), Media::formatRange(2000, 4000));
+        QToolButton *playButton = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->text() == "Riproduci")
+                playButton = b;
+        QVERIFY(playButton && !playButton->isEnabled());
+        table->selectRow(0);
+        QVERIFY(playButton->isEnabled());
+        QSignalSpy playSpy(&panel, &SegmentsPanel::segmentPlayRequested);
+        playButton->click();
+        QCOMPARE(playSpy.count(), 1);
+        QCOMPARE(playSpy.last().at(0).toLongLong(), audio);
+        QCOMPARE(playSpy.last().at(1).toLongLong(), seg);
+
+        // A text document leaves media mode and, with no recording, hides the player.
+        const qint64 text = p.addDocument(g, "Testo", "Solo testo.");
+        view.openDocument(text);
+        QVERIFY(!view.isMedia());
+        QVERIFY(!view.player()->isVisible());
+        QVERIFY(!view.hasRecording());
+        QVERIFY(!view.playFromTextPosition(2));
+        QCOMPARE(view.insertTimestampAtCursor(), qint64(0));
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void transcriptPlayback()
+    {
+        useTemporarySettings();
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("playback.tsra")));
+        const qint64 g = p.groups().first().id;
+        const QString body = "Domanda uno.\nRisposta due.";
+        const qint64 d = p.addDocument(g, "Intervista", body);
+        QList<Timestamp> stamps(2);
+        stamps[0].textPos = 0;
+        stamps[0].timeMs = 1000;
+        stamps[1].textPos = 13;
+        stamps[1].timeMs = 6000;
+        QVERIFY(p.setTimestamps(d, stamps));
+        QVERIFY(p.setDocumentMediaPath(d, p.storableMediaPath(writeWav(m_dir.filePath("playback.wav"), 10))));
+
+        DocumentView view(&p);
+        view.resize(800, 520);
+        view.show();
+        view.openDocument(d);
+        auto *edit = view.findChild<QTextEdit *>();
+        QVERIFY(!view.isMedia());
+        QVERIFY(view.hasRecording());
+        QVERIFY(view.player()->hasMedia());
+        QVERIFY(view.player()->isVisible()); // compact player above the text
+        view.player()->handleDuration(10000);
+
+        // While playing, the text of the current time stamp is highlighted.
+        view.player()->handlePosition(500);
+        QCOMPARE(view.playbackSpan(), (std::pair<int, int>{0, 0}));
+        view.player()->handlePosition(2000);
+        QCOMPARE(view.playbackSpan(), (std::pair<int, int>{0, 13}));
+        view.player()->handlePosition(7000);
+        QCOMPARE(view.playbackSpan(), (std::pair<int, int>{13, int(body.size())}));
+        bool highlighted = false;
+        for (const QTextEdit::ExtraSelection &s : edit->extraSelections())
+            highlighted = highlighted || (s.cursor.selectionStart() == 13 && s.cursor.selectionEnd() == body.size());
+        QVERIFY(highlighted);
+        QTest::qWait(50);
+        shot(&view, "transcript_player");
+
+        // Ctrl+click on the text plays from the stamp that governs the point.
+        QTextCursor at(edit->document());
+        at.setPosition(15);
+        QTest::mouseClick(edit->viewport(), Qt::LeftButton, Qt::ControlModifier, edit->cursorRect(at).center());
+        QCOMPARE(view.player()->position(), qint64(6000));
+        QVERIFY(view.playFromTextPosition(3));
+        QCOMPARE(view.player()->position(), qint64(1000));
+
+        // F8: a stamp at the cursor with the current time; once per position.
+        at.setPosition(5);
+        edit->setTextCursor(at);
+        view.player()->handlePosition(3000);
+        const qint64 id = view.insertTimestampAtCursor();
+        QVERIFY(id > 0);
+        QCOMPARE(p.timestamps(d).size(), 3);
+        view.player()->handlePosition(3500);
+        QCOMPARE(view.insertTimestampAtCursor(), id);
+        QCOMPARE(p.timestamps(d).size(), 3);
+        QCOMPARE(p.timestamps(d)[1].textPos, 5);
+        QCOMPARE(p.timestamps(d)[1].timeMs, qint64(3500));
+        QCOMPARE(view.transcriptStamps().size(), 3);
+
+        // A coded passage plays from its stamp to the next one after it.
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(d, code, 6, 10);
+        Segment s;
+        for (const Segment &x : p.segmentsForDocument(d))
+            if (x.id == seg)
+                s = x;
+        QVERIFY(view.playSegment(s));
+        QCOMPARE(view.player()->rangeEnd(), qint64(6000)); // the stamp at 13
+        view.player()->pause();
+
+        // While transcribing (editing mode) the text is saved first and editing goes on.
+        view.setEditing(true);
+        QTextCursor c(edit->document());
+        c.setPosition(0);
+        c.insertText("Ok. ");
+        edit->setTextCursor(c);
+        view.player()->handlePosition(8000);
+        const qint64 id3 = view.insertTimestampAtCursor();
+        QVERIFY(id3 > 0);
+        QVERIFY(view.isEditing());
+        QCOMPARE(p.documentText(d), QString("Ok. ") + body);
+        bool found = false;
+        for (const Timestamp &ts : p.timestamps(d))
+            found = found || (ts.id == id3 && ts.textPos == 4 && ts.timeMs == 8000);
+        QVERIFY(found);
+        QVERIFY(view.commitEdits());
+        view.player()->pause();
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void mediaActions()
+    {
+        MainWindow w;
+        QMap<QString, QAction *> byKey;
+        for (QAction *a : w.findChildren<QAction *>())
+            if (!a->shortcut().isEmpty())
+                byKey.insert(a->shortcut().toString(), a);
+        QVERIFY(byKey.contains("F8") && byKey["F8"]->text().contains("time stamp"));
+        QVERIFY(byKey.contains("F9") && byKey.contains("F7"));
+        for (const char *key : {"F7", "F8", "F9"})
+            QVERIFY(!byKey[key]->isEnabled()); // nothing open, nothing to play
     }
     void namesAreNotRichText()
     {

@@ -25,6 +25,8 @@ public:
 
 signals:
     void positionActivated(qint64 documentId, int textPos);
+    // "Riproduci da qui": the recording should play from the selected time stamp.
+    void playRequested(qint64 documentId, qint64 timeMs);
 
 private:
     qint64 currentStampId() const;
@@ -35,6 +37,8 @@ private:
     void associateMedia();
     void exportDialog();
     void activateCurrent();
+    void playCurrent();
+    qint64 currentTimeMs() const; // time of the selected stamp, -1 if none
 
     Project *m_project;
     qint64 m_docId;

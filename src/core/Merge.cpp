@@ -1,4 +1,5 @@
 #include "core/Merge.h"
+#include "core/Media.h"
 
 #include "core/Project.h"
 #include "core/Qdpx.h"
@@ -6,6 +7,7 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -27,6 +29,10 @@ QByteArray fingerprint(const Project &p, const Document &d)
     h.addData(p.documentText(d.id).toUtf8());
     h.addData(QByteArray(1, '\0'));
     h.addData(p.documentData(d.id));
+    if (d.kind == DocumentKind::Audio || d.kind == DocumentKind::Video) { // the recording is linked: its name tells them apart
+        h.addData(QByteArray(1, '\0'));
+        h.addData(QFileInfo(p.documentMediaPath(d.id)).fileName().toUtf8());
+    }
     return h.result();
 }
 
@@ -217,8 +223,10 @@ qint64 Merger::createDocument(const Document &od, const QString &uuid, const QSt
         id = t.addDocument(group, name, text, od.sourcePath, uuid);
         if (id && !s.documentRichContent(od.id).isEmpty())
             t.setDocumentRichContent(id, s.documentRichContent(od.id));
-        if (id && !s.documentMediaPath(od.id).isEmpty())
-            t.setDocumentMediaPath(id, s.documentMediaPath(od.id));
+        if (id && !s.documentMediaPath(od.id).isEmpty()) {
+            const QString found = s.resolvedMediaPath(od.id);
+            t.setDocumentMediaPath(id, found.isEmpty() ? s.documentMediaPath(od.id) : t.storableMediaPath(found));
+        }
         if (id && !s.timestamps(od.id).isEmpty())
             t.setTimestamps(id, s.timestamps(od.id));
         break;
@@ -233,6 +241,11 @@ qint64 Merger::createDocument(const Document &od, const QString &uuid, const QSt
         id = t.addMediaDocument(group, name, od.kind, od.sourcePath, uuid);
         if (id && !data.isEmpty() && !t.setDocumentData(id, data))
             id = 0;
+        if (id && !s.documentMediaPath(od.id).isEmpty()) {
+            // A relative path is relative to the other project: keep it valid for this one.
+            const QString found = s.resolvedMediaPath(od.id);
+            t.setDocumentMediaPath(id, found.isEmpty() ? s.documentMediaPath(od.id) : t.storableMediaPath(found));
+        }
         break;
     }
     return check(id);
@@ -806,6 +819,15 @@ bool Source::load(const QString &path, QString *error)
         QFile::setPermissions(local, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
         if (!m_project->open(local))
             return fail(m_project->lastError());
+        // Recordings are linked by paths relative to the original project: make them absolute in the copy.
+        for (const Document &d : m_project->documents()) {
+            const QString stored = m_project->documentMediaPath(d.id);
+            if (!stored.isEmpty() && !QDir::isAbsolutePath(stored)) {
+                const QString found = Media::resolvePath(path, stored);
+                if (!found.isEmpty())
+                    m_project->setDocumentMediaPath(d.id, found);
+            }
+        }
     }
     return true;
 }

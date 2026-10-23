@@ -1,4 +1,5 @@
 #include "core/Project.h"
+#include "core/Media.h"
 #include "core/RichText.h"
 
 #include <QBuffer>
@@ -1356,6 +1357,35 @@ bool Project::setDocumentMediaPath(qint64 documentId, const QString &path)
         return false;
     notify(&Project::documentsChanged);
     return true;
+}
+
+qint64 Project::addRecordingDocument(qint64 groupId, const QString &mediaFile, const QString &name)
+{
+    setUndoLabel(tr("Nuovo documento"));
+    const DocumentKind kind = Media::kindForFile(mediaFile);
+    if (kind == DocumentKind::Text) {
+        fail(tr("%1 non è un file audio o video").arg(QFileInfo(mediaFile).fileName()));
+        return 0;
+    }
+    beginBatch();
+    const qint64 id = addMediaDocument(groupId, name.isEmpty() ? QFileInfo(mediaFile).completeBaseName() : name, kind,
+                                       QFileInfo(mediaFile).absoluteFilePath());
+    if (!id || !setDocumentMediaPath(id, storableMediaPath(mediaFile))) {
+        rollbackBatch();
+        return 0;
+    }
+    commitBatch();
+    return id;
+}
+
+QString Project::storableMediaPath(const QString &mediaFile) const
+{
+    return Media::storedPath(m_path, mediaFile);
+}
+
+QString Project::resolvedMediaPath(qint64 documentId) const
+{
+    return Media::resolvePath(m_path, documentMediaPath(documentId));
 }
 
 // ---------------------------------------------------------------- document sets

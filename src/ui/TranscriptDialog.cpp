@@ -66,8 +66,9 @@ TranscriptDialog::TranscriptDialog(Project *project, qint64 documentId, std::fun
     QPushButton *remove = buttons->addButton(tr("Elimina"), QDialogButtonBox::ActionRole);
     QPushButton *shift = buttons->addButton(tr("Sposta tutti…"), QDialogButtonBox::ActionRole);
     QPushButton *go = buttons->addButton(tr("Vai al testo"), QDialogButtonBox::ActionRole);
+    QPushButton *play = buttons->addButton(tr("Riproduci da qui"), QDialogButtonBox::ActionRole);
     QPushButton *exp = buttons->addButton(tr("Esporta…"), QDialogButtonBox::ActionRole);
-    for (QPushButton *b : {insert, edit, remove, shift, go, exp, associate, openMedia})
+    for (QPushButton *b : {insert, edit, remove, shift, go, play, exp, associate, openMedia})
         b->setAutoDefault(false);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(insert, &QPushButton::clicked, this, &TranscriptDialog::insertAtCursor);
@@ -78,17 +79,19 @@ TranscriptDialog::TranscriptDialog(Project *project, qint64 documentId, std::fun
     });
     connect(shift, &QPushButton::clicked, this, &TranscriptDialog::shiftAll);
     connect(go, &QPushButton::clicked, this, &TranscriptDialog::activateCurrent);
+    connect(play, &QPushButton::clicked, this, &TranscriptDialog::playCurrent);
     connect(exp, &QPushButton::clicked, this, &TranscriptDialog::exportDialog);
     connect(associate, &QPushButton::clicked, this, &TranscriptDialog::associateMedia);
     connect(openMedia, &QPushButton::clicked, this, [this] {
-        const QString path = m_project->documentMediaPath(m_docId);
-        if (path.isEmpty() || !QFileInfo::exists(path))
+        const QString path = m_project->resolvedMediaPath(m_docId);
+        if (path.isEmpty())
             Ui::showError(this, tr("Registrazione non trovata. Ricollega il file con \"Associa registrazione…\"."));
         else
             QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     });
     auto updateButtons = [=, this] {
         const bool any = currentStampId() != 0;
+        play->setEnabled(any && !m_project->documentMediaPath(m_docId).isEmpty());
         for (QPushButton *b : {edit, remove, go})
             b->setEnabled(any);
         shift->setEnabled(m_table->rowCount() > 0);
@@ -208,7 +211,7 @@ void TranscriptDialog::associateMedia()
                                           tr("Audio e video (*.mp3 *.wav *.m4a *.aac *.ogg *.flac *.mp4 *.mov *.mkv "
                                              "*.avi *.webm);;Tutti i file (*)"));
     if (!path.isEmpty())
-        m_project->setDocumentMediaPath(m_docId, path);
+        m_project->setDocumentMediaPath(m_docId, m_project->storableMediaPath(path));
 }
 
 bool TranscriptDialog::exportTo(const QString &path)
@@ -236,6 +239,22 @@ void TranscriptDialog::exportDialog()
                                           tr("SubRip (*.srt);;WebVTT (*.vtt);;Testo con [hh:mm:ss] (*.txt)"));
     if (!path.isEmpty())
         exportTo(path);
+}
+
+qint64 TranscriptDialog::currentTimeMs() const
+{
+    const qint64 id = currentStampId();
+    for (const Timestamp &ts : m_project->timestamps(m_docId))
+        if (ts.id == id)
+            return ts.timeMs;
+    return -1;
+}
+
+void TranscriptDialog::playCurrent()
+{
+    const qint64 ms = currentTimeMs();
+    if (ms >= 0)
+        emit playRequested(m_docId, ms);
 }
 
 void TranscriptDialog::activateCurrent()
