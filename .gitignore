@@ -10,3 +10,6 @@ CMakeUserPresets.json
 *.tsra
 *.tsra-journal
 *.qdpx
+
+# Local assistant notes
+CLAUDE.md
