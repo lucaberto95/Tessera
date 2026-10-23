@@ -36,6 +36,7 @@
 #include "ui/SurveyImportDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/VariablesDialog.h"
+#include "ui/TopicsDialog.h"
 #include "ui/WordFrequencyDialog.h"
 
 #include <QApplication>
@@ -214,6 +215,7 @@ void MainWindow::createActions()
     m_summaryGrid = make(tr("&Griglia delle sintesi…"), &MainWindow::showSummaryGrid);
     m_summaryTables = make(tr("Tabelle &riassuntive…"), &MainWindow::showSummaryTables);
     m_wordFrequencies = make(tr("&Frequenze di parole, nuvola e parole in contesto…"), &MainWindow::showWordFrequencies);
+    m_topics = make(tr("&Topic modeling…"), &MainWindow::showTopics);
     m_dictionaries = make(tr("&Dizionari e analisi del contenuto…"), &MainWindow::showDictionaries);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
     m_exportSegmentsXlsx = make(tr("Esporta segmenti recuperati (&Excel .xlsx)…"), [this] { m_segments->exportXlsx(); });
@@ -319,6 +321,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_summaryGrid);
     analysis->addAction(m_summaryTables);
     analysis->addAction(m_wordFrequencies);
+    analysis->addAction(m_topics);
     analysis->addAction(m_dictionaries);
     analysis->addAction(m_activateByVariables);
     analysis->addSeparator();
@@ -1065,6 +1068,17 @@ void MainWindow::showWordFrequencies()
         search->show();
         search->searchFor(word);
     });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showTopics()
+{
+    auto *dlg = new TopicsDialog(m_project, [this] { return m_documents->activeDocumentIds(); },
+                                 [this] { return m_segments->segments(); }, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &TopicsDialog::passageActivated, this,
+            [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

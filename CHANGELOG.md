@@ -4,6 +4,8 @@ Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla re
 
 ## [Unreleased]
 
+- Topic modeling esplorativo (#38): Analisi > Topic modeling… trova i temi ricorrenti con LDA (campionamento di Gibbs, implementazione propria in `core/Topics`, seme fisso = risultato riproducibile). Unità: documenti, paragrafi o segmenti recuperati; numero di temi scelto o automatico (euristica sulla coerenza). Per ogni tema: parole caratteristiche, quota, passaggi più rappresentativi; assegnazione di ogni unità; "Crea codici dai temi" (opzionalmente codifica le unità sopra una soglia, un solo passo di annulla); esportazione xlsx/csv/html. Nessuna AI.
+
 - Interfaccia in inglese (#49): le stringhe di `tr()` hanno la traduzione in `translations/tessera_en.ts` (lingua sorgente: italiano), compilata da `lrelease` e incorporata nell'eseguibile. La lingua si sceglie da Impostazioni > Lingua dell'interfaccia (sistema, italiano, inglese; si applica al riavvio). Anche il progetto di esempio ha una versione inglese. Per aggiornare le traduzioni: target CMake `update_translations`.
 - Import da MAXQDA e NVivo tramite lo standard REFI-QDA: oltre ai progetti .qdpx si importano i libri dei codici .qdc. I file nativi (.mqda/.mx24, .nvp/.nvpx) sono riconosciuti e rifiutati con le istruzioni per esportare in REFI-QDA (lettura diretta non verificabile in clean room, vedi docs/foreign-formats.md). Rif. #51.
 

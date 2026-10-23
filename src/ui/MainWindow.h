@@ -69,6 +69,7 @@ private:
     void showSummaryTables();
     void showDictionaries();
     void showWordFrequencies();
+    void showTopics();
     void showVariableFilter();
     void showVariables();
     void showMemos();
@@ -145,6 +146,7 @@ private:
     QAction *m_summaryTables = nullptr;
     QAction *m_dictionaries = nullptr;
     QAction *m_wordFrequencies = nullptr;
+    QAction *m_topics = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;
     QAction *m_exportSegmentsXlsx = nullptr;
     QAction *m_exportSegmentsCsv = nullptr;

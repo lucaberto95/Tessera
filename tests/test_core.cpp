@@ -23,6 +23,7 @@
 #include "core/TextUtils.h"
 #include "core/VariableFilter.h"
 #include "core/Updater.h"
+#include "core/Topics.h"
 #include "core/WordFrequencies.h"
 #include "core/Xlsx.h"
 
@@ -5495,6 +5496,212 @@ private slots:
             QTRY_COMPARE(spy.count(), 1);
             QCOMPARE(run.response().kind, Ai::ErrorKind::Cancelled);
         }
+    }
+
+    // ---------------------------------------------------------------- topic modeling (#38)
+
+    // Three themes with separate vocabularies, 12 short documents each, a little noise from other themes.
+private:
+    struct TopicCorpus {
+        QList<QStringList> themes;
+        QList<QString> texts;
+        QList<int> theme; // per text
+    };
+    static TopicCorpus topicCorpus()
+    {
+        TopicCorpus c;
+        c.themes = {QString("lavoro stipendio ufficio colleghi turno contratto azienda orario carriera capo").split(' '),
+                    QString("famiglia figli casa genitori nonni cena bambini vacanza fratello madre").split(' '),
+                    QString("salute ospedale medico cura terapia dolore farmaci visita malattia infermiere").split(' ')};
+        quint32 state = 12345;
+        auto next = [&state](int n) {
+            state = state * 1664525u + 1013904223u;
+            return int((state >> 8) % quint32(n));
+        };
+        for (int t = 0; t < 3; ++t)
+            for (int d = 0; d < 12; ++d) {
+                QStringList words;
+                for (int i = 0; i < 24; ++i) {
+                    const bool noise = next(20) == 0;
+                    const int theme = noise ? (t + 1 + next(2)) % 3 : t;
+                    words << c.themes[theme][next(10)];
+                    if (i % 6 == 5)
+                        words << "molto"; // a word of every document
+                }
+                c.texts << words.join(' ') + ".";
+                c.theme << t;
+            }
+        return c;
+    }
+
+private slots:
+    void topicModelFindsSeparatedThemes()
+    {
+        const TopicCorpus c = topicCorpus();
+        QHash<qint64, QString> texts;
+        QList<Words::Source> units;
+        for (int i = 0; i < c.texts.size(); ++i) {
+            texts.insert(i + 1, c.texts[i]);
+            units.append({qint64(i + 1), 0, -1});
+        }
+        Topics::Options o;
+        o.topics = 3;
+        o.seed = 7;
+        const Topics::Result r = Topics::model(units, texts, o);
+        QVERIFY(r.complete);
+        QCOMPARE(r.topics.size(), 3);
+        QCOMPARE(r.units.size(), 36);
+        QVERIFY(r.vocabulary >= 30);
+
+        // Each topic's best words belong to one theme, and the three topics cover the three themes.
+        QSet<int> themesFound;
+        QList<int> themeOfTopic;
+        for (const Topics::Topic &t : r.topics) {
+            QVERIFY(t.words.size() >= 5);
+            QMap<int, int> votes;
+            for (int i = 0; i < 5; ++i)
+                for (int th = 0; th < 3; ++th)
+                    if (c.themes[th].contains(t.words[i].word))
+                        votes[th]++;
+            QCOMPARE(votes.size(), 1);
+            QCOMPARE(votes.first(), 5);
+            themeOfTopic << votes.firstKey();
+            themesFound.insert(votes.firstKey());
+        }
+        QCOMPARE(themesFound.size(), 3);
+        QVERIFY(!r.topics[0].words.isEmpty() && r.topics[0].words[0].word != "molto");
+
+        // Every document goes to the topic of its theme.
+        for (int i = 0; i < c.texts.size(); ++i) {
+            QCOMPARE(themeOfTopic[r.dominant[i]], c.theme[i]);
+            double sum = 0;
+            for (double v : r.theta[i])
+                sum += v;
+            QVERIFY(qAbs(sum - 1.0) < 1e-9);
+        }
+        double shares = 0;
+        for (const Topics::Topic &t : r.topics) {
+            shares += t.share;
+            QCOMPARE(t.units, 12);
+            QVERIFY(!t.topUnits.isEmpty());
+        }
+        QVERIFY(qAbs(shares - 1.0) < 1e-9);
+        QVERIFY(r.topics[0].share >= r.topics[1].share && r.topics[1].share >= r.topics[2].share);
+
+        // Same options and seed, same result.
+        const Topics::Result again = Topics::model(units, texts, o);
+        QCOMPARE(again.dominant, r.dominant);
+        QCOMPARE(again.theta, r.theta);
+        for (int k = 0; k < 3; ++k)
+            QCOMPARE(again.topics[k].words.first().word, r.topics[k].words.first().word);
+
+        // Cancelling stops the computation.
+        QVERIFY(!Topics::model(units, texts, o, [](int, int) { return false; }).complete);
+
+        // The automatic number of topics is within bounds, and the result is usable.
+        o.topics = 0;
+        const int chosen = Topics::chooseTopicCount(units, texts, o);
+        QCOMPARE(chosen, 3);
+        const Topics::Result automatic = Topics::model(units, texts, o);
+        QCOMPARE(automatic.topics.size(), 3);
+
+        // Tables for the export.
+        const QList<QStringList> rows = Topics::topicRows(r);
+        QCOMPARE(rows.size(), 4);
+        QCOMPARE(rows[1].size(), rows[0].size());
+        QHash<qint64, QString> names;
+        names.insert(1, "D1");
+        const QList<QStringList> assign = Topics::assignmentRows(r, names, texts);
+        QCOMPARE(assign.size(), 37);
+        QCOMPARE(assign[1][0], QString("D1"));
+        QCOMPARE(assign[0].size(), assign[1].size());
+    }
+
+    void topicModelEdgeCases()
+    {
+        // No usable words: an empty result, no crash.
+        QHash<qint64, QString> texts{{1, "a b c"}, {2, ""}};
+        const QList<Words::Source> units{{1, 0, -1}, {2, 0, -1}};
+        Topics::Options o;
+        o.topics = 2;
+        const Topics::Result r = Topics::model(units, texts, o);
+        QVERIFY(r.topics.isEmpty());
+        QCOMPARE(r.units.size(), 2);
+        QVERIFY(Topics::model({}, {}, o).topics.isEmpty());
+        o.topics = 0;
+        QVERIFY(Topics::model(units, texts, o).topics.isEmpty());
+
+        // More topics than distinct words is allowed.
+        QHash<qint64, QString> small{{1, "alpha beta alpha beta"}, {2, "alpha beta beta"}, {3, "alpha beta"}};
+        o.topics = 5;
+        const Topics::Result s = Topics::model({{1, 0, -1}, {2, 0, -1}, {3, 0, -1}}, small, o);
+        QCOMPARE(s.topics.size(), 5);
+    }
+
+    void topicParagraphSources()
+    {
+        const QString text = QString("Prima riga lunga abbastanza per essere un paragrafo da sola, davvero.\n"
+                                     "breve\n"
+                                     "ancora breve\n"
+                                     "\n"
+                                     "Un secondo paragrafo che supera la soglia minima di sessanta caratteri.\n"
+                                     "fine");
+        const QHash<qint64, QString> texts{{1, text}};
+        const QList<Words::Source> out = Topics::paragraphSources({{1, 0, -1}}, texts, 60);
+        QCOMPARE(out.size(), 3);
+        QCOMPARE(text.mid(out[0].start, out[0].end - out[0].start).left(5), QString("Prima"));
+        QVERIFY(text.mid(out[1].start, out[1].end - out[1].start).startsWith("breve"));
+        QVERIFY(text.mid(out[1].start, out[1].end - out[1].start).endsWith("breve"));
+        // The short last line joins the previous paragraph.
+        QVERIFY(text.mid(out[2].start, out[2].end - out[2].start).endsWith("fine"));
+        QVERIFY(text.mid(out[2].start, out[2].end - out[2].start).startsWith("Un secondo"));
+        QVERIFY(Topics::paragraphSources({{1, 0, -1}}, {{1, "  \n \n"}}, 60).isEmpty());
+    }
+
+    void topicCreateCodes()
+    {
+        const TopicCorpus c = topicCorpus();
+        Project p;
+        QVERIFY(p.create(path("topics.tsra")));
+        const qint64 g = p.groups().first().id;
+        QList<qint64> ids;
+        for (int i = 0; i < c.texts.size(); ++i)
+            ids << p.addDocument(g, QString("Doc %1").arg(i), c.texts[i]);
+        const QList<Words::Source> units = Words::documentSources(ids);
+        const QHash<qint64, QString> texts = Words::loadTexts(p, units);
+        Topics::Options o;
+        o.topics = 3;
+        o.seed = 7;
+        const Topics::Result r = Topics::model(units, texts, o);
+
+        const int codesBefore = p.codes().size();
+        Topics::CodeOptions co;
+        co.parentName = "Temi";
+        const Topics::CodeResult onlyCodes = Topics::createCodes(p, r, co, texts);
+        QCOMPARE(onlyCodes.codes.size(), 3);
+        QCOMPARE(onlyCodes.segments, 0);
+        QCOMPARE(p.codes().size(), codesBefore + 4);
+        QCOMPARE(p.code(onlyCodes.codes[0]).parentId, onlyCodes.parentCode);
+        QVERIFY(p.code(onlyCodes.codes[0]).name.contains(r.topics[0].words[0].word));
+        QVERIFY(p.undo()); // one step
+        QCOMPARE(p.codes().size(), codesBefore);
+
+        co.codeUnits = true;
+        co.threshold = 0.5;
+        const Topics::CodeResult coded = Topics::createCodes(p, r, co, texts);
+        QCOMPARE(coded.segments, 36);
+        QCOMPARE(p.allSegments().size(), 36);
+        for (const Segment &s : p.allSegments())
+            QCOMPARE(p.code(s.codeId).parentId, coded.parentCode);
+        // Running it again reuses the codes and the segments.
+        const int codes = p.codes().size();
+        Topics::createCodes(p, r, co, texts);
+        QCOMPARE(p.codes().size(), codes);
+        QCOMPARE(p.allSegments().size(), 36);
+        QVERIFY(p.undo());
+        QVERIFY(p.undo());
+        QCOMPARE(p.allSegments().size(), 0);
+        QCOMPARE(p.codes().size(), codesBefore);
     }
 };
 
