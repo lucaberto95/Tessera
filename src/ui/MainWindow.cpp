@@ -36,6 +36,7 @@
 #include "ui/SurveyImportDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/VariablesDialog.h"
+#include "ui/SentimentDialog.h"
 #include "ui/WordFrequencyDialog.h"
 
 #include <QApplication>
@@ -215,6 +216,7 @@ void MainWindow::createActions()
     m_summaryTables = make(tr("Tabelle &riassuntive…"), &MainWindow::showSummaryTables);
     m_wordFrequencies = make(tr("&Frequenze di parole, nuvola e parole in contesto…"), &MainWindow::showWordFrequencies);
     m_dictionaries = make(tr("&Dizionari e analisi del contenuto…"), &MainWindow::showDictionaries);
+    m_sentiment = make(tr("Analisi del &sentiment…"), &MainWindow::showSentiment);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
     m_exportSegmentsXlsx = make(tr("Esporta segmenti recuperati (&Excel .xlsx)…"), [this] { m_segments->exportXlsx(); });
     m_exportSegmentsCsv = make(tr("Esporta segmenti recuperati (CS&V per Excel)…"), [this] { m_segments->exportCsv(); });
@@ -320,6 +322,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_summaryTables);
     analysis->addAction(m_wordFrequencies);
     analysis->addAction(m_dictionaries);
+    analysis->addAction(m_sentiment);
     analysis->addAction(m_activateByVariables);
     analysis->addSeparator();
     analysis->addAction(m_exportSegmentsHtml);
@@ -1043,6 +1046,18 @@ void MainWindow::showDictionaries()
     auto *dlg = new DictionaryDialog(m_project, [this] { return m_documents->activeDocumentIds(); }, this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &DictionaryDialog::documentActivated, this, [this](qint64 doc) { m_view->openDocument(doc); });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showSentiment()
+{
+    auto *dlg = new SentimentDialog(m_project, [this] { return m_documents->activeDocumentIds(); },
+                                    [this] { return m_segments->segments(); }, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &SentimentDialog::passagesRequested, m_segments, &SegmentsPanel::setPassages);
+    connect(dlg, &SentimentDialog::passageActivated, this,
+            [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

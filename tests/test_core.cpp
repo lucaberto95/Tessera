@@ -17,6 +17,7 @@
 #include "core/Report.h"
 #include "core/RichText.h"
 #include "core/Retrieval.h"
+#include "core/Sentiment.h"
 #include "core/Stats.h"
 #include "core/Summaries.h"
 #include "core/Survey.h"
@@ -3497,6 +3498,85 @@ private slots:
     }
 
     // ---------------------------------------------------------------- word frequencies (#18)
+
+    void sentimentScoresAndNegation()
+    {
+        using namespace Sentiment;
+        QVERIFY(lexiconSize() > 200);
+        QCOMPARE(wordPolarity("Bellissimo"), 2);
+        QCOMPARE(wordPolarity("problemi"), -1);
+        QCOMPARE(wordPolarity(QString::fromUtf8("DIFFICOLT\xC3\x80")), -1); // accents and case are folded
+        QCOMPARE(wordPolarity("table"), 0);
+        QCOMPARE(wordPolarity("great", Language::Italian), 0);
+
+        const Score pos = score(QString::fromUtf8("Il servizio \xC3\xA8 stato ottimo, sono molto contento."));
+        const Score neg = score("The process was terrible and I am sad.");
+        const Score neutral = score("Il documento ha tre pagine.");
+        QCOMPARE(pos.polarity, Polarity::Positive);
+        QCOMPARE(neg.polarity, Polarity::Negative);
+        QCOMPARE(neutral.polarity, Polarity::Neutral);
+        QCOMPARE(neutral.hits, 0);
+        QVERIFY(pos.value > 0 && pos.value <= 1 && neg.value < 0 && neg.value >= -1);
+
+        // Negation flips (weaker), intensifiers strengthen, diminishers weaken, a comma stops both.
+        const double base = score("Il lavoro \xC3\xA8 buono").value;
+        QVERIFY(base > 0);
+        QVERIFY(score("Il lavoro non \xC3\xA8 buono").value < 0);
+        QVERIFY(score("Il lavoro non \xC3\xA8 buono").value > -base);
+        QVERIFY(score("Il lavoro \xC3\xA8 molto buono").value > base);
+        QVERIFY(score("Il lavoro \xC3\xA8 abbastanza buono").value < base);
+        QVERIFY(score("Non c'\xC3\xA8 nulla, buono").value > 0);
+        QVERIFY(score("I don't like it, it is not good").value < 0);
+        QVERIFY(score("This is not bad").value > 0);
+
+        // Reproducible.
+        QCOMPARE(score("molto bello ma un po' faticoso").value, score("molto bello ma un po' faticoso").value);
+        QCOMPARE(score("").polarity, Polarity::Neutral);
+    }
+
+    void sentimentPassagesAndCoding()
+    {
+        Project p;
+        QVERIFY(p.create(path("sentiment.tsra")));
+        const qint64 g = p.groups().first().id;
+        const QString text = "Mi piace molto lavorare qui. Il capo e' terribile! Oggi piove. Not bad at all";
+        const qint64 d = p.addDocument(g, "D", text);
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        p.addSegment(d, code, 0, 27);   // positive
+        p.addSegment(d, code, 28, 50);  // negative
+        p.addSegment(d, p.addCode(0, "Altro", Qt::blue), 0, 27); // same passage: counted once
+
+        const QList<Segment> segs = p.allSegments();
+        QCOMPARE(Sentiment::segmentPassages(segs).size(), 2);
+
+        const QList<Sentiment::Item> bySeg = Sentiment::analyze(p, Sentiment::Unit::Segments, segs, {}, Sentiment::Language::Auto);
+        QCOMPARE(bySeg.size(), 2);
+        QCOMPARE(bySeg[0].score.polarity, Sentiment::Polarity::Positive);
+        QCOMPARE(bySeg[1].score.polarity, Sentiment::Polarity::Negative);
+
+        const QList<Sentiment::Item> sentences = Sentiment::analyze(p, Sentiment::Unit::Sentences, {}, {d}, Sentiment::Language::Auto);
+        QCOMPARE(sentences.size(), 4);
+        QCOMPARE(sentences[2].score.polarity, Sentiment::Polarity::Neutral);
+        QCOMPARE(sentences[3].score.polarity, Sentiment::Polarity::Positive);
+        QCOMPARE(sentences[3].text, QString("Not bad at all"));
+
+        const QList<Sentiment::Item> docs = Sentiment::analyze(p, Sentiment::Unit::Documents, {}, {}, Sentiment::Language::Auto);
+        QCOMPARE(docs.size(), 1); // empty list = every document
+        QCOMPARE(docs[0].end, int(text.size()));
+
+        // Coding: three sub-codes under the chosen code, one undo step, nothing twice.
+        const qsizetype before = p.allSegments().size();
+        QCOMPARE(Sentiment::codeByPolarity(p, sentences, "Sentiment"), 4);
+        const qint64 parent = p.findCode(0, "Sentiment");
+        QVERIFY(parent);
+        QVERIFY(p.findCode(parent, Sentiment::polarityName(Sentiment::Polarity::Positive)));
+        QVERIFY(p.findCode(parent, Sentiment::polarityName(Sentiment::Polarity::Negative)));
+        QVERIFY(p.findCode(parent, Sentiment::polarityName(Sentiment::Polarity::Neutral)));
+        QCOMPARE(p.allSegments().size(), before + 4);
+        QVERIFY(p.undo());
+        QCOMPARE(p.allSegments().size(), before);
+        QCOMPARE(p.findCode(0, "Sentiment"), qint64(0));
+    }
 
     void wordFrequenciesCountsAndFilters()
     {

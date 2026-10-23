@@ -4,6 +4,7 @@ Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla re
 
 ## [Unreleased]
 
+- Analisi del sentiment (#20): menu Analisi > Analisi del sentiment. Stima la polarità (positiva, negativa, neutra) dei segmenti recuperati, delle frasi o dei documenti con un piccolo lessico originale italiano/inglese, negazioni e intensificatori; tabella ordinabile con punteggio, barra di distribuzione, filtro per polarità, invio dei passaggi al pannello segmenti e codifica automatica con i sottocodici Positivo/Negativo/Neutro (un solo passo di annullamento). Avviso: stima esplorativa da verificare. Variante AI non inclusa. Nessuna migrazione dello schema.
 - Interfaccia in inglese (#49): le stringhe di `tr()` hanno la traduzione in `translations/tessera_en.ts` (lingua sorgente: italiano), compilata da `lrelease` e incorporata nell'eseguibile. La lingua si sceglie da Impostazioni > Lingua dell'interfaccia (sistema, italiano, inglese; si applica al riavvio). Anche il progetto di esempio ha una versione inglese. Per aggiornare le traduzioni: target CMake `update_translations`.
 - Import da MAXQDA e NVivo tramite lo standard REFI-QDA: oltre ai progetti .qdpx si importano i libri dei codici .qdc. I file nativi (.mqda/.mx24, .nvp/.nvpx) sono riconosciuti e rifiutati con le istruzioni per esportare in REFI-QDA (lettura diretta non verificabile in clean room, vedi docs/foreign-formats.md). Rif. #51.
 
