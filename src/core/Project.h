@@ -61,6 +61,12 @@ public:
     QString redoLabel() const { return canRedo() ? m_redoSteps.last().label : QString(); }
     bool undo();
     bool redo();
+    // Labels of the steps that can be undone (most recent first) and redone (next one first).
+    QStringList undoLabels() const;
+    QStringList redoLabels() const;
+    // Undo/redo several steps in a row; stops at the first failure. Returns false if any step failed.
+    bool undoSteps(int count);
+    bool redoSteps(int count);
     void clearUndoHistory();
     void setUndoLabel(const QString &label);
     static constexpr int MaxUndoSteps = 200;

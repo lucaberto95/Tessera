@@ -26,6 +26,7 @@
 #include "ui/ImageView.h"
 #include "ui/PdfView.h"
 #include "ui/LinksDialog.h"
+#include "ui/UndoHistoryDialog.h"
 #include "ui/Language.h"
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
@@ -122,6 +123,40 @@ private:
     }
 
 private slots:
+    void undoHistoryDialogJumpsToAnyPoint()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("undo-history.tsra")));
+        const qint64 g = p.groups().first().id;
+        p.addDocument(g, "A", "uno");
+        p.addDocument(g, "B", "due");
+        p.addDocument(g, "C", "tre");
+        UndoHistoryDialog dlg(&p);
+        dlg.show();
+        auto *list = dlg.findChild<QListWidget *>();
+        QVERIFY(list);
+        QCOMPARE(dlg.rowCount(), 4); // current state + 3 undo steps
+        QCOMPARE(dlg.currentStateRow(), 0);
+
+        // The oldest step: undoing up to it empties the project.
+        dlg.selectRow(3);
+        QVERIFY(dlg.applySelected());
+        QCOMPARE(p.documents().size(), 0);
+        // The list followed the project's signal: 3 redo steps above the current state.
+        QCOMPARE(dlg.rowCount(), 4);
+        QCOMPARE(dlg.currentStateRow(), 3);
+
+        // Redo only up to the middle redo step (2 steps).
+        dlg.selectRow(1);
+        QVERIFY(dlg.applySelected());
+        QCOMPARE(p.documents().size(), 2);
+        QCOMPARE(dlg.currentStateRow(), 1);
+
+        // The marker itself does nothing.
+        dlg.selectRow(dlg.currentStateRow());
+        QVERIFY(!dlg.applySelected());
+        QCOMPARE(p.documents().size(), 2);
+    }
     void mergeDialogShowsReportAndOptions()
     {
         const QString fileA = m_dir.filePath("merge-a.tsra"), fileB = m_dir.filePath("merge-b.tsra");

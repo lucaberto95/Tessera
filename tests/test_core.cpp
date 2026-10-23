@@ -220,6 +220,46 @@ private:
     }
 
 private slots:
+    void undoLabelsAndMultiStep()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("undo-steps.tsra")));
+        QVERIFY(p.undoLabels().isEmpty());
+        QVERIFY(p.redoLabels().isEmpty());
+        const qint64 g = p.groups().first().id;
+        const qint64 a = p.addDocument(g, "A", "uno");
+        const qint64 b = p.addDocument(g, "B", "due");
+        const qint64 c = p.addDocument(g, "C", "tre");
+        QCOMPARE(p.undoLabels().size(), 3);
+        const QString newest = p.undoLabel();
+        QCOMPARE(p.undoLabels().first(), newest);
+
+        // Back two steps in one go: only the first document is left.
+        QVERIFY(p.undoSteps(2));
+        QCOMPARE(p.undoLabels().size(), 1);
+        QCOMPARE(p.redoLabels().size(), 2);
+        QCOMPARE(p.redoLabels().first(), p.redoLabel());
+        QCOMPARE(p.documents().size(), 1);
+        QCOMPARE(p.documents().first().id, a);
+
+        // Forward again, all the way.
+        QVERIFY(p.redoSteps(2));
+        QCOMPARE(p.documents().size(), 3);
+        QVERIFY(p.redoLabels().isEmpty());
+        Q_UNUSED(b);
+        Q_UNUSED(c);
+
+        // Asking for more steps than exist stops at the end and reports failure.
+        QVERIFY(!p.undoSteps(10));
+        QVERIFY(p.undoLabels().isEmpty());
+        QCOMPARE(p.redoLabels().size(), 3);
+        QVERIFY(p.documents().isEmpty());
+
+        // A new change drops the redo steps.
+        p.addDocument(g, "D", "quattro");
+        QVERIFY(p.redoLabels().isEmpty());
+        QCOMPARE(p.undoLabels().size(), 1);
+    }
     void reportDocxPdfHtml()
     {
         Project p;

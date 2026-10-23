@@ -30,6 +30,7 @@
 #include "ui/RetrievalDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/LinksDialog.h"
+#include "ui/UndoHistoryDialog.h"
 #include "ui/MemoManager.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
@@ -167,6 +168,7 @@ void MainWindow::createActions()
             Ui::showError(this, m_project->lastError());
     }, QKeySequence::Redo, true, QStyle::SP_ArrowForward);
     m_redo->setShortcuts({QKeySequence::Redo, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)});
+    m_undoHistory = make(tr("&Cronologia di annulla…"), &MainWindow::showUndoHistory);
 
     m_importDocs = make(tr("&Importa documenti…"), [this] { importDocuments(m_documents->currentGroupId()); },
                         QKeySequence(Qt::CTRL | Qt::Key_I), true, QStyle::SP_FileIcon);
@@ -275,6 +277,7 @@ void MainWindow::createMenus()
     QMenu *edit = menuBar()->addMenu(tr("&Modifica"));
     edit->addAction(m_undo);
     edit->addAction(m_redo);
+    edit->addAction(m_undoHistory);
 
     QMenu *docs = menuBar()->addMenu(tr("&Documenti"));
     docs->addAction(m_importDocs);
@@ -908,6 +911,19 @@ void MainWindow::showVariables()
 {
     VariablesDialog dlg(m_project, this);
     dlg.exec();
+}
+
+void MainWindow::showUndoHistory()
+{
+    if (m_undoHistoryDialog) {
+        m_undoHistoryDialog->raise();
+        m_undoHistoryDialog->activateWindow();
+        return;
+    }
+    auto *dlg = new UndoHistoryDialog(m_project, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    m_undoHistoryDialog = dlg;
+    dlg->show();
 }
 
 // ---------------------------------------------------------------- coding
