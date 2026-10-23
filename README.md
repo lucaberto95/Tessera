@@ -114,6 +114,11 @@ creati portano l'indicazione «AI (modello X)» e si annullano con `Ctrl+Z`.
 | `Ctrl+rotella` | Zoom del testo e dei PDF |
 | `Alt` + trascinamento | In un PDF: seleziona un rettangolo da codificare |
 
+## Licenza
+
+Tessera è distribuito con licenza [MIT](LICENSE). Crediti e componenti di terze parti sono in
+**Aiuto → Informazioni su Tessera**.
+
 ## Limiti attuali
 
 - Si codificano testi e aree di immagini e PDF; audio e video non sono ancora supportati.

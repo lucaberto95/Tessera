@@ -53,6 +53,7 @@
 #include <QSplitter>
 #include <QStatusBar>
 #include <QStyle>
+#include <QTabWidget>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -1317,14 +1318,48 @@ void MainWindow::askUserNameOnFirstRun()
 
 void MainWindow::about()
 {
-    QMessageBox::about(this, tr("Informazioni su Tessera"),
-                       tr("<h3>Tessera %1</h3>"
-                          "<p>Software per l'analisi qualitativa dei dati: documenti, sistema di codici, codifica, "
-                          "memo, variabili, ricerca e matrici.</p>"
-                          "<p>I progetti sono file SQLite (.tsra) salvati automaticamente a ogni modifica. "
-                          "Lo scambio con altri software QDA avviene tramite lo standard aperto REFI-QDA (.qdpx).</p>"
-                          "<p>Realizzato con Qt %2.</p>")
-                           .arg(QStringLiteral(TESSERA_VERSION_STRING), QString::fromLatin1(qVersion())));
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Informazioni su Tessera"));
+    auto *layout = new QVBoxLayout(&dlg);
+    auto *tabs = new QTabWidget(&dlg);
+    layout->addWidget(tabs);
+
+    auto addTab = [tabs](const QString &title, const QString &html) {
+        auto *label = new QLabel(html);
+        label->setTextFormat(Qt::RichText);
+        label->setWordWrap(true);
+        label->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+        label->setOpenExternalLinks(true);
+        label->setMargin(12);
+        label->setMinimumWidth(420);
+        tabs->addTab(label, title);
+    };
+    addTab(tr("Informazioni"),
+           tr("<h3>Tessera %1</h3>"
+              "<p>Software per l'analisi qualitativa dei dati: documenti, sistema di codici, codifica, "
+              "memo, variabili, ricerca e matrici.</p>"
+              "<p>I progetti sono file SQLite (.tsra) salvati automaticamente a ogni modifica. "
+              "Lo scambio con altri software QDA avviene tramite lo standard aperto REFI-QDA (.qdpx).</p>"
+              "<p>Realizzato con Qt %2.</p>")
+               .arg(QStringLiteral(TESSERA_VERSION_STRING), QString::fromLatin1(qVersion())));
+    addTab(tr("Crediti"),
+           tr("<h3>Crediti</h3>"
+              "<p><b>Ideazione e sviluppo</b><br>Luca Berto</p>"
+              "<p><b>Componenti di terze parti</b><br>"
+              "Qt (<a href=\"https://www.qt.io\">qt.io</a>), distribuito con licenza LGPL v3.</p>"
+              "<p>Codice sorgente: <a href=\"https://github.com/lucaberto95/Tessera\">github.com/lucaberto95/Tessera</a></p>"));
+    addTab(tr("Licenza"),
+           tr("<h3>Licenza MIT</h3>"
+              "<p>Copyright © 2026 Luca Berto</p>"
+              "<p>Tessera è software libero, distribuito con licenza MIT: puoi usarlo, copiarlo, modificarlo e "
+              "ridistribuirlo, anche a fini commerciali, purché venga mantenuta questa nota di copyright. "
+              "Il software è fornito «così com'è», senza garanzie di alcun tipo. "
+              "Il testo completo è nel file LICENSE.</p>"));
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    layout->addWidget(buttons);
+    dlg.exec();
 }
 
 void MainWindow::addRecent(const QString &path)
