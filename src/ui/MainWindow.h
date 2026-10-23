@@ -36,6 +36,7 @@ protected:
 private:
     void createActions();
     void createMenus();
+    void createLanguageMenu(QMenu *settings);
     void createToolBar();
     void connectProject();
     void updateActions();

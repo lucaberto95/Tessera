@@ -4,7 +4,7 @@ project(Tessera VERSION 0.29.3 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Concurrent Network Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Concurrent Network Test LinguistTools)
 qt_standard_project_setup()
 
 if(MSVC)
@@ -96,6 +96,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/AiCodesDialog.h src/ui/AiCodesDialog.cpp
     src/ui/AiUi.h src/ui/AiUi.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
+    src/ui/Language.h src/ui/Language.cpp
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent)
 
@@ -107,6 +108,16 @@ qt_add_executable(tessera_makeicon EXCLUDE_FROM_ALL tools/makeicon.cpp)
 target_link_libraries(tessera_makeicon PRIVATE Qt6::Gui Qt6::Svg)
 target_link_libraries(Tessera PRIVATE tessera_ui)
 set_target_properties(Tessera PROPERTIES OUTPUT_NAME "Tessera")
+
+# Translations: the source language of tr() is Italian; English is translations/tessera_en.ts.
+# The .qm files are compiled by lrelease at build time and embedded in tessera_core (":/i18n").
+# Refresh the .ts files with the "update_translations" target (lupdate).
+set(TESSERA_TS_FILES translations/tessera_en.ts)
+qt_add_translations(tessera_core
+    SOURCE_TARGETS tessera_core tessera_ui Tessera
+    TS_FILES ${TESSERA_TS_FILES}
+    RESOURCE_PREFIX "/i18n"
+    LUPDATE_OPTIONS -no-obsolete)
 endif()
 
 enable_testing()

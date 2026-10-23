@@ -12,6 +12,7 @@
 #include "core/Updater.h"
 #include "ui/CodeTree.h"
 #include "ui/DocumentTree.h"
+#include "ui/Language.h"
 #include "ui/DocumentView.h"
 #include "ui/AgreementDialog.h"
 #include "ui/AiAssistDialog.h"
@@ -52,6 +53,7 @@
 #include <QPushButton>
 #include <QDesktopServices>
 #include <QSettings>
+#include <QActionGroup>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QUrl>
@@ -343,6 +345,7 @@ void MainWindow::createMenus()
     QMenu *settings = menuBar()->addMenu(tr("&Impostazioni"));
     settings->addAction(m_userName);
     settings->addAction(m_aiSettings);
+    createLanguageMenu(settings);
 
     QMenu *help = menuBar()->addMenu(tr("&Aiuto"));
     help->addAction(m_checkUpdates);
@@ -351,6 +354,28 @@ void MainWindow::createMenus()
     help->addAction(m_about);
 }
 
+void MainWindow::createLanguageMenu(QMenu *settings)
+{
+    QMenu *menu = settings->addMenu(tr("&Lingua dell'interfaccia"));
+    auto *group = new QActionGroup(menu);
+    const QString current = Language::storedChoice();
+    auto add = [&](const QString &text, const QString &code) {
+        QAction *a = menu->addAction(text);
+        a->setCheckable(true);
+        a->setChecked(code == current);
+        group->addAction(a);
+        connect(a, &QAction::triggered, this, [this, code] {
+            if (Language::storedChoice() == code)
+                return;
+            Language::setStoredChoice(code);
+            Ui::showInfo(this, tr("Lingua dell'interfaccia"),
+                         tr("La nuova lingua verrà usata al prossimo avvio di Tessera."));
+        });
+    };
+    add(tr("Lingua del sistema"), QString());
+    for (const QString &code : Language::available())
+        add(Language::nativeName(code), code);
+}
 void MainWindow::createToolBar()
 {
     QToolBar *tb = addToolBar(tr("Strumenti"));

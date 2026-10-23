@@ -8,11 +8,6 @@ namespace Ai::Assist {
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("Ai::Assist", text);
-}
-
 QString loadPrompt(const char *name)
 {
     QFile f(QStringLiteral(":/ai/") + QLatin1String(name));
@@ -64,10 +59,10 @@ QString functionId(Task task)
 QString taskTitle(Task task)
 {
     switch (task) {
-    case Task::SummarizeDocument: return tr("Riassunto del documento");
-    case Task::SummarizeSegments: return tr("Riassunto dei segmenti");
-    case Task::Explain: return tr("Spiegazione");
-    case Task::Translate: return tr("Traduzione");
+    case Task::SummarizeDocument: return QCoreApplication::translate("Ai::Assist", "Riassunto del documento");
+    case Task::SummarizeSegments: return QCoreApplication::translate("Ai::Assist", "Riassunto dei segmenti");
+    case Task::Explain: return QCoreApplication::translate("Ai::Assist", "Spiegazione");
+    case Task::Translate: return QCoreApplication::translate("Ai::Assist", "Traduzione");
     }
     return {};
 }
@@ -80,9 +75,9 @@ bool usesLength(Task task)
 QString lengthName(Length length)
 {
     switch (length) {
-    case Length::Short: return tr("Breve");
-    case Length::Medium: return tr("Media");
-    case Length::Long: return tr("Lunga");
+    case Length::Short: return QCoreApplication::translate("Ai::Assist", "Breve");
+    case Length::Medium: return QCoreApplication::translate("Ai::Assist", "Media");
+    case Length::Long: return QCoreApplication::translate("Ai::Assist", "Lunga");
     }
     return {};
 }
@@ -178,7 +173,7 @@ void Run::start()
     if (!m_client) {
         Response r;
         r.kind = ErrorKind::Config;
-        r.error = tr("Nessun provider AI utilizzabile.");
+        r.error = QCoreApplication::translate("Ai::Assist", "Nessun provider AI utilizzabile.");
         QTimer::singleShot(0, this, [this, r] { fail(r); });
         return;
     }
@@ -186,7 +181,7 @@ void Run::start()
     if (chunks.isEmpty()) {
         Response r;
         r.kind = ErrorKind::Config;
-        r.error = tr("Non c'è testo da inviare.");
+        r.error = QCoreApplication::translate("Ai::Assist", "Non c'è testo da inviare.");
         QTimer::singleShot(0, this, [this, r] { fail(r); });
         return;
     }
@@ -217,7 +212,7 @@ void Run::cancel()
     m_started = true;
     Response r;
     r.kind = ErrorKind::Cancelled;
-    r.error = tr("Operazione annullata.");
+    r.error = QCoreApplication::translate("Ai::Assist", "Operazione annullata.");
     fail(r);
 }
 

@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## Unreleased
+
+- Interfaccia in inglese (#49): le stringhe di `tr()` hanno la traduzione in `translations/tessera_en.ts` (lingua sorgente: italiano), compilata da `lrelease` e incorporata nell'eseguibile. La lingua si sceglie da Impostazioni > Lingua dell'interfaccia (sistema, italiano, inglese; si applica al riavvio). Anche il progetto di esempio ha una versione inglese. Per aggiornare le traduzioni: target CMake `update_translations`.
+
 ## [0.29.3] - 2026-10-23 — Riavvio dopo l'aggiornamento
 
 - Lo script di aggiornamento ora individua la chiusura di Tessera filtrando per PID e nome del processo, riavvia l'app anche se l'attesa scade e la lancia dalla sua cartella. Gli errori di copia sono registrati in `update.log` nella cartella temporanea `tessera-update`.

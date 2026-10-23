@@ -13,11 +13,6 @@ namespace Ai::Codes {
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("Ai::Codes", text);
-}
-
 QString loadPrompt(const char *name)
 {
     QFile f(QStringLiteral(":/ai/") + QLatin1String(name));
@@ -96,9 +91,9 @@ QString functionId(Task task)
 QString taskTitle(Task task)
 {
     switch (task) {
-    case Task::SuggestCodes: return tr("Suggerimento di codici");
-    case Task::SuggestSubcodes: return tr("Suggerimento di sottocodici");
-    case Task::GroupCodes: return tr("Raggruppamento dei codici");
+    case Task::SuggestCodes: return QCoreApplication::translate("Ai::Codes", "Suggerimento di codici");
+    case Task::SuggestSubcodes: return QCoreApplication::translate("Ai::Codes", "Suggerimento di sottocodici");
+    case Task::GroupCodes: return QCoreApplication::translate("Ai::Codes", "Raggruppamento dei codici");
     }
     return {};
 }
@@ -288,12 +283,12 @@ void Run::start()
         QTimer::singleShot(0, this, [this, r] { fail(r); });
     };
     if (!m_client) {
-        failLater(ErrorKind::Config, tr("Nessun provider AI utilizzabile."));
+        failLater(ErrorKind::Config, QCoreApplication::translate("Ai::Codes", "Nessun provider AI utilizzabile."));
         return;
     }
     m_chunks = planChunks(m_material, m_maxTokens, m_maxItems);
     if (m_chunks.isEmpty()) {
-        failLater(ErrorKind::Config, tr("Non c'è nulla da inviare."));
+        failLater(ErrorKind::Config, QCoreApplication::translate("Ai::Codes", "Non c'è nulla da inviare."));
         return;
     }
     emit progress(0, int(m_chunks.size()));
@@ -312,7 +307,7 @@ void Run::cancel()
     m_started = true;
     Response r;
     r.kind = ErrorKind::Cancelled;
-    r.error = tr("Operazione annullata.");
+    r.error = QCoreApplication::translate("Ai::Codes", "Operazione annullata.");
     fail(r);
 }
 
@@ -395,7 +390,7 @@ void Run::finish()
 
 QString provenanceNote(const Config &config)
 {
-    return tr("Proposto da %1").arg(authorName(config));
+    return QCoreApplication::translate("Ai::Codes", "Proposto da %1").arg(authorName(config));
 }
 
 ApplyReport apply(Project &project, Task task, qint64 contextId, const QList<Proposal> &accepted, const QString &provenance)

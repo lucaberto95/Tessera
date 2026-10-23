@@ -26,6 +26,7 @@
 #include "ui/ImageView.h"
 #include "ui/PdfView.h"
 #include "ui/LinksDialog.h"
+#include "ui/Language.h"
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
 #include "ui/MemoDialog.h"
@@ -69,6 +70,7 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTranslator>
 #include <QTextDocument>
 #include <QTextEdit>
 #include <QToolButton>
@@ -176,6 +178,44 @@ private slots:
             QVERIFY2(a.total(c.id) > 0, qPrintable(c.name));
     }
 
+    void englishTranslation()
+    {
+        QCOMPARE(Language::resolve(QStringLiteral("en")), QStringLiteral("en"));
+        QCOMPARE(Language::resolve(QStringLiteral("it")), QStringLiteral("it"));
+        auto menuTitles = [] {
+            MainWindow w;
+            QStringList titles;
+            for (QAction *a : w.menuBar()->actions())
+                if (a->menu())
+                    titles << a->menu()->title();
+            return titles;
+        };
+        QVERIFY(menuTitles().contains("&Modifica")); // source language
+        QCOMPARE(QCoreApplication::translate("MergeDialog", "Unisci"), QString("Unisci"));
+
+        QTranslator app, qt;
+        QVERIFY(Language::load(QStringLiteral("en"), app, qt, QString()));
+        QVERIFY(!app.isEmpty());
+        QCoreApplication::installTranslator(&app);
+        const QStringList titles = menuTitles();
+        QVERIFY2(titles.contains("&Edit") && titles.contains("&Settings") && titles.contains("&Help"), qPrintable(titles.join('|')));
+        QVERIFY(!titles.contains("&Modifica"));
+        QCOMPARE(QCoreApplication::translate("MergeDialog", "Unisci"), QString("Merge"));
+        QCOMPARE(QCoreApplication::translate("Project", "Nuovo gruppo"), QString("New group"));
+        {
+            Project p;
+            QVERIFY(p.create(m_dir.filePath("en.tsra")));
+            QVERIFY(DemoProject::populate(p)); // the example keeps its quotes and keywords coherent
+            QCOMPARE(p.documents().size(), 3);
+            QCOMPARE(p.allSegments().size(), 11);
+            QCOMPARE(p.documents().first().name, QString("Interview with Giulia"));
+            const Dictionaries::Analysis a = Dictionaries::analyze(p, p.dictionaries().first().id);
+            for (const DictCategory &c : a.categories)
+                QVERIFY2(a.total(c.id) > 0, qPrintable(c.name));
+        }
+        QCoreApplication::removeTranslator(&app);
+        QVERIFY(menuTitles().contains("&Modifica"));
+    }
     void trees()
     {
         DocumentTree docs(m_project);

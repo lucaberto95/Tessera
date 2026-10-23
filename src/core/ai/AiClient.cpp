@@ -14,11 +14,6 @@ namespace Ai {
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("Ai", text);
-}
-
 // Message of an API error body: {"error": {"message": "..."}} or {"error": "..."}.
 QString apiErrorMessage(const QByteArray &body)
 {
@@ -49,7 +44,7 @@ Response classify(QNetworkReply *net, const QByteArray &body, bool cancelled, co
     r.httpStatus = net->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (cancelled) {
         r.kind = ErrorKind::Cancelled;
-        r.error = tr("Richiesta annullata.");
+        r.error = QCoreApplication::translate("Ai", "Richiesta annullata.");
         return r;
     }
     const QNetworkReply::NetworkError err = net->error();
@@ -58,22 +53,22 @@ Response classify(QNetworkReply *net, const QByteArray &body, bool cancelled, co
         const QString suffix = detail.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(detail);
         if (r.httpStatus == 401 || r.httpStatus == 403) {
             r.kind = ErrorKind::Unauthorized;
-            r.error = tr("Il server rifiuta l'accesso: la chiave API manca o non è corretta.") + suffix;
+            r.error = QCoreApplication::translate("Ai", "Il server rifiuta l'accesso: la chiave API manca o non è corretta.") + suffix;
         } else if ((r.httpStatus == 404 || r.httpStatus == 400) && mentionsModel(body)) {
             r.kind = ErrorKind::ModelNotFound;
-            r.error = tr("Il modello «%1» non è disponibile sul server.").arg(model) + suffix;
+            r.error = QCoreApplication::translate("Ai", "Il modello «%1» non è disponibile sul server.").arg(model) + suffix;
         } else if (r.httpStatus == 404) {
             r.kind = ErrorKind::Http;
-            r.error = tr("Indirizzo non trovato sul server (404): controlla l'URL, di solito termina con /v1.") + suffix;
+            r.error = QCoreApplication::translate("Ai", "Indirizzo non trovato sul server (404): controlla l'URL, di solito termina con /v1.") + suffix;
         } else if (r.httpStatus == 429) {
             r.kind = ErrorKind::Http;
-            r.error = tr("Troppe richieste o quota esaurita (429): riprova più tardi.") + suffix;
+            r.error = QCoreApplication::translate("Ai", "Troppe richieste o quota esaurita (429): riprova più tardi.") + suffix;
         } else if (r.httpStatus >= 300 && r.httpStatus < 400) {
             r.kind = ErrorKind::Http;
-            r.error = tr("Il server ha risposto con un reindirizzamento (%1): controlla l'URL.").arg(r.httpStatus);
+            r.error = QCoreApplication::translate("Ai", "Il server ha risposto con un reindirizzamento (%1): controlla l'URL.").arg(r.httpStatus);
         } else {
             r.kind = ErrorKind::Http;
-            r.error = tr("Errore del server (HTTP %1).").arg(r.httpStatus) + suffix;
+            r.error = QCoreApplication::translate("Ai", "Errore del server (HTTP %1).").arg(r.httpStatus) + suffix;
         }
         return r;
     }
@@ -84,7 +79,7 @@ Response classify(QNetworkReply *net, const QByteArray &body, bool cancelled, co
     case QNetworkReply::TimeoutError:
     case QNetworkReply::OperationCanceledError:
         r.kind = ErrorKind::Timeout;
-        r.error = tr("Il server non ha risposto entro il tempo previsto. Un modello grande può richiedere più tempo: "
+        r.error = QCoreApplication::translate("Ai", "Il server non ha risposto entro il tempo previsto. Un modello grande può richiedere più tempo: "
                      "aumenta il timeout nelle impostazioni AI.");
         return r;
     case QNetworkReply::ConnectionRefusedError:
@@ -94,16 +89,16 @@ Response classify(QNetworkReply *net, const QByteArray &body, bool cancelled, co
     case QNetworkReply::NetworkSessionFailedError:
     case QNetworkReply::TemporaryNetworkFailureError:
         r.kind = ErrorKind::Unreachable;
-        r.error = tr("Il server non risponde: è avviato (per esempio Ollama o LM Studio)? Controlla l'indirizzo e la "
+        r.error = QCoreApplication::translate("Ai", "Il server non risponde: è avviato (per esempio Ollama o LM Studio)? Controlla l'indirizzo e la "
                      "connessione.");
         return r;
     case QNetworkReply::SslHandshakeFailedError:
         r.kind = ErrorKind::Unreachable;
-        r.error = tr("Impossibile stabilire una connessione sicura con il server (certificato non valido).");
+        r.error = QCoreApplication::translate("Ai", "Impossibile stabilire una connessione sicura con il server (certificato non valido).");
         return r;
     default:
         r.kind = ErrorKind::Unreachable;
-        r.error = tr("Errore di rete: %1").arg(net->errorString());
+        r.error = QCoreApplication::translate("Ai", "Errore di rete: %1").arg(net->errorString());
         return r;
     }
 }
@@ -181,7 +176,7 @@ void Reply::cancel()
     }
     Response r;
     r.kind = ErrorKind::Cancelled;
-    r.error = tr("Richiesta annullata.");
+    r.error = QCoreApplication::translate("Ai", "Richiesta annullata.");
     finish(r);
 }
 
@@ -302,7 +297,7 @@ private:
         if (choices.isEmpty()) {
             r.ok = false;
             r.kind = ErrorKind::BadResponse;
-            r.error = tr("La risposta del server non è nel formato atteso (manca «choices»): "
+            r.error = QCoreApplication::translate("Ai", "La risposta del server non è nel formato atteso (manca «choices»): "
                          "il server è compatibile con le API OpenAI?");
             fail(r);
             return;
@@ -333,7 +328,7 @@ private:
         }
         r.ok = false;
         r.kind = ErrorKind::InvalidJson;
-        r.error = tr("Il modello non ha restituito una risposta strutturata valida, anche dopo un nuovo tentativo. "
+        r.error = QCoreApplication::translate("Ai", "Il modello non ha restituito una risposta strutturata valida, anche dopo un nuovo tentativo. "
                      "Un modello più grande o un testo più breve possono aiutare.");
         fail(r);
     }
@@ -387,7 +382,7 @@ public:
                                         && !doc.object().contains(QStringLiteral("models")))) {
                     r.ok = false;
                     r.kind = ErrorKind::BadResponse;
-                    r.error = tr("Il server ha risposto, ma non con un elenco di modelli: l'indirizzo è corretto "
+                    r.error = QCoreApplication::translate("Ai", "Il server ha risposto, ma non con un elenco di modelli: l'indirizzo è corretto "
                                  "(di solito termina con /v1)?");
                 } else {
                     for (const QJsonValue &v : data) {
@@ -457,7 +452,7 @@ public:
                     && !r.models.contains(want + QStringLiteral(":latest"))) {
                     r.ok = false;
                     r.kind = ErrorKind::ModelNotFound;
-                    r.error = tr("Il server risponde, ma il modello «%1» non è tra quelli disponibili.").arg(want);
+                    r.error = QCoreApplication::translate("Ai", "Il server risponde, ma il modello «%1» non è tra quelli disponibili.").arg(want);
                 }
                 m_r->finish(r);
                 return;
@@ -510,7 +505,7 @@ Client *makeClient(const Config &config, QObject *parent, QString *error)
     }
     if (isCloud(config.provider) && !Settings::cloudConfirmed(config.provider)) {
         if (error)
-            *error = tr("Prima di usare %1 bisogna confermare l'invio dei dati nelle impostazioni AI.")
+            *error = QCoreApplication::translate("Ai", "Prima di usare %1 bisogna confermare l'invio dei dati nelle impostazioni AI.")
                          .arg(providerName(config.provider));
         return nullptr;
     }
@@ -613,9 +608,9 @@ int countWords(const QString &text)
 QString describeInput(int documents, qint64 words)
 {
     const QLocale it(QLocale::Italian);
-    const QString docs = documents == 1 ? tr("1 documento") : tr("%1 documenti").arg(documents);
+    const QString docs = documents == 1 ? QCoreApplication::translate("Ai", "1 documento") : QCoreApplication::translate("Ai", "%1 documenti").arg(documents);
     return QStringLiteral("%1, ~%2 %3")
-        .arg(docs, it.toString(words), words == 1 ? tr("parola") : tr("parole"));
+        .arg(docs, it.toString(words), words == 1 ? QCoreApplication::translate("Ai", "parola") : QCoreApplication::translate("Ai", "parole"));
 }
 
 } // namespace Ai
