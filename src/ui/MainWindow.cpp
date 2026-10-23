@@ -78,7 +78,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_rightSplitter(new QSplitter(Qt::Vertical))
     , m_stats(new QLabel)
 {
-    setWindowIcon(Ui::colorIcon(QColor(0x3d5a80), 32));
+    // The window inherits the application icon set in main().
     const QString author = QSettings().value(QStringLiteral("user/name")).toString();
     if (!author.isEmpty())
         m_project->setAuthor(author);
@@ -248,19 +248,22 @@ void MainWindow::createActions()
 
 void MainWindow::createMenus()
 {
-    QMenu *project = menuBar()->addMenu(tr("&Progetto"));
+    QMenu *project = menuBar()->addMenu(tr("&File"));
     project->addAction(m_newProject);
     project->addAction(m_openProject);
     m_recentMenu = project->addMenu(tr("Progetti &recenti"));
     rebuildRecentMenu();
+    project->addSeparator();
     project->addAction(m_saveCopy);
     project->addAction(m_closeProject);
     project->addSeparator();
-    project->addAction(m_importQdpx);
-    project->addAction(m_mergeProject);
-    project->addAction(m_exportQdpx);
-    project->addAction(m_exportProjectXlsx);
-    project->addAction(m_createReport);
+    QMenu *import = project->addMenu(tr("&Importa"));
+    import->addAction(m_importQdpx);
+    import->addAction(m_mergeProject);
+    QMenu *exp = project->addMenu(tr("Es&porta"));
+    exp->addAction(m_exportQdpx);
+    exp->addAction(m_exportProjectXlsx);
+    exp->addAction(m_createReport);
     project->addSeparator();
     project->addAction(m_example);
     project->addSeparator();
@@ -354,6 +357,7 @@ void MainWindow::createToolBar()
     tb->setObjectName(QStringLiteral("mainToolBar"));
     tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     tb->setMovable(false);
+    tb->setIconSize(QSize(20, 20));
     tb->addAction(m_newProject);
     tb->addAction(m_openProject);
     tb->addSeparator();
@@ -375,21 +379,22 @@ void MainWindow::createToolBar()
     tb->addSeparator();
     tb->addAction(m_importDocs);
     tb->addSeparator();
-    QAction *newCode = new QAction(Ui::colorIcon(QColor(0x2ca02c)), tr("Nuovo codice"), this);
+    QAction *newCode = new QAction(Ui::colorIcon(QColor(0x2ca02c), 16), tr("Nuovo codice"), this);
     connect(newCode, &QAction::triggered, m_newCode, &QAction::trigger);
     m_projectActions << newCode;
     tb->addAction(newCode);
-    QAction *code = new QAction(tr("Codifica (Ctrl+E)"), this);
+    QAction *code = new QAction(style()->standardIcon(QStyle::SP_DialogApplyButton), tr("Codifica"), this);
+    code->setToolTip(tr("Codifica la selezione (Ctrl+E)"));
     connect(code, &QAction::triggered, m_codeCurrent, &QAction::trigger);
     m_projectActions << code;
     tb->addAction(code);
     tb->addSeparator();
     tb->addAction(m_search);
-    QAction *matrix = new QAction(tr("Matrice"), this);
+    QAction *matrix = new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Matrice"), this);
     connect(matrix, &QAction::triggered, m_matrix, &QAction::trigger);
     m_projectActions << matrix;
     tb->addAction(matrix);
-    QAction *vars = new QAction(tr("Variabili"), this);
+    QAction *vars = new QAction(style()->standardIcon(QStyle::SP_FileDialogListView), tr("Variabili"), this);
     connect(vars, &QAction::triggered, m_variables, &QAction::trigger);
     m_projectActions << vars;
     tb->addAction(vars);

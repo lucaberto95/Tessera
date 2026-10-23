@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.29.1] - 2026-10-23 — Icona e barre
+
+- L'icona dell'applicazione ora compare nella finestra e nella barra delle applicazioni (la finestra principale la sovrascriveva con un quadratino colorato).
+- Menu «Progetto» rinominato «File», con sottomenu «Importa» ed «Esporta». Barra degli strumenti con icone di pari dimensione per tutti i pulsanti.
+
 ## [0.29.0] - 2026-10-23 — Aggiornamento automatico
 
 - Aiuto › «Verifica aggiornamenti…» e, all'avvio, un controllo silenzioso (una richiesta all'API delle release su GitHub, con il solo User-Agent `Tessera/versione`; si spegne da Aiuto › «Cerca aggiornamenti all'avvio»). Se esiste una versione più recente compare il riepilogo con le note; «Aggiorna ora» scarica lo zip con barra di avanzamento e annullabile.
