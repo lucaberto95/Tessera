@@ -237,6 +237,24 @@ public:
     bool updateSummaryTable(qint64 id, const QString &name, const QString &configJson);
     bool deleteSummaryTable(qint64 id);
 
+    // Concept maps (issue #15). Deleting a map deletes its nodes and arrows; deleting a node deletes its arrows.
+    // Nodes may point at elements that are later deleted: they are kept (see MapNode). Moving a node is one
+    // updateMapNode call, so the editor calls it on mouse release only.
+    QList<ConceptMap> conceptMaps() const;
+    ConceptMap conceptMap(qint64 id) const;
+    qint64 addConceptMap(const QString &name, const QString &uuid = {});
+    bool renameConceptMap(qint64 id, const QString &name);
+    bool deleteConceptMap(qint64 id);
+    QList<MapNode> mapNodes(qint64 mapId) const;
+    MapNode mapNode(qint64 id) const;
+    qint64 addMapNode(const MapNode &node); // id/uuid ignored (uuid kept if given)
+    bool updateMapNode(const MapNode &node);
+    bool deleteMapNode(qint64 id);
+    QList<MapEdge> mapEdges(qint64 mapId) const;
+    qint64 addMapEdge(const MapEdge &edge);
+    bool updateMapEdge(const MapEdge &edge);
+    bool deleteMapEdge(qint64 id);
+
     // Log of the requests made to language models (issue #39). Optional, off by default (meta "ai_log"):
     // addAiLog does nothing and returns 0 while it is off. Not undoable, not merged, not exported. Never holds keys.
     bool aiLogEnabled() const;
@@ -249,6 +267,7 @@ public:
 signals:
     void opened();
     void summariesChanged();
+    void mapsChanged();
     void aiLogChanged();
     void closed();
     void groupsChanged();

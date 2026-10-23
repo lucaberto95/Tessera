@@ -25,6 +25,7 @@
 #include "ui/StatsDialog.h"
 #include "ui/SummaryGridDialog.h"
 #include "ui/SummaryTablesDialog.h"
+#include "ui/ConceptMapDialog.h"
 #include "ui/MatrixDialog.h"
 #include "ui/MergeDialog.h"
 #include "ui/RetrievalDialog.h"
@@ -213,6 +214,7 @@ void MainWindow::createActions()
     m_statsAction = make(tr("&Statistiche e tabelle incrociate…"), &MainWindow::showStats);
     m_summaryGrid = make(tr("&Griglia delle sintesi…"), &MainWindow::showSummaryGrid);
     m_summaryTables = make(tr("Tabelle &riassuntive…"), &MainWindow::showSummaryTables);
+    m_conceptMaps = make(tr("Mappe conce&ttuali…"), &MainWindow::showConceptMaps);
     m_wordFrequencies = make(tr("&Frequenze di parole, nuvola e parole in contesto…"), &MainWindow::showWordFrequencies);
     m_dictionaries = make(tr("&Dizionari e analisi del contenuto…"), &MainWindow::showDictionaries);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
@@ -318,6 +320,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_statsAction);
     analysis->addAction(m_summaryGrid);
     analysis->addAction(m_summaryTables);
+    analysis->addAction(m_conceptMaps);
     analysis->addAction(m_wordFrequencies);
     analysis->addAction(m_dictionaries);
     analysis->addAction(m_activateByVariables);
@@ -1034,6 +1037,38 @@ void MainWindow::showSummaryTables()
 {
     auto *dlg = new SummaryTablesDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showConceptMaps()
+{
+    auto *dlg = new ConceptMapDialog(m_project, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &ConceptMapDialog::elementActivated, this, [this](int kind, qint64 id) {
+        switch (static_cast<MapNodeKind>(kind)) {
+        case MapNodeKind::Document:
+            openSegment(id, 0, 0, 0);
+            break;
+        case MapNodeKind::Code:
+            m_codes->setCurrentCode(id);
+            break;
+        case MapNodeKind::Memo: {
+            const Memo memo = m_project->memo(id);
+            if (memo.id)
+                Ui::openMemo(this, m_project, memo);
+            break;
+        }
+        case MapNodeKind::Segment: {
+            const Segment s = m_project->segment(id);
+            if (s.id)
+                openSegment(s.documentId, s.start, s.end, s.id);
+            break;
+        }
+        default:
+            break;
+        }
+    });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

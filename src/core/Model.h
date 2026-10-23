@@ -169,6 +169,39 @@ struct SummaryTable {
     QString uuid;
 };
 
+// Concept maps (issue #15): a canvas of nodes joined by labelled arrows. A node is free text or points at a
+// code, a document, a memo or a segment (`refId`); a node whose target was deleted stays, shown as deleted.
+// Geometry is in scene units; `styleJson` holds optional {"color": "#rrggbb", "width": n, "line": "solid|dash|dot"}.
+enum class MapNodeKind { Text, Code, Document, Memo, Segment };
+
+struct ConceptMap {
+    qint64 id = 0;
+    QString name;
+    int position = 0;
+    QString uuid;
+};
+
+struct MapNode {
+    qint64 id = 0;
+    qint64 mapId = 0;
+    MapNodeKind kind = MapNodeKind::Text;
+    qint64 refId = 0;
+    QString label; // text of a free node; for the others, the caption last seen (used if the target is gone)
+    double x = 0, y = 0, w = 0, h = 0; // w/h == 0: size from the content
+    QString styleJson;
+    QString uuid;
+};
+
+struct MapEdge {
+    qint64 id = 0;
+    qint64 mapId = 0;
+    qint64 fromNode = 0;
+    qint64 toNode = 0;
+    QString label;
+    QString styleJson;
+    QString uuid;
+};
+
 // One request made to a language model (issue #39), kept for transparency and reproducibility. Not part of undo.
 struct AiLogEntry {
     qint64 id = 0;
