@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QPair>
 #include <QSet>
 #include <QTemporaryDir>
 
@@ -111,6 +112,7 @@ private:
     void mergeSummaries();
     void mergeDictionaries();
     void mergeSummaryTables();
+    void mergeResearchQuestions();
 
     Project &t;
     const Project &s;
@@ -729,6 +731,79 @@ void Merger::mergeSummaryTables()
     }
 }
 
+// Research questions are matched by uuid, else by title. A new one is copied with its evidence, mapped to the
+// target's segments, codes and memos (evidence whose element did not come across is dropped); a question already
+// there only gains the evidence it lacks, its own texts are never overwritten.
+void Merger::mergeResearchQuestions()
+{
+    QHash<QString, qint64> tMemoByUuidNow;
+    for (const Memo &m : t.memos())
+        tMemoByUuidNow.insert(m.uuid, m.id);
+    QHash<qint64, QString> srcMemoUuid;
+    for (const Memo &m : s.memos())
+        srcMemoUuid.insert(m.id, m.uuid);
+
+    for (const ResearchQuestion &oq : s.researchQuestions()) {
+        if (m_failed)
+            return;
+        ResearchQuestion existing;
+        for (const ResearchQuestion &c : t.researchQuestions())
+            if ((!oq.uuid.isEmpty() && c.uuid == oq.uuid) || c.title == oq.title)
+                existing = c;
+
+        QList<QPair<EvidenceKind, qint64>> mapped;
+        for (const QuestionEvidence &e : s.questionEvidence(oq.id)) {
+            qint64 id = 0;
+            switch (e.kind) {
+            case EvidenceKind::Segment: id = segMap.value(e.refId, 0); break;
+            case EvidenceKind::Code: id = ensureCode(e.refId); break;
+            case EvidenceKind::Memo: id = tMemoByUuidNow.value(srcMemoUuid.value(e.refId), 0); break;
+            }
+            if (id)
+                mapped.append({e.kind, id});
+        }
+        if (m_failed)
+            return;
+
+        if (existing.id) {
+            QSet<QPair<int, qint64>> have;
+            for (const QuestionEvidence &e : t.questionEvidence(existing.id))
+                have.insert({int(e.kind), e.refId});
+            bool added = false;
+            for (const auto &e : mapped) {
+                if (have.contains({int(e.first), e.second}))
+                    continue;
+                added = true;
+                if (!m_dry && e.second > 0 && !t.addQuestionEvidence(existing.id, e.first, e.second)) {
+                    fail();
+                    return;
+                }
+            }
+            if (added)
+                ++report.questionsExtended;
+            continue;
+        }
+
+        ++report.questionsNew;
+        if (m_dry)
+            continue;
+        const qint64 id = check(t.addResearchQuestion(oq.title, oq.uuid));
+        if (!id)
+            return;
+        ResearchQuestion copy = oq;
+        copy.id = id;
+        if (!t.updateResearchQuestion(copy)) {
+            fail();
+            return;
+        }
+        for (const auto &e : mapped)
+            if (!t.addQuestionEvidence(id, e.first, e.second)) {
+                fail();
+                return;
+            }
+    }
+}
+
 Report Merger::run()
 {
     buildIndexes();
@@ -767,6 +842,8 @@ Report Merger::run()
     if (!m_failed && !filtering()) {
         mergeDictionaries();
         mergeSummaryTables();
+        if (!m_failed)
+            mergeResearchQuestions();
     }
     return report;
 }

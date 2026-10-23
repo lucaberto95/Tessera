@@ -10,6 +10,7 @@
 #include "ui/CodeTree.h"
 #include "ui/AgreementDialog.h"
 #include "ui/ReportDialog.h"
+#include "ui/ResearchQuestionsDialog.h"
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
@@ -873,7 +874,73 @@ private slots:
         QCOMPARE(dlg.preview()->item(1, 2)->text(), QString("s2"));
         Q_UNUSED(b);
         shot(&dlg, "summary-tables");
-    }    void dictionaryDialog()
+    }
+
+    void researchQuestionsDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("questions.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "Il lavoro da remoto cambia tutto.");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, 3, 19);
+        p.addResearchQuestion("Prima domanda");
+
+        ResearchQuestionsDialog dlg(&p);
+        dlg.show();
+        QCOMPARE(dlg.questionList()->count(), 1);
+        QVERIFY(dlg.currentQuestionId() > 0);
+        QCOMPARE(dlg.titleEdit()->text(), QString("Prima domanda"));
+
+        // New question, edits are saved (debounced; commitEdits flushes them).
+        const qint64 q = dlg.createQuestion("Seconda");
+        QCOMPARE(dlg.currentQuestionId(), q);
+        QCOMPARE(dlg.questionList()->count(), 2);
+        dlg.descriptionEdit()->setPlainText("Contesto");
+        dlg.themesEdit()->setPlainText("Uno\nDue");
+        dlg.conclusionsEdit()->setPlainText("Fine");
+        dlg.statusBox()->setCurrentIndex(2);
+        emit dlg.statusBox()->activated(2);
+        dlg.commitEdits();
+        const ResearchQuestion saved = p.researchQuestion(q);
+        QCOMPARE(saved.description, QString("Contesto"));
+        QCOMPARE(saved.themes, (QStringList{"Uno", "Due"}));
+        QCOMPARE(saved.conclusions, QString("Fine"));
+        QCOMPARE(saved.status, QuestionStatus::Answered);
+        QCOMPARE(dlg.descriptionEdit()->toPlainText(), QString("Contesto")); // own save does not reset the editors
+
+        // Switching question keeps the edits and loads the other one.
+        dlg.selectQuestion(p.researchQuestions().first().id);
+        QCOMPARE(dlg.titleEdit()->text(), QString("Prima domanda"));
+        QVERIFY(dlg.descriptionEdit()->toPlainText().isEmpty());
+        dlg.selectQuestion(q);
+        QCOMPARE(dlg.themesEdit()->toPlainText(), QString("Uno\nDue"));
+
+        // Evidence: a dropped code, a segment added through the project; it follows deletions.
+        QMimeData mime;
+        mime.setData(Ui::CodeMimeType, QByteArray::number(code));
+        QVERIFY(dlg.addDroppedMime(&mime));
+        QCOMPARE(dlg.evidenceList()->count(), 1);
+        QVERIFY(dlg.evidenceList()->item(0)->text().contains("Tema"));
+        p.addQuestionEvidence(q, EvidenceKind::Segment, seg);
+        QCOMPARE(dlg.evidenceList()->count(), 2);
+        QVERIFY(dlg.evidenceList()->item(1)->text().contains("lavoro da remoto"));
+        QSignalSpy activated(&dlg, &ResearchQuestionsDialog::evidenceActivated);
+        emit dlg.evidenceList()->itemDoubleClicked(dlg.evidenceList()->item(1));
+        QCOMPARE(activated.count(), 1);
+        QCOMPARE(activated.first().at(1).toLongLong(), seg);
+        p.deleteSegment(seg);
+        QCOMPARE(dlg.evidenceList()->count(), 1);
+
+        // Export by suffix.
+        QVERIFY(dlg.exportTo(m_dir.filePath("worksheet.html")));
+        QFile html(m_dir.filePath("worksheet.html"));
+        QVERIFY(html.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(html.readAll()).contains("Seconda"));
+        QVERIFY(dlg.exportTo(m_dir.filePath("worksheet.docx")));
+        shot(&dlg, "research-questions");
+    }
+
+    void dictionaryDialog()
     {
         Project p;
         QVERIFY(p.create(m_dir.filePath("dictionary.tsra")));

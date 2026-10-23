@@ -4,6 +4,8 @@ Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla re
 
 ## [Unreleased]
 
+- Foglio di lavoro per le domande di ricerca (#17): menu Analisi > Domande di ricerca…, con elenco di domande (stato, descrizione, temi, conclusioni, note di lavoro) e evidenze collegate per riferimento a segmenti, codici e memo (i codici si trascinano dall'albero). Esportazione dell'intero foglio in Word, PDF o HTML come bozza dei risultati, con i testi dei segmenti citati. Schema 12 (tabelle `research_questions` e `research_evidence`, nell'annulla); l'unione di progetti porta con sé le domande e aggiunge alle domande già presenti le evidenze mancanti. Non entra nel QDPX (REFI-QDA non ha un equivalente). Nota: altri rami usano lo schema 12, da rinumerare all'integrazione.
+
 - Interfaccia in inglese (#49): le stringhe di `tr()` hanno la traduzione in `translations/tessera_en.ts` (lingua sorgente: italiano), compilata da `lrelease` e incorporata nell'eseguibile. La lingua si sceglie da Impostazioni > Lingua dell'interfaccia (sistema, italiano, inglese; si applica al riavvio). Anche il progetto di esempio ha una versione inglese. Per aggiornare le traduzioni: target CMake `update_translations`.
 - Import da MAXQDA e NVivo tramite lo standard REFI-QDA: oltre ai progetti .qdpx si importano i libri dei codici .qdc. I file nativi (.mqda/.mx24, .nvp/.nvpx) sono riconosciuti e rifiutati con le istruzioni per esportare in REFI-QDA (lettura diretta non verificabile in clean room, vedi docs/foreign-formats.md). Rif. #51.
 

@@ -15,6 +15,7 @@
 #include "core/Project.h"
 #include "core/Qdpx.h"
 #include "core/Report.h"
+#include "core/ResearchWorksheet.h"
 #include "core/RichText.h"
 #include "core/Retrieval.h"
 #include "core/Stats.h"
@@ -3845,8 +3846,8 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 11);
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(p.schemaVersion(), 12);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
@@ -3998,7 +3999,7 @@ private slots:
         QCOMPARE(fileVersion(file), 7);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.documents().first().id;
         const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
         QVERIFY(a > 0);
@@ -4183,11 +4184,223 @@ private slots:
         QCOMPARE(fileVersion(file), 8);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
         QVERIFY(p.setSummary(doc, p.codes().first().id, "ok"));
         QVERIFY(p.addSummaryTable("T", "{}") > 0);
-    }    void wordCloudLayoutDoesNotOverlap()
+    }
+
+    // ---- research questions worksheet (issue #17)
+
+    void researchQuestionsCrud()
+    {
+        Project p;
+        QVERIFY(p.create(path("questions.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "Il lavoro da remoto cambia tutto.");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, 0, 17);
+        Memo m;
+        m.targetType = MemoTarget::Free;
+        m.title = "Idea";
+        m.body = "Una prima idea";
+        const qint64 memo = p.saveMemo(m);
+
+        QSignalSpy spy(&p, &Project::researchQuestionsChanged);
+        const qint64 q1 = p.addResearchQuestion("Come cambia il lavoro?");
+        const qint64 q2 = p.addResearchQuestion("Quali effetti sul benessere?");
+        QVERIFY(q1 > 0 && q2 > q1);
+        QVERIFY(spy.count() >= 2);
+        QCOMPARE(p.researchQuestions().size(), 2);
+        QCOMPARE(p.researchQuestion(q1).status, QuestionStatus::Open);
+
+        ResearchQuestion q = p.researchQuestion(q1);
+        q.description = "Descrizione";
+        q.status = QuestionStatus::InProgress;
+        q.themes = {" Flessibilità ", "", "Isolamento"};
+        q.conclusions = "Prime conclusioni";
+        q.notes = "Da rivedere";
+        QVERIFY(p.updateResearchQuestion(q));
+        q = p.researchQuestion(q1);
+        QCOMPARE(q.status, QuestionStatus::InProgress);
+        QCOMPARE(q.themes, (QStringList{"Flessibilità", "Isolamento"}));
+        QCOMPARE(q.conclusions, QString("Prime conclusioni"));
+        QCOMPARE(q.notes, QString("Da rivedere"));
+        QVERIFY(!q.uuid.isEmpty());
+
+        // Evidence: references, each element once; missing elements are refused.
+        QVERIFY(p.addQuestionEvidence(q1, EvidenceKind::Segment, seg));
+        QVERIFY(p.addQuestionEvidence(q1, EvidenceKind::Code, code));
+        QVERIFY(p.addQuestionEvidence(q1, EvidenceKind::Memo, memo));
+        QVERIFY(p.addQuestionEvidence(q1, EvidenceKind::Segment, seg)); // already there
+        QVERIFY(!p.addQuestionEvidence(q1, EvidenceKind::Segment, 9999));
+        QVERIFY(!p.addQuestionEvidence(9999, EvidenceKind::Segment, seg));
+        QList<QuestionEvidence> ev = p.questionEvidence(q1);
+        QCOMPARE(ev.size(), 3);
+        QCOMPARE(ev[0].kind, EvidenceKind::Segment);
+        QCOMPARE(ev[1].kind, EvidenceKind::Code);
+        QCOMPARE(ev[2].refId, memo);
+        QVERIFY(p.questionEvidence(q2).isEmpty());
+
+        // Order of the questions.
+        QVERIFY(p.moveResearchQuestion(q2, -1));
+        QCOMPARE(p.researchQuestions().first().id, q2);
+        QVERIFY(!p.moveResearchQuestion(q2, -1));
+        QVERIFY(p.undo());
+        QCOMPARE(p.researchQuestions().first().id, q1);
+
+        // Removing an evidence, and undoing it.
+        QVERIFY(p.removeQuestionEvidence(ev[1].id));
+        QCOMPARE(p.questionEvidence(q1).size(), 2);
+        QVERIFY(p.undo());
+        QCOMPARE(p.questionEvidence(q1).size(), 3);
+
+        // Evidence disappears with its element; undo brings it back.
+        QVERIFY(p.deleteSegment(seg));
+        QCOMPARE(p.questionEvidence(q1).size(), 2);
+        QVERIFY(p.undo());
+        QCOMPARE(p.questionEvidence(q1).size(), 3);
+        QVERIFY(p.deleteCode(code));
+        QCOMPARE(p.questionEvidence(q1).size(), 1); // the code and its segment are gone, the memo stays
+        QVERIFY(p.undo());
+        QCOMPARE(p.questionEvidence(q1).size(), 3);
+
+        // Deleting a question takes its evidence along and is one undo step.
+        QVERIFY(p.deleteResearchQuestion(q1));
+        QCOMPARE(p.researchQuestions().size(), 1);
+        QVERIFY(p.undo());
+        QCOMPARE(p.researchQuestions().size(), 2);
+        QCOMPARE(p.questionEvidence(q1).size(), 3);
+        QCOMPARE(p.researchQuestion(q1).themes.size(), 2);
+    }
+
+    void researchQuestionsMigrateFromV11()
+    {
+        const QString file = path("v11-questions.tsra");
+        {
+            Project old;
+            old.setMigrations(Project::builtInMigrations().mid(0, 10)); // up to schema 11
+            QVERIFY(old.create(file));
+        }
+        QCOMPARE(fileVersion(file), 11);
+        Project p;
+        QVERIFY(p.open(file));
+        QCOMPARE(fileVersion(file), 12);
+        QVERIFY(p.addResearchQuestion("Domanda") > 0);
+    }
+
+    void researchWorksheetExport()
+    {
+        Project p;
+        QVERIFY(p.create(path("worksheet.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista 1", "Il lavoro da remoto cambia tutto.");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, 3, 19, 0, "commento <b>");
+        Memo m;
+        m.targetType = MemoTarget::Free;
+        m.title = "Idea";
+        m.body = "Una prima idea";
+        const qint64 memo = p.saveMemo(m);
+        const qint64 q1 = p.addResearchQuestion("Come cambia il lavoro?");
+        const qint64 q2 = p.addResearchQuestion("Seconda");
+        ResearchQuestion q = p.researchQuestion(q1);
+        q.description = "Contesto";
+        q.themes = {"Flessibilità"};
+        q.conclusions = "Cambia molto";
+        q.notes = "nota riservata";
+        p.updateResearchQuestion(q);
+        p.addQuestionEvidence(q1, EvidenceKind::Segment, seg);
+        p.addQuestionEvidence(q1, EvidenceKind::Code, code);
+        p.addQuestionEvidence(q1, EvidenceKind::Memo, memo);
+
+        const Report::Document d = ResearchWorksheet::build(p, {});
+        const QString html = Report::toHtml(d);
+        QVERIFY(html.contains("Come cambia il lavoro?"));
+        QVERIFY(html.contains("lavoro da remoto"));   // the text of the segment, quoted
+        QVERIFY(html.contains("Intervista 1"));
+        QVERIFY(html.contains("Una prima idea"));
+        QVERIFY(html.contains("Flessibilità"));
+        QVERIFY(html.contains("Cambia molto"));
+        QVERIFY(html.contains("commento &lt;b&gt;")); // escaped
+        QVERIFY(!html.contains("nota riservata"));    // working notes only on request
+        ResearchWorksheet::Options withNotes;
+        withNotes.notes = true;
+        QVERIFY(Report::toHtml(ResearchWorksheet::build(p, withNotes)).contains("nota riservata"));
+        ResearchWorksheet::Options only;
+        only.questions = {q2};
+        const QString one = Report::toHtml(ResearchWorksheet::build(p, only));
+        QVERIFY(one.contains("Seconda") && !one.contains("Come cambia il lavoro?"));
+
+        QString error;
+        QVERIFY2(Report::writeHtml(path("worksheet.html"), d, &error), qPrintable(error));
+        QVERIFY2(Report::writeDocx(path("worksheet.docx"), d, &error), qPrintable(error));
+        QVERIFY2(Report::writePdf(path("worksheet.pdf"), d, &error), qPrintable(error));
+        QVERIFY(QFileInfo(path("worksheet.docx")).size() > 0);
+    }
+
+    void researchQuestionsMerge()
+    {
+        const QString a = path("rq-a.tsra"), b = path("rq-b.tsra");
+        {
+            Project base;
+            base.create(a);
+            const qint64 doc = base.addDocument(base.groups().first().id, "Intervista", "Il lavoro da remoto cambia tutto.");
+            const qint64 code = base.addCode(0, "Tema", Qt::red);
+            base.addSegment(doc, code, 0, 17);
+            base.addResearchQuestion("Domanda comune");
+            base.saveCopyAs(b);
+        }
+        {
+            Project pb;
+            QVERIFY(pb.open(b));
+            const qint64 doc = pb.documents().first().id;
+            const qint64 code = pb.findCode(0, "Tema");
+            const qint64 extra = pb.addSegment(doc, code, 18, 32);
+            Memo m;
+            m.targetType = MemoTarget::Free;
+            m.title = "Pensiero";
+            m.body = "Memo libero di B";
+            const qint64 memo = pb.saveMemo(m);
+            // The shared question gains evidence in B; a new one is only in B.
+            const qint64 shared = pb.researchQuestions().first().id;
+            pb.addQuestionEvidence(shared, EvidenceKind::Segment, extra);
+            const qint64 fresh = pb.addResearchQuestion("Domanda di B");
+            ResearchQuestion q = pb.researchQuestion(fresh);
+            q.themes = {"Tema B"};
+            q.conclusions = "Conclusione B";
+            pb.updateResearchQuestion(q);
+            pb.addQuestionEvidence(fresh, EvidenceKind::Code, code);
+            pb.addQuestionEvidence(fresh, EvidenceKind::Segment, extra);
+            pb.addQuestionEvidence(fresh, EvidenceKind::Memo, memo);
+        }
+        Project pa;
+        QVERIFY(pa.open(a));
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(b, &error), qPrintable(error));
+        const Merge::Report dry = Merge::analyze(pa, src, {});
+        QCOMPARE(dry.questionsNew, 1);
+        QCOMPARE(dry.questionsExtended, 1);
+        QCOMPARE(pa.researchQuestions().size(), 1); // a dry run writes nothing
+        const Merge::Report r = Merge::apply(pa, src, {});
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.questionsNew, 1);
+        QCOMPARE(r.questionsExtended, 1);
+        const QList<ResearchQuestion> qs = pa.researchQuestions();
+        QCOMPARE(qs.size(), 2);
+        QCOMPARE(pa.questionEvidence(qs[0].id).size(), 1);
+        QCOMPARE(qs[1].title, QString("Domanda di B"));
+        QCOMPARE(qs[1].themes, QStringList{"Tema B"});
+        QCOMPARE(qs[1].conclusions, QString("Conclusione B"));
+        const QList<QuestionEvidence> ev = pa.questionEvidence(qs[1].id);
+        QCOMPARE(ev.size(), 3);
+        QCOMPARE(pa.segment(ev[1].refId).start, 18);
+        QCOMPARE(pa.memo(ev[2].refId).body, QString("Memo libero di B"));
+        // Merging again changes nothing.
+        QCOMPARE(Merge::apply(pa, src, {}).questionsNew, 0);
+        QCOMPARE(pa.researchQuestions().size(), 2);
+    }
+
+    void wordCloudLayoutDoesNotOverlap()
     {
         QList<QSizeF> sizes;
         for (int i = 0; i < 40; ++i)
@@ -5159,7 +5372,7 @@ private slots:
     {
         Project p;
         QVERIFY(p.create(path("ailog.tsra")));
-        QCOMPARE(p.schemaVersion(), 11);
+        QCOMPARE(p.schemaVersion(), 12);
         QVERIFY(!p.aiLogEnabled());
         QCOMPARE(p.addAiLog("f", "local", "m", "in", "out"), qint64(0)); // off by default
         p.setAiLogEnabled(true);
