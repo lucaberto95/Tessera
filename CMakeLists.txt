@@ -20,6 +20,7 @@ qt_add_library(tessera_core STATIC
     src/core/Pdfs.h src/core/Pdfs.cpp
     src/core/Exporters.h src/core/Exporters.cpp
     src/core/Qdpx.h src/core/Qdpx.cpp
+    src/core/ForeignImport.h src/core/ForeignImport.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
     src/core/RichText.h src/core/RichText.cpp
     src/core/Retrieval.h src/core/Retrieval.cpp

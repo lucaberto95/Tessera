@@ -2,6 +2,10 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [Unreleased]
+
+- Import da MAXQDA e NVivo tramite lo standard REFI-QDA: oltre ai progetti .qdpx si importano i libri dei codici .qdc. I file nativi (.mqda/.mx24, .nvp/.nvpx) sono riconosciuti e rifiutati con le istruzioni per esportare in REFI-QDA (lettura diretta non verificabile in clean room, vedi docs/foreign-formats.md). Rif. #51.
+
 ## [0.29.3] - 2026-10-23 — Riavvio dopo l'aggiornamento
 
 - Lo script di aggiornamento ora individua la chiusura di Tessera filtrando per PID e nome del processo, riavvia l'app anche se l'attesa scade e la lancia dalla sua cartella. Gli errori di copia sono registrati in `update.log` nella cartella temporanea `tessera-update`.

@@ -7,6 +7,7 @@
 #include "core/Cooccurrence.h"
 #include "core/Dictionaries.h"
 #include "core/Exporters.h"
+#include "core/ForeignImport.h"
 #include "core/Images.h"
 #include "core/Importers.h"
 #include "core/Merge.h"
@@ -35,6 +36,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -2406,6 +2409,71 @@ private slots:
         QVERIFY(saved.conditions[0] == female);
         QCOMPARE(saved.conditions[1].op, Op::Between);
         QCOMPARE(saved.conditions[1].value2, QString("2"));
+    }
+
+    void foreignImportDetectsAndImports()
+    {
+        // A MAXQDA-like SQLite file (built here, no vendor material): recognised, refused with guidance, not modified.
+        const QString mq = path("sample.mqda");
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "mqda_fixture");
+            db.setDatabaseName(mq);
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TABLE sys_Setup (Key TEXT, Value TEXT)"));
+            QVERIFY(q.exec("INSERT INTO sys_Setup VALUES ('APP', 'MAXQDA test MX24')"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("mqda_fixture");
+        const QByteArray before = QCryptographicHash::hash([&] { QFile f(mq); f.open(QIODevice::ReadOnly); return f.readAll(); }(),
+                                                           QCryptographicHash::Sha256);
+        const ForeignImport::Info info = ForeignImport::detect(mq);
+        QCOMPARE(info.kind, ForeignImport::Kind::MaxqdaNative);
+        QVERIFY(info.description.contains("MX24"));
+        Project p;
+        QVERIFY(p.create(path("fi1.tsra")));
+        QString report, err;
+        QVERIFY(!ForeignImport::importFile(p, mq, &report, &err));
+        QVERIFY(err.contains("REFI-QDA"));
+        const QByteArray after = QCryptographicHash::hash([&] { QFile f(mq); f.open(QIODevice::ReadOnly); return f.readAll(); }(),
+                                                          QCryptographicHash::Sha256);
+        QCOMPARE(after, before);
+
+        // NVivo native files: explained, not converted.
+        QFile nv(path("sample.nvp"));
+        QVERIFY(nv.open(QIODevice::WriteOnly));
+        nv.write("MSSQL-ish binary");
+        nv.close();
+        QCOMPARE(ForeignImport::detect(path("sample.nvp")).kind, ForeignImport::Kind::NvivoNative);
+        QVERIFY(!ForeignImport::importFile(p, path("sample.nvp"), &report, &err));
+        QVERIFY(err.contains("REFI-QDA"));
+
+        // A bare REFI-QDA codebook (as exported by NVivo/MAXQDA) imports its code tree.
+        QFile qdc(path("book.qdc"));
+        QVERIFY(qdc.open(QIODevice::WriteOnly));
+        qdc.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                  "<CodeBook xmlns=\"urn:QDA-XML:codebook:1.0\"><Codes>"
+                  "<Code guid=\"11111111-1111-1111-1111-111111111111\" name=\"Lavoro\" isCodable=\"true\" color=\"#ff0000\">"
+                  "<Code guid=\"22222222-2222-2222-2222-222222222222\" name=\"Stress\" isCodable=\"true\"/></Code>"
+                  "</Codes></CodeBook>");
+        qdc.close();
+        QCOMPARE(ForeignImport::detect(path("book.qdc")).kind, ForeignImport::Kind::Qdc);
+        QVERIFY2(ForeignImport::importFile(p, path("book.qdc"), &report, &err), qPrintable(err));
+        QCOMPARE(p.codes().size(), 2);
+        QCOMPARE(p.codes().first().name, QString("Lavoro"));
+
+        // A .qdpx goes through the regular importer.
+        Project src;
+        QVERIFY(src.create(path("fi_src.tsra")));
+        src.addCode(0, "Tema", QColor("#112233"));
+        QVERIFY2(Qdpx::exportProject(src, path("fi.qdpx"), &err), qPrintable(err));
+        QCOMPARE(ForeignImport::detect(path("fi.qdpx")).kind, ForeignImport::Kind::Qdpx);
+        Project dst;
+        QVERIFY(dst.create(path("fi_dst.tsra")));
+        QVERIFY2(ForeignImport::importFile(dst, path("fi.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(dst.codes().size(), 1);
+
+        QVERIFY(ForeignImport::detect(path("nonexistent.xyz")).kind == ForeignImport::Kind::Unknown);
     }
 
     void qdpxRoundTrip()
