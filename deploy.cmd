@@ -22,7 +22,7 @@ echo Pronto: %DIST%
 if /i "%1"=="zip" (
     for /f "tokens=3" %%v in ('findstr /r /c:"project(Tessera VERSION" "%~dp0CMakeLists.txt"') do set VERSION=%%v
     call set ZIP=%~dp0dist\Tessera-%%VERSION%%-win64.zip
-    call powershell -NoProfile -Command "Compress-Archive -Path '%DIST%' -DestinationPath '%%ZIP%%' -Force" || exit /b 1
+    call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\makezip.ps1" "%DIST%" "%%ZIP%%" || exit /b 1
     call echo Archivio: %%ZIP%%
 )
 

@@ -2,6 +2,11 @@
 
 Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla release e al commit.
 
+## [0.29.2] - 2026-10-23 — Correzione dell'aggiornamento automatico
+
+- L'aggiornamento estraeva file vuoti: lo zip creato da `Compress-Archive` (PowerShell 5.1) usa le barre rovesciate nei nomi e il lettore non trovava i dati. L'estrazione prova entrambe le grafie e rifiuta qualunque file la cui dimensione non corrisponde all'archivio.
+- `deploy.cmd zip` ora usa `tools/makezip.ps1` (nomi con `/`), così anche la 0.29.0/0.29.1 già installate riescono ad aggiornarsi a questa versione. Chi ha provato l'aggiornamento da 0.29.0/0.29.1 ha un'installazione danneggiata e deve riscaricare lo zip.
+
 ## [0.29.1] - 2026-10-23 — Icona e barre
 
 - L'icona dell'applicazione ora compare nella finestra e nella barra delle applicazioni (la finestra principale la sovrascriveva con un quadratino colorato).

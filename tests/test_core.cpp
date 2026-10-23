@@ -4895,6 +4895,20 @@ private slots:
         QVERIFY2(!src.isEmpty(), qPrintable(err));
         QVERIFY(QFileInfo::exists(QDir(src).filePath("platforms/q.dll")));
 
+        // Windows PowerShell's Compress-Archive stores names with backslashes; contents must still be extracted.
+        QByteArray backslashed = makeZip({{"Tessera/Tessera.exe", QByteArray(5000, 'e')},
+                                          {"Tessera/platforms/q.dll", QByteArray(5000, 'd')}});
+        backslashed.replace("Tessera/Tessera.exe", "Tessera\\Tessera.exe");
+        backslashed.replace("Tessera/platforms/q.dll", "Tessera\\platforms\\q.dll");
+        QFile bs(dir.filePath("bs.zip"));
+        QVERIFY(bs.open(QIODevice::WriteOnly));
+        bs.write(backslashed);
+        bs.close();
+        const QString bsrc = Update::extractDistribution(dir.filePath("bs.zip"), dir.filePath("bsout"), &err);
+        QVERIFY2(!bsrc.isEmpty(), qPrintable(err));
+        QCOMPARE(QFileInfo(QDir(bsrc).filePath("Tessera.exe")).size(), qint64(5000));
+        QCOMPARE(QFileInfo(QDir(bsrc).filePath("platforms/q.dll")).size(), qint64(5000));
+
         QFile h(dir.filePath("nope.zip"));
         QVERIFY(h.open(QIODevice::WriteOnly));
         h.write(makeZip({{"readme.txt", "x"}}));

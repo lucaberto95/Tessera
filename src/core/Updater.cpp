@@ -138,8 +138,13 @@ QString extractDistribution(const QString &zipPath, const QString &outDir, QStri
         if (!fi.isFile)
             continue;
         QDir().mkpath(QFileInfo(target).absolutePath());
+        // Archives made by Windows PowerShell's Compress-Archive store backslashes; the reader reports
+        // slashes but looks entries up by the stored name, so try both spellings.
+        QByteArray data = zip.fileData(fi.filePath);
+        if (data.isEmpty() && fi.size > 0)
+            data = zip.fileData(QString(fi.filePath).replace(QLatin1Char('/'), QLatin1Char('\\')));
         QFile f(target);
-        if (!f.open(QIODevice::WriteOnly) || f.write(zip.fileData(fi.filePath)) < 0)
+        if (data.size() != fi.size || !f.open(QIODevice::WriteOnly) || f.write(data) != data.size())
             return fail(QCoreApplication::translate("Update", "Impossibile estrarre l'aggiornamento."));
     }
     for (const QString &candidate : {out.filePath(QStringLiteral("Tessera")), out.absolutePath()}) {
