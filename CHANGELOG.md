@@ -4,6 +4,7 @@ Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla re
 
 ## [Unreleased]
 
+- Lavoro di gruppo a cicli su cartella condivisa (#24, opzione 1): Analisi > Lavoro di gruppo. Il responsabile avvia un ciclo e Tessera scrive una copia del progetto per ogni membro (`<progetto>_ciclo<N>_<membro>.tsra`) con membro e ciclo registrati nel file; aprendo la copia l'autore delle codifiche è sempre il membro. Le copie rientrate si importano con l'unione (#22) limitata al lavoro del membro, con anteprima e annullamento; la cronologia dei cicli sta nella tabella `team_cycles` (schema 12) e il confronto tra i codificatori riusa l'accordo (#23). Nessun server.
 - Interfaccia in inglese (#49): le stringhe di `tr()` hanno la traduzione in `translations/tessera_en.ts` (lingua sorgente: italiano), compilata da `lrelease` e incorporata nell'eseguibile. La lingua si sceglie da Impostazioni > Lingua dell'interfaccia (sistema, italiano, inglese; si applica al riavvio). Anche il progetto di esempio ha una versione inglese. Per aggiornare le traduzioni: target CMake `update_translations`.
 - Import da MAXQDA e NVivo tramite lo standard REFI-QDA: oltre ai progetti .qdpx si importano i libri dei codici .qdc. I file nativi (.mqda/.mx24, .nvp/.nvpx) sono riconosciuti e rifiutati con le istruzioni per esportare in REFI-QDA (lettura diretta non verificabile in clean room, vedi docs/foreign-formats.md). Rif. #51.
 

@@ -64,6 +64,7 @@ private:
     void showRetrieval();
     void showCooccurrence();
     void showAgreement();
+    void showTeamwork();
     void showStats();
     void showSummaryGrid();
     void showSummaryTables();
@@ -140,6 +141,7 @@ private:
     QAction *m_retrieval = nullptr;
     QAction *m_cooccurrence = nullptr;
     QAction *m_agreement = nullptr;
+    QAction *m_teamwork = nullptr;
     QAction *m_statsAction = nullptr;
     QAction *m_summaryGrid = nullptr;
     QAction *m_summaryTables = nullptr;

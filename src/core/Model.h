@@ -180,6 +180,25 @@ struct AiLogEntry {
     QString output;
 };
 
+// A round of team work (issue #24): the project manager hands a copy to each member, the members code it and
+// send it back, the manager merges the returned copies. Bookkeeping of the manager's project only: not part of
+// undo, not merged, not exported (the copies given to the members carry no cycle history).
+enum class TeamCycleStatus { Sent, Returned, Merged };
+struct TeamCycle {
+    qint64 id = 0;
+    int number = 0;     // 1, 2, ... in order of creation of the round
+    QString member;     // coder the copy was given to (the author name recorded on their codings)
+    QString fileName;   // file name of the copy handed out
+    TeamCycleStatus status = TeamCycleStatus::Sent;
+    QDateTime sentAt;
+    QDateTime returnedAt; // null until the copy came back
+    QDateTime mergedAt;   // null until it was merged
+    QString report;       // summary of the merge, for the history
+};
+
+QString teamCycleStatusToString(TeamCycleStatus s);
+TeamCycleStatus teamCycleStatusFromString(const QString &s);
+
 QString documentKindToString(DocumentKind k);
 DocumentKind documentKindFromString(const QString &s);
 QString segmentKindToString(SegmentKind k);

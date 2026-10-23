@@ -3,6 +3,7 @@
 #include "core/Exporters.h"
 #include "core/Images.h"
 #include "core/Merge.h"
+#include "core/Team.h"
 #include "core/Importers.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
@@ -27,6 +28,7 @@
 #include "ui/SummaryTablesDialog.h"
 #include "ui/MatrixDialog.h"
 #include "ui/MergeDialog.h"
+#include "ui/TeamDialog.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/LinksDialog.h"
@@ -209,6 +211,7 @@ void MainWindow::createActions()
     m_matrix = make(tr("&Matrice codici × documenti…"), &MainWindow::showMatrix, QKeySequence(Qt::CTRL | Qt::Key_M));
     m_retrieval = make(tr("Recupero &complesso…"), &MainWindow::showRetrieval, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
     m_cooccurrence = make(tr("Co-&occorrenze dei codici…"), &MainWindow::showCooccurrence);
+    m_teamwork = make(tr("Lavoro di &gruppo…"), &MainWindow::showTeamwork);
     m_agreement = make(tr("Accordo tra codi&ficatori…"), &MainWindow::showAgreement);
     m_statsAction = make(tr("&Statistiche e tabelle incrociate…"), &MainWindow::showStats);
     m_summaryGrid = make(tr("&Griglia delle sintesi…"), &MainWindow::showSummaryGrid);
@@ -314,6 +317,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_matrix);
     analysis->addAction(m_retrieval);
     analysis->addAction(m_cooccurrence);
+    analysis->addAction(m_teamwork);
     analysis->addAction(m_agreement);
     analysis->addAction(m_statsAction);
     analysis->addAction(m_summaryGrid);
@@ -433,6 +437,14 @@ void MainWindow::createToolBar()
 void MainWindow::connectProject()
 {
     connect(m_project, &Project::opened, this, [this] {
+        // A copy handed out for team work knows who its coder is: the author stays stable, whatever the
+        // user name set on this computer (issue #24).
+        const QString member = m_project->meta(QLatin1String(Team::MemberKey));
+        const QString saved = QSettings().value(QStringLiteral("user/name")).toString();
+        if (!member.isEmpty())
+            m_project->setAuthor(member);
+        else if (!saved.isEmpty())
+            m_project->setAuthor(saved);
         refreshAll();
         updateActions();
         updateTitle();
@@ -997,6 +1009,15 @@ void MainWindow::showCooccurrence()
     connect(dlg, &CooccurrenceDialog::passagesRequested, m_segments, &SegmentsPanel::setPassages);
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
+}
+
+void MainWindow::showTeamwork()
+{
+    m_view->commitEdits();
+    TeamDialog dlg(m_project, this);
+    dlg.exec();
+    if (dlg.agreementRequested())
+        showAgreement();
 }
 
 void MainWindow::showAgreement()

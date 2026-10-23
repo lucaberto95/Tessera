@@ -18,6 +18,7 @@
 #include "core/RichText.h"
 #include "core/Retrieval.h"
 #include "core/Stats.h"
+#include "core/Team.h"
 #include "core/Summaries.h"
 #include "core/Survey.h"
 #include "core/TextUtils.h"
@@ -3845,8 +3846,8 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 11);
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(p.schemaVersion(), 12);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
@@ -3998,7 +3999,7 @@ private slots:
         QCOMPARE(fileVersion(file), 7);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.documents().first().id;
         const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
         QVERIFY(a > 0);
@@ -4183,7 +4184,7 @@ private slots:
         QCOMPARE(fileVersion(file), 8);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
         QVERIFY(p.setSummary(doc, p.codes().first().id, "ok"));
         QVERIFY(p.addSummaryTable("T", "{}") > 0);
@@ -4446,6 +4447,103 @@ private slots:
         QCOMPARE(a.findCode(0, "Inutile"), qint64(0)); // codes nobody used with that author stay out
         QVERIFY(a.dictionaries().isEmpty());
         QCOMPARE(a.allSegments().size(), 3);
+    }
+
+    void teamworkRounds()
+    {
+        const QString file = path("team-manager.tsra");
+        const QString folder = path("team-shared");
+        qint64 doc = 0, tema = 0;
+        {
+            Project m;
+            QVERIFY(m.create(file));
+            m.setAuthor("Resp");
+            doc = m.addDocument(m.groups().first().id, "Intervista", "Mi piace lavorare da casa, ma il traffico pesa.");
+            tema = m.addCode(0, "Tema", Qt::red);
+            m.addSegment(doc, tema, 0, 14);
+            QCOMPARE(m.schemaVersion(), 12);
+            QVERIFY(m.teamCycles().isEmpty());
+            QCOMPARE(m.nextTeamCycleNumber(), 1);
+
+            QVERIFY(!Team::startCycle(m, {}, folder).ok);
+            QVERIFY(!Team::startCycle(m, {"Anna", " anna "}, folder).ok); // repeated
+            QVERIFY(!Team::startCycle(m, {"Anna", " "}, folder).ok);      // blank
+            QVERIFY(m.teamCycles().isEmpty());
+
+            const Team::StartResult r = Team::startCycle(m, {"Anna", "Bruno / B"}, folder);
+            QVERIFY2(r.ok, qPrintable(r.error));
+            QCOMPARE(r.number, 1);
+            QCOMPARE(r.files.size(), 2);
+            QVERIFY(QFileInfo::exists(r.files.at(0)));
+            QVERIFY(!QFileInfo(r.files.at(1)).fileName().contains('/'));
+            const QList<TeamCycle> cycles = m.teamCycles();
+            QCOMPARE(cycles.size(), 2);
+            QCOMPARE(cycles.at(0).member, QString("Anna"));
+            QVERIFY(cycles.at(0).status == TeamCycleStatus::Sent);
+            QCOMPARE(m.nextTeamCycleNumber(), 2);
+
+            // The copies know their coder and carry no history.
+            Project a;
+            QVERIFY(a.open(r.files.at(0)));
+            QCOMPARE(a.meta(Team::MemberKey), QString("Anna"));
+            QCOMPARE(a.meta(Team::CycleKey), QString("1"));
+            QVERIFY(a.teamCycles().isEmpty());
+            a.setAuthor("Anna");
+            a.addSegment(a.documents().first().id, a.findCode(0, "Tema"), 15, 30);
+            a.addSegment(a.documents().first().id, a.addCode(0, "Solo Anna", Qt::green), 0, 2);
+            a.setAuthor("Intruso"); // work by someone else in the copy stays out
+            a.addSegment(a.documents().first().id, a.findCode(0, "Tema"), 31, 46);
+        }
+        const QString annaFile = path("team-shared/" + QFileInfo(file).completeBaseName() + "_ciclo1_Anna.tsra");
+        QVERIFY(QFileInfo::exists(annaFile));
+
+        Project m;
+        QVERIFY(m.open(file));
+        m.setAuthor("Resp");
+        // A project that is not a copy of a round, and a copy of another project, are refused.
+        const Team::ReturnResult notCopy = Team::importReturned(m, file, Merge::TextConflict::ImportCopy);
+        QVERIFY(!notCopy.ok);
+        {
+            Project other;
+            QVERIFY(other.create(path("team-other.tsra")));
+            other.setMeta(Team::MemberKey, "Carla");
+            other.setMeta(Team::CycleKey, "1");
+        }
+        QVERIFY(!Team::importReturned(m, path("team-other.tsra"), Merge::TextConflict::ImportCopy).ok);
+
+        const Team::ReturnResult dry = Team::importReturned(m, annaFile, Merge::TextConflict::ImportCopy, true);
+        QVERIFY2(dry.ok, qPrintable(dry.error));
+        QCOMPARE(dry.member, QString("Anna"));
+        QCOMPARE(dry.report.segmentsNew, 2);
+        QCOMPARE(m.allSegments().size(), 1); // nothing written
+        QVERIFY(m.teamCycles().at(0).status == TeamCycleStatus::Sent);
+
+        const Team::ReturnResult done = Team::importReturned(m, annaFile, Merge::TextConflict::ImportCopy);
+        QVERIFY2(done.ok, qPrintable(done.error));
+        QCOMPARE(m.allSegments().size(), 3);
+        QVERIFY(m.findCode(0, "Solo Anna") > 0);
+        const TeamCycle c = m.teamCycles().at(0);
+        QVERIFY(c.status == TeamCycleStatus::Merged);
+        QVERIFY(c.returnedAt.isValid() && c.mergedAt.isValid());
+        QVERIFY(!c.report.isEmpty());
+        QVERIFY(m.teamCycles().at(1).status == TeamCycleStatus::Sent);
+        QCOMPARE(Agreement::authors(m), (QStringList{"Anna", "Resp"}));
+        QCOMPARE(Agreement::byAuthor(m.allSegments(), "Anna").size(), 2);
+
+        // Merged once only; the merge is one undo step; bookkeeping survives a reopen.
+        QVERIFY(!Team::importReturned(m, annaFile, Merge::TextConflict::ImportCopy).ok);
+        QVERIFY(m.undo());
+        QCOMPARE(m.allSegments().size(), 1);
+        // The round stays "merged" after the undo: it can be reopened by hand and imported again.
+        QVERIFY(m.setTeamCycleStatus(m.teamCycles().at(0).id, TeamCycleStatus::Sent));
+        QVERIFY(m.teamCycles().at(0).status == TeamCycleStatus::Sent);
+        QVERIFY(!m.teamCycles().at(0).mergedAt.isValid());
+        m.close();
+        QVERIFY(m.open(file));
+        QCOMPARE(m.teamCycles().size(), 2);
+        QVERIFY(m.deleteTeamCycle(m.teamCycles().at(1).id));
+        QCOMPARE(m.teamCycles().size(), 1);
+        QCOMPARE(Team::copyFileName("Mio progetto", 2, "A:b"), QString("Mio_progetto_ciclo2_A_b.tsra"));
     }
 
     void mergeMediaAndOlderSchemas()
@@ -5159,7 +5257,7 @@ private slots:
     {
         Project p;
         QVERIFY(p.create(path("ailog.tsra")));
-        QCOMPARE(p.schemaVersion(), 11);
+        QCOMPARE(p.schemaVersion(), 12);
         QVERIFY(!p.aiLogEnabled());
         QCOMPARE(p.addAiLog("f", "local", "m", "in", "out"), qint64(0)); // off by default
         p.setAiLogEnabled(true);

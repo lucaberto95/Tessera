@@ -32,6 +32,7 @@
 #include "ui/MemoDialog.h"
 #include "ui/MemoManager.h"
 #include "ui/MergeDialog.h"
+#include "ui/TeamDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
@@ -122,6 +123,42 @@ private:
     }
 
 private slots:
+    void teamDialogRoundAndImport()
+    {
+        const QString file = m_dir.filePath("team-ui.tsra");
+        const QString folder = m_dir.filePath("team-ui-shared");
+        Project m;
+        m.setAuthor("Resp");
+        QVERIFY(m.create(file));
+        const qint64 doc = m.addDocument(m.groups().first().id, "Testo", "Una frase da codificare bene.");
+        const qint64 code = m.addCode(0, "Tema", Qt::red);
+        m.addSegment(doc, code, 0, 3);
+        TeamDialog dialog(&m);
+        auto *table = dialog.findChild<QTableWidget *>();
+        QVERIFY(table);
+        QCOMPARE(table->rowCount(), 0);
+        QVERIFY(dialog.startRound({"Anna", "Bruno"}, folder));
+        QCOMPARE(table->rowCount(), 2);
+        QCOMPARE(table->item(0, 1)->text(), QString("Anna"));
+        QCOMPARE(table->item(1, 0)->text(), QString("1"));
+        const QString annaFile = QDir(folder).filePath(table->item(0, 2)->text());
+        QVERIFY(QFileInfo::exists(annaFile));
+        {
+            Project a;
+            QVERIFY(a.open(annaFile));
+            a.setAuthor("Anna");
+            a.addSegment(doc, a.findCode(0, "Tema"), 4, 9);
+        }
+        const QString result = dialog.importFiles({annaFile}, false);
+        QVERIFY2(result.contains("unita"), qPrintable(result));
+        QCOMPARE(m.allSegments().size(), 2);
+        QCOMPARE(table->item(0, 3)->text(), QString("Unita"));
+        QCOMPARE(table->item(1, 3)->text(), QString("Inviata"));
+        // The same copy again is refused with a reason, and nothing changes.
+        QVERIFY(dialog.importFiles({annaFile}, false).contains("non importata"));
+        QCOMPARE(m.allSegments().size(), 2);
+    }
+
     void mergeDialogShowsReportAndOptions()
     {
         const QString fileA = m_dir.filePath("merge-a.tsra"), fileB = m_dir.filePath("merge-b.tsra");
