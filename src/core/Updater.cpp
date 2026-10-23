@@ -194,7 +194,7 @@ bool launchReplacement(const QString &sourceDir, const QString &appDir, qint64 p
         "ping -n 2 127.0.0.1 >nul\r\n"
         "goto again\r\n"
         ":done\r\n"
-        "start \"\" /D \"%3\" \"%3\\Tessera.exe\"\r\n")
+        "if exist \"%3\\Tessera.exe\" start \"\" /D \"%3\" \"%3\\Tessera.exe\"\r\n")
         .arg(QString::number(pid), src, app, QDir::toNativeSeparators(workDir));
     script.write(text.toLocal8Bit());
     script.close();
