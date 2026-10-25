@@ -4,6 +4,7 @@ Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla re
 
 ## [Unreleased]
 
+- Cronologia di annulla (Modifica > Cronologia di annulla...): finestra non modale con le azioni annullabili e ripetibili della sessione, aggiornata dai segnali del progetto; scegliendo un punto si annulla o si ripete fino a lì in un solo gesto. Nuove API di `Project`: `undoLabels/redoLabels`, `undoSteps/redoSteps`. Nessun cambio di schema. Non chiude #11 (cronologia salvata nel progetto).
 - Interfaccia in inglese (#49): le stringhe di `tr()` hanno la traduzione in `translations/tessera_en.ts` (lingua sorgente: italiano), compilata da `lrelease` e incorporata nell'eseguibile. La lingua si sceglie da Impostazioni > Lingua dell'interfaccia (sistema, italiano, inglese; si applica al riavvio). Anche il progetto di esempio ha una versione inglese. Per aggiornare le traduzioni: target CMake `update_translations`.
 - Import da MAXQDA e NVivo tramite lo standard REFI-QDA: oltre ai progetti .qdpx si importano i libri dei codici .qdc. I file nativi (.mqda/.mx24, .nvp/.nvpx) sono riconosciuti e rifiutati con le istruzioni per esportare in REFI-QDA (lettura diretta non verificabile in clean room, vedi docs/foreign-formats.md). Rif. #51.
 

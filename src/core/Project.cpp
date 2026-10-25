@@ -582,6 +582,38 @@ bool Project::redo()
     return true;
 }
 
+QStringList Project::undoLabels() const
+{
+    QStringList out;
+    for (qsizetype i = m_undoSteps.size() - 1; i >= 0; --i)
+        out.append(m_undoSteps.at(i).label);
+    return out;
+}
+
+QStringList Project::redoLabels() const
+{
+    QStringList out;
+    for (qsizetype i = m_redoSteps.size() - 1; i >= 0; --i)
+        out.append(m_redoSteps.at(i).label);
+    return out;
+}
+
+bool Project::undoSteps(int count)
+{
+    for (int i = 0; i < count; ++i)
+        if (!undo())
+            return false;
+    return true;
+}
+
+bool Project::redoSteps(int count)
+{
+    for (int i = 0; i < count; ++i)
+        if (!redo())
+            return false;
+    return true;
+}
+
 void Project::clearUndoHistory()
 {
     takeUndoLog();

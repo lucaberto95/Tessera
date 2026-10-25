@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QPointer>
 
 class CodeTree;
 class DocumentTree;
 class DocumentView;
 class Project;
+class QDialog;
 class QLabel;
 class QMenu;
 class QSplitter;
@@ -71,6 +73,7 @@ private:
     void showWordFrequencies();
     void showVariableFilter();
     void showVariables();
+    void showUndoHistory();
     void showMemos();
     void showLinks();
     void editProjectMemo();
@@ -117,6 +120,8 @@ private:
     QAction *m_quit = nullptr;
     QAction *m_undo = nullptr;
     QAction *m_redo = nullptr;
+    QAction *m_undoHistory = nullptr;
+    QPointer<QDialog> m_undoHistoryDialog;
     QAction *m_importDocs = nullptr;
     QAction *m_importSurvey = nullptr;
     QAction *m_newTextDoc = nullptr;
