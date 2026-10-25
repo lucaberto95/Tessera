@@ -10,6 +10,9 @@
 #include "ui/CodeTree.h"
 #include "ui/AgreementDialog.h"
 #include "ui/ReportDialog.h"
+#include "core/ConceptMaps.h"
+#include "ui/ConceptMapDialog.h"
+#include "ui/ResearchQuestionsDialog.h"
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
@@ -26,25 +29,35 @@
 #include "ui/ImageView.h"
 #include "ui/PdfView.h"
 #include "ui/LinksDialog.h"
+#include "ui/UndoHistoryDialog.h"
+#include "ui/MediaPlayerWidget.h"
+#include "core/Media.h"
+#include "ui/TranscriptDialog.h"
 #include "ui/Language.h"
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
 #include "ui/MemoDialog.h"
 #include "ui/MemoManager.h"
 #include "ui/MergeDialog.h"
+#include "ui/TeamDialog.h"
+#include "ui/TeamSyncDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
+#include "ui/SentimentDialog.h"
 #include "ui/SurveyImportDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/VariablesDialog.h"
+#include "ui/TopicsDialog.h"
 #include "ui/WordFrequencyDialog.h"
 
 #include <QBuffer>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QJsonArray>
+#include <QSettings>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -122,6 +135,116 @@ private:
     }
 
 private slots:
+    void undoHistoryDialogJumpsToAnyPoint()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("undo-history.tsra")));
+        const qint64 g = p.groups().first().id;
+        p.addDocument(g, "A", "uno");
+        p.addDocument(g, "B", "due");
+        p.addDocument(g, "C", "tre");
+        UndoHistoryDialog dlg(&p);
+        dlg.show();
+        auto *list = dlg.findChild<QListWidget *>();
+        QVERIFY(list);
+        QCOMPARE(dlg.rowCount(), 4); // current state + 3 undo steps
+        QCOMPARE(dlg.currentStateRow(), 0);
+
+        // The oldest step: undoing up to it empties the project.
+        dlg.selectRow(3);
+        QVERIFY(dlg.applySelected());
+        QCOMPARE(p.documents().size(), 0);
+        // The list followed the project's signal: 3 redo steps above the current state.
+        QCOMPARE(dlg.rowCount(), 4);
+        QCOMPARE(dlg.currentStateRow(), 3);
+
+        // Redo only up to the middle redo step (2 steps).
+        dlg.selectRow(1);
+        QVERIFY(dlg.applySelected());
+        QCOMPARE(p.documents().size(), 2);
+        QCOMPARE(dlg.currentStateRow(), 1);
+
+        // The marker itself does nothing.
+        dlg.selectRow(dlg.currentStateRow());
+        QVERIFY(!dlg.applySelected());
+        QCOMPARE(p.documents().size(), 2);
+    }
+
+    void teamDialogRoundAndImport()
+    {
+        const QString file = m_dir.filePath("team-ui.tsra");
+        const QString folder = m_dir.filePath("team-ui-shared");
+        Project m;
+        m.setAuthor("Resp");
+        QVERIFY(m.create(file));
+        const qint64 doc = m.addDocument(m.groups().first().id, "Testo", "Una frase da codificare bene.");
+        const qint64 code = m.addCode(0, "Tema", Qt::red);
+        m.addSegment(doc, code, 0, 3);
+        TeamDialog dialog(&m);
+        auto *table = dialog.findChild<QTableWidget *>();
+        QVERIFY(table);
+        QCOMPARE(table->rowCount(), 0);
+        QVERIFY(dialog.startRound({"Anna", "Bruno"}, folder));
+        QCOMPARE(table->rowCount(), 2);
+        QCOMPARE(table->item(0, 1)->text(), QString("Anna"));
+        QCOMPARE(table->item(1, 0)->text(), QString("1"));
+        const QString annaFile = QDir(folder).filePath(table->item(0, 2)->text());
+        QVERIFY(QFileInfo::exists(annaFile));
+        {
+            Project a;
+            QVERIFY(a.open(annaFile));
+            a.setAuthor("Anna");
+            a.addSegment(doc, a.findCode(0, "Tema"), 4, 9);
+        }
+        const QString result = dialog.importFiles({annaFile}, false);
+        QVERIFY2(result.contains("unita"), qPrintable(result));
+        QCOMPARE(m.allSegments().size(), 2);
+        QCOMPARE(table->item(0, 3)->text(), QString("Unita"));
+        QCOMPARE(table->item(1, 3)->text(), QString("Inviata"));
+        // The same copy again is refused with a reason, and nothing changes.
+        QVERIFY(dialog.importFiles({annaFile}, false).contains("non importata"));
+        QCOMPARE(m.allSegments().size(), 2);
+    }
+
+    void teamSyncDialogPublishesAndReads()
+    {
+        const QString base = m_dir.filePath("tsync-base.tsra");
+        const QString shared = m_dir.filePath("tsync-shared");
+        {
+            Project p;
+            QVERIFY(p.create(base));
+            p.addDocument(p.groups().first().id, "Testo", "Una frase da codificare bene.");
+            p.addCode(0, "Tema", Qt::red);
+        }
+        const QString fileB = m_dir.filePath("tsync-b.tsra");
+        {
+            Project p;
+            QVERIFY(p.open(base));
+            QVERIFY(p.saveCopyAs(fileB));
+        }
+        Project a, b;
+        QVERIFY(a.open(base));
+        QVERIFY(b.open(fileB));
+        a.setAuthor("Anna");
+        b.setAuthor("Bruno");
+        a.addSegment(a.documents().first().id, a.findCode(0, "Tema"), 0, 3);
+
+        TeamSyncDialog da(&a), db(&b);
+        da.setFolder(shared);
+        db.setFolder(shared);
+        QCOMPARE(da.folder(), shared);
+        QVERIFY(da.syncNow().contains("Pubblicato"));
+        const QString preview = db.syncNow(true);
+        QVERIFY2(preview.contains("ANTEPRIMA") && preview.contains("Anna"), qPrintable(preview));
+        QCOMPARE(b.allSegments().size(), 0);
+        const QString text = db.syncNow();
+        QVERIFY2(text.contains("1 codifiche"), qPrintable(text));
+        QCOMPARE(b.allSegments().size(), 1);
+        QVERIFY(db.syncNow().contains("nessuna novità"));
+        // A project file inside the shared folder is refused, with the reason.
+        db.setFolder(m_dir.path());
+        QVERIFY(db.syncNow().contains("non riuscita"));
+    }
     void mergeDialogShowsReportAndOptions()
     {
         const QString fileA = m_dir.filePath("merge-a.tsra"), fileB = m_dir.filePath("merge-b.tsra");
@@ -497,6 +620,405 @@ private slots:
         QCOMPARE(view.links().size(), 1);
     }
 
+    void transcriptDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("transcript.tsra")));
+        const qint64 d = p.addDocument(p.groups().first().id, "Intervista", "Domanda uno.\nRisposta due.");
+        QList<Timestamp> stamps;
+        Timestamp t1;
+        t1.textPos = 0;
+        t1.timeMs = 1000;
+        Timestamp t2;
+        t2.textPos = 13;
+        t2.timeMs = 65000;
+        stamps << t1 << t2;
+        QVERIFY(p.setTimestamps(d, stamps));
+
+        DocumentView view(&p);
+        view.resize(700, 400);
+        view.show();
+        view.openDocument(d);
+        auto *edit = view.findChild<QTextEdit *>();
+        QCOMPARE(view.cursorPosition(), 0);
+
+        TranscriptDialog dlg(&p, d, [&view] { return view.cursorPosition(); });
+        dlg.show();
+        auto *table = dlg.findChild<QTableWidget *>();
+        QCOMPARE(table->rowCount(), 2);
+        QCOMPARE(table->item(1, 0)->text(), QString("00:01:05.000"));
+        QCOMPARE(table->item(1, 1)->text(), QString("Risposta due."));
+
+        // Editing the text in the view moves the markers; the dialog follows.
+        view.setEditing(true);
+        QTextCursor c(edit->document());
+        c.setPosition(0);
+        c.insertText("Premessa. ");
+        QVERIFY(view.commitEdits());
+        QCOMPARE(p.timestamps(d)[0].textPos, 0);
+        QCOMPARE(p.timestamps(d)[1].textPos, 23);
+        QCOMPARE(table->item(1, 1)->text(), QString("Risposta due."));
+
+        // Inserting at a position, exporting, and the double click that goes to the text.
+        QVERIFY(dlg.insertAt(10, 500));
+        QCOMPARE(dlg.rowCount(), 3);
+        const QString out = m_dir.filePath("t.srt");
+        QVERIFY(dlg.exportTo(out));
+        QFile f(out);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(f.readAll()).contains("00:01:05,000 --> "));
+        QSignalSpy go(&dlg, &TranscriptDialog::positionActivated);
+        table->selectRow(2);
+        emit table->cellDoubleClicked(2, 1);
+        QCOMPARE(go.count(), 1);
+        QCOMPARE(go.last().at(1).toInt(), 23);
+
+        QPushButton *remove = nullptr;
+        for (QPushButton *btn : dlg.findChildren<QPushButton *>())
+            if (btn->text() == QStringLiteral("Elimina"))
+                remove = btn;
+        QVERIFY(remove && remove->isEnabled());
+        remove->click();
+        QCOMPARE(table->rowCount(), 2);
+        QVERIFY(p.undo());
+        QCOMPARE(table->rowCount(), 3);
+    }
+    // A WAV of silence (8 kHz, 8 bit, mono) to give the player something real to open.
+    static QString writeWav(const QString &file, int seconds)
+    {
+        const quint32 rate = 8000, n = rate * quint32(seconds);
+        QByteArray header;
+        QDataStream ds(&header, QIODevice::WriteOnly);
+        ds.setByteOrder(QDataStream::LittleEndian);
+        ds.writeRawData("RIFF", 4);
+        ds << quint32(36 + n);
+        ds.writeRawData("WAVEfmt ", 8);
+        ds << quint32(16) << quint16(1) << quint16(1) << rate << rate << quint16(1) << quint16(8);
+        ds.writeRawData("data", 4);
+        ds << n;
+        QFile f(file);
+        if (!f.open(QIODevice::WriteOnly))
+            return {};
+        f.write(header);
+        f.write(QByteArray(int(n), char(128)));
+        return file;
+    }
+    void useTemporarySettings()
+    {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_dir.filePath("settings"));
+    }
+
+    void mediaPlayerLogic()
+    {
+        useTemporarySettings();
+        MediaPlayerWidget w;
+        w.resize(640, 220);
+        w.show();
+        // Nothing to play: the message offers to relink the file.
+        QVERIFY(!w.setMedia(QString(), "rec/mancante.mp3"));
+        QVERIFY(w.problem().contains("mancante.mp3"));
+        QPushButton *relink = nullptr;
+        for (QPushButton *b : w.findChildren<QPushButton *>())
+            if (b->text().startsWith("Ricollega"))
+                relink = b;
+        QVERIFY(relink && relink->isVisible());
+        QSignalSpy relinkSpy(&w, &MediaPlayerWidget::relinkRequested);
+        relink->click();
+        QCOMPARE(relinkSpy.count(), 1);
+        w.seek(5000); // ignored without a recording
+        QCOMPARE(w.position(), qint64(0));
+
+        // A path that does not exist makes the backend complain later, but the logic below does not depend on it.
+        QVERIFY(w.setMedia(m_dir.filePath("logica.wav")));
+        QVERIFY(w.hasMedia());
+        w.handleDuration(10000);
+        w.seek(4000);
+        QCOMPARE(w.position(), qint64(4000));
+        w.skip(-5);
+        QCOMPARE(w.position(), qint64(0)); // never before the start
+        w.setRewindSeconds(2);
+        w.seek(4000);
+        w.rewind();
+        QCOMPARE(w.position(), qint64(2000));
+        w.skip(3);
+        QCOMPARE(w.position(), qint64(5000));
+        w.seek(99999);
+        QCOMPARE(w.position(), qint64(10000)); // nor after the end
+        w.setSpeed(1.5);
+        QCOMPARE(w.speed(), 1.5);
+
+        // Marks "Inizio qui" / "Fine qui" make the interval to code.
+        QPushButton *in = nullptr, *out = nullptr;
+        for (QPushButton *b : w.findChildren<QPushButton *>()) {
+            if (b->text() == "Inizio qui")
+                in = b;
+            if (b->text() == "Fine qui")
+                out = b;
+        }
+        QVERIFY(in && out);
+        QSignalSpy selSpy(&w, &MediaPlayerWidget::selectionChanged);
+        w.seek(2000);
+        in->click();
+        QVERIFY(!w.hasSelection()); // the end is still missing
+        w.seek(6000);
+        out->click();
+        QVERIFY(w.hasSelection());
+        QCOMPARE(w.selectionStart(), qint64(2000));
+        QCOMPARE(w.selectionEnd(), qint64(6000));
+        QVERIFY(selSpy.count() >= 1);
+
+        // Playing a range stops at its end; positions reported before the seek took effect do not stop it.
+        w.playRange(1000, 3000);
+        QCOMPARE(w.rangeEnd(), qint64(3000));
+        w.handlePosition(9000); // stale
+        QCOMPARE(w.rangeEnd(), qint64(3000));
+        w.handlePosition(1500);
+        QCOMPARE(w.rangeEnd(), qint64(3000));
+        w.handlePosition(3000);
+        QCOMPARE(w.rangeEnd(), qint64(-1));
+        w.playRange(4000, -1); // to the end of the recording
+        QCOMPARE(w.rangeEnd(), qint64(-1));
+        w.pause();
+
+        // Timeline: clicking seeks, dragging selects, coded intervals become bands in rows.
+        MediaTimeline *tl = w.timeline();
+        QCOMPARE(tl->duration(), qint64(10000));
+        QVERIFY(qAbs(tl->msAtX(tl->xAtMs(5000)) - 5000) < 40);
+        const int flatHeight = tl->sizeHint().height();
+        tl->setBands({{1, 1000, 5000, Qt::red, "a"}, {2, 3000, 8000, Qt::blue, "b"}, {3, 9000, 9500, Qt::green, QString()}});
+        QVERIFY(tl->sizeHint().height() > flatHeight); // overlapping intervals take two rows
+        QCOMPARE(tl->bandsAt(4000), (QList<qint64>{2, 1}));
+        QCOMPARE(tl->bandsAt(9200), (QList<qint64>{3}));
+        QVERIFY(tl->bandsAt(8500).isEmpty());
+        QSignalSpy seekSpy(tl, &MediaTimeline::seekRequested);
+        QTest::mouseClick(tl, Qt::LeftButton, Qt::NoModifier, QPoint(tl->xAtMs(7000), 6));
+        QCOMPARE(seekSpy.count(), 1);
+        QVERIFY(qAbs(w.position() - 7000) < 40);
+        QTest::mousePress(tl, Qt::LeftButton, Qt::NoModifier, QPoint(tl->xAtMs(2000), 6));
+        QTest::mouseMove(tl, QPoint(tl->xAtMs(4500), 6));
+        QTest::mouseRelease(tl, Qt::LeftButton, Qt::NoModifier, QPoint(tl->xAtMs(4500), 6));
+        QCOMPARE(seekSpy.count(), 1); // a drag is not a click
+        QVERIFY(qAbs(w.selectionStart() - 2000) < 40 && qAbs(w.selectionEnd() - 4500) < 40);
+        w.pause();
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void mediaPlayerRealFile()
+    {
+        useTemporarySettings();
+        MediaPlayerWidget w;
+        w.show();
+        QVERIFY(w.setMedia(writeWav(m_dir.filePath("real.wav"), 2)));
+        QElapsedTimer timer;
+        timer.start();
+        while (w.duration() == 0 && timer.elapsed() < 8000)
+            QTest::qWait(50);
+        if (w.duration() == 0)
+            QSKIP("Il backend multimediale non ha aperto il file: riproduzione non verificabile qui");
+        QVERIFY2(qAbs(w.duration() - 2000) < 150, qPrintable(QString::number(w.duration())));
+        QVERIFY(w.problem().isEmpty());
+        w.playRange(200, 900);
+        timer.restart();
+        while (!w.isPlaying() && timer.elapsed() < 3000)
+            QTest::qWait(50);
+        if (!w.isPlaying())
+            QSKIP("Nessun dispositivo audio: la riproduzione non parte");
+        timer.restart();
+        while (w.isPlaying() && timer.elapsed() < 4000)
+            QTest::qWait(50);
+        QVERIFY(!w.isPlaying()); // it paused at the end of the range
+        QVERIFY(w.position() >= 850 && w.position() < 1500);
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void mediaDocumentView()
+    {
+        useTemporarySettings();
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("mediadoc.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 audio = p.addRecordingDocument(g, m_dir.filePath("mancante.mp3"));
+        QVERIFY(audio > 0);
+        DocumentView view(&p);
+        view.resize(800, 520);
+        view.show();
+        view.openDocument(audio);
+        QVERIFY(view.isMedia() && !view.isImage() && !view.isPdf());
+        QVERIFY(view.player()->isVisible());
+        QVERIFY(!view.player()->hasMedia()); // the file is not there
+        QVERIFY(view.player()->problem().contains("mancante.mp3"));
+        QCOMPARE(view.cursorPosition(), -1);
+        QVERIFY(!view.hasSelection());
+
+        // Relinking (setDocumentMediaPath) makes the player load the file.
+        const QString wav = writeWav(m_dir.filePath("mediadoc.wav"), 10);
+        QVERIFY(p.setDocumentMediaPath(audio, p.storableMediaPath(wav)));
+        QVERIFY(view.player()->hasMedia());
+        view.player()->handleDuration(10000);
+
+        // An interval chosen on the timeline is coded as a time segment.
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        QCOMPARE(view.codeSelection(code), qint64(0)); // nothing selected
+        view.player()->setSelection(2000, 4000);
+        QVERIFY(view.hasSelection());
+        const qint64 seg = view.codeSelection(code);
+        QVERIFY(seg > 0);
+        const QList<Segment> segs = p.segmentsForDocument(audio, true);
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(segs[0].kind, SegmentKind::Time);
+        QCOMPARE(segs[0].tStartMs, qint64(2000));
+        QCOMPARE(segs[0].tEndMs, qint64(4000));
+        QVERIFY(!view.player()->timeline()->bandsAt(3000).isEmpty()); // shown under the timeline
+        view.player()->setSelection(0, 0);
+        view.selectRange(0, 1, seg); // "show in document": selects the interval and moves the playhead
+        QCOMPARE(view.player()->selectionStart(), qint64(2000));
+        QCOMPARE(view.player()->position(), qint64(2000));
+        QVERIFY(view.playSegment(segs[0]));
+        QCOMPARE(view.player()->rangeEnd(), qint64(4000));
+        view.player()->setSelection(5000, 7000);
+        QTest::qWait(50);
+        shot(&view, "media_player");
+        view.player()->pause();
+
+        // The segments panel shows the interval and can play it.
+        SegmentsPanel panel(&p);
+        panel.resize(900, 300);
+        panel.show();
+        panel.setActivation({}, {code});
+        auto *table = panel.findChild<QTableWidget *>();
+        QCOMPARE(table->rowCount(), 1);
+        QCOMPARE(table->item(0, 2)->text(), Media::formatRange(2000, 4000));
+        QToolButton *playButton = nullptr;
+        for (QToolButton *b : panel.findChildren<QToolButton *>())
+            if (b->text() == "Riproduci")
+                playButton = b;
+        QVERIFY(playButton && !playButton->isEnabled());
+        table->selectRow(0);
+        QVERIFY(playButton->isEnabled());
+        QSignalSpy playSpy(&panel, &SegmentsPanel::segmentPlayRequested);
+        playButton->click();
+        QCOMPARE(playSpy.count(), 1);
+        QCOMPARE(playSpy.last().at(0).toLongLong(), audio);
+        QCOMPARE(playSpy.last().at(1).toLongLong(), seg);
+
+        // A text document leaves media mode and, with no recording, hides the player.
+        const qint64 text = p.addDocument(g, "Testo", "Solo testo.");
+        view.openDocument(text);
+        QVERIFY(!view.isMedia());
+        QVERIFY(!view.player()->isVisible());
+        QVERIFY(!view.hasRecording());
+        QVERIFY(!view.playFromTextPosition(2));
+        QCOMPARE(view.insertTimestampAtCursor(), qint64(0));
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void transcriptPlayback()
+    {
+        useTemporarySettings();
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("playback.tsra")));
+        const qint64 g = p.groups().first().id;
+        const QString body = "Domanda uno.\nRisposta due.";
+        const qint64 d = p.addDocument(g, "Intervista", body);
+        QList<Timestamp> stamps(2);
+        stamps[0].textPos = 0;
+        stamps[0].timeMs = 1000;
+        stamps[1].textPos = 13;
+        stamps[1].timeMs = 6000;
+        QVERIFY(p.setTimestamps(d, stamps));
+        QVERIFY(p.setDocumentMediaPath(d, p.storableMediaPath(writeWav(m_dir.filePath("playback.wav"), 10))));
+
+        DocumentView view(&p);
+        view.resize(800, 520);
+        view.show();
+        view.openDocument(d);
+        auto *edit = view.findChild<QTextEdit *>();
+        QVERIFY(!view.isMedia());
+        QVERIFY(view.hasRecording());
+        QVERIFY(view.player()->hasMedia());
+        QVERIFY(view.player()->isVisible()); // compact player above the text
+        view.player()->handleDuration(10000);
+
+        // While playing, the text of the current time stamp is highlighted.
+        view.player()->handlePosition(500);
+        QCOMPARE(view.playbackSpan(), (std::pair<int, int>{0, 0}));
+        view.player()->handlePosition(2000);
+        QCOMPARE(view.playbackSpan(), (std::pair<int, int>{0, 13}));
+        view.player()->handlePosition(7000);
+        QCOMPARE(view.playbackSpan(), (std::pair<int, int>{13, int(body.size())}));
+        bool highlighted = false;
+        for (const QTextEdit::ExtraSelection &s : edit->extraSelections())
+            highlighted = highlighted || (s.cursor.selectionStart() == 13 && s.cursor.selectionEnd() == body.size());
+        QVERIFY(highlighted);
+        QTest::qWait(50);
+        shot(&view, "transcript_player");
+
+        // Ctrl+click on the text plays from the stamp that governs the point.
+        QTextCursor at(edit->document());
+        at.setPosition(15);
+        QTest::mouseClick(edit->viewport(), Qt::LeftButton, Qt::ControlModifier, edit->cursorRect(at).center());
+        QCOMPARE(view.player()->position(), qint64(6000));
+        QVERIFY(view.playFromTextPosition(3));
+        QCOMPARE(view.player()->position(), qint64(1000));
+
+        // F8: a stamp at the cursor with the current time; once per position.
+        at.setPosition(5);
+        edit->setTextCursor(at);
+        view.player()->handlePosition(3000);
+        const qint64 id = view.insertTimestampAtCursor();
+        QVERIFY(id > 0);
+        QCOMPARE(p.timestamps(d).size(), 3);
+        view.player()->handlePosition(3500);
+        QCOMPARE(view.insertTimestampAtCursor(), id);
+        QCOMPARE(p.timestamps(d).size(), 3);
+        QCOMPARE(p.timestamps(d)[1].textPos, 5);
+        QCOMPARE(p.timestamps(d)[1].timeMs, qint64(3500));
+        QCOMPARE(view.transcriptStamps().size(), 3);
+
+        // A coded passage plays from its stamp to the next one after it.
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(d, code, 6, 10);
+        Segment s;
+        for (const Segment &x : p.segmentsForDocument(d))
+            if (x.id == seg)
+                s = x;
+        QVERIFY(view.playSegment(s));
+        QCOMPARE(view.player()->rangeEnd(), qint64(6000)); // the stamp at 13
+        view.player()->pause();
+
+        // While transcribing (editing mode) the text is saved first and editing goes on.
+        view.setEditing(true);
+        QTextCursor c(edit->document());
+        c.setPosition(0);
+        c.insertText("Ok. ");
+        edit->setTextCursor(c);
+        view.player()->handlePosition(8000);
+        const qint64 id3 = view.insertTimestampAtCursor();
+        QVERIFY(id3 > 0);
+        QVERIFY(view.isEditing());
+        QCOMPARE(p.documentText(d), QString("Ok. ") + body);
+        bool found = false;
+        for (const Timestamp &ts : p.timestamps(d))
+            found = found || (ts.id == id3 && ts.textPos == 4 && ts.timeMs == 8000);
+        QVERIFY(found);
+        QVERIFY(view.commitEdits());
+        view.player()->pause();
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void mediaActions()
+    {
+        MainWindow w;
+        QMap<QString, QAction *> byKey;
+        for (QAction *a : w.findChildren<QAction *>())
+            if (!a->shortcut().isEmpty())
+                byKey.insert(a->shortcut().toString(), a);
+        QVERIFY(byKey.contains("F8") && byKey["F8"]->text().contains("time stamp"));
+        QVERIFY(byKey.contains("F9") && byKey.contains("F7"));
+        for (const char *key : {"F7", "F8", "F9"})
+            QVERIFY(!byKey[key]->isEnabled()); // nothing open, nothing to play
+    }
     void namesAreNotRichText()
     {
         // Rich text reads the files named by <img src> (a network share would get the user's credentials).
@@ -873,7 +1395,73 @@ private slots:
         QCOMPARE(dlg.preview()->item(1, 2)->text(), QString("s2"));
         Q_UNUSED(b);
         shot(&dlg, "summary-tables");
-    }    void dictionaryDialog()
+    }
+
+    void researchQuestionsDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("questions.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "Il lavoro da remoto cambia tutto.");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, 3, 19);
+        p.addResearchQuestion("Prima domanda");
+
+        ResearchQuestionsDialog dlg(&p);
+        dlg.show();
+        QCOMPARE(dlg.questionList()->count(), 1);
+        QVERIFY(dlg.currentQuestionId() > 0);
+        QCOMPARE(dlg.titleEdit()->text(), QString("Prima domanda"));
+
+        // New question, edits are saved (debounced; commitEdits flushes them).
+        const qint64 q = dlg.createQuestion("Seconda");
+        QCOMPARE(dlg.currentQuestionId(), q);
+        QCOMPARE(dlg.questionList()->count(), 2);
+        dlg.descriptionEdit()->setPlainText("Contesto");
+        dlg.themesEdit()->setPlainText("Uno\nDue");
+        dlg.conclusionsEdit()->setPlainText("Fine");
+        dlg.statusBox()->setCurrentIndex(2);
+        emit dlg.statusBox()->activated(2);
+        dlg.commitEdits();
+        const ResearchQuestion saved = p.researchQuestion(q);
+        QCOMPARE(saved.description, QString("Contesto"));
+        QCOMPARE(saved.themes, (QStringList{"Uno", "Due"}));
+        QCOMPARE(saved.conclusions, QString("Fine"));
+        QCOMPARE(saved.status, QuestionStatus::Answered);
+        QCOMPARE(dlg.descriptionEdit()->toPlainText(), QString("Contesto")); // own save does not reset the editors
+
+        // Switching question keeps the edits and loads the other one.
+        dlg.selectQuestion(p.researchQuestions().first().id);
+        QCOMPARE(dlg.titleEdit()->text(), QString("Prima domanda"));
+        QVERIFY(dlg.descriptionEdit()->toPlainText().isEmpty());
+        dlg.selectQuestion(q);
+        QCOMPARE(dlg.themesEdit()->toPlainText(), QString("Uno\nDue"));
+
+        // Evidence: a dropped code, a segment added through the project; it follows deletions.
+        QMimeData mime;
+        mime.setData(Ui::CodeMimeType, QByteArray::number(code));
+        QVERIFY(dlg.addDroppedMime(&mime));
+        QCOMPARE(dlg.evidenceList()->count(), 1);
+        QVERIFY(dlg.evidenceList()->item(0)->text().contains("Tema"));
+        p.addQuestionEvidence(q, EvidenceKind::Segment, seg);
+        QCOMPARE(dlg.evidenceList()->count(), 2);
+        QVERIFY(dlg.evidenceList()->item(1)->text().contains("lavoro da remoto"));
+        QSignalSpy activated(&dlg, &ResearchQuestionsDialog::evidenceActivated);
+        emit dlg.evidenceList()->itemDoubleClicked(dlg.evidenceList()->item(1));
+        QCOMPARE(activated.count(), 1);
+        QCOMPARE(activated.first().at(1).toLongLong(), seg);
+        p.deleteSegment(seg);
+        QCOMPARE(dlg.evidenceList()->count(), 1);
+
+        // Export by suffix.
+        QVERIFY(dlg.exportTo(m_dir.filePath("worksheet.html")));
+        QFile html(m_dir.filePath("worksheet.html"));
+        QVERIFY(html.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(html.readAll()).contains("Seconda"));
+        QVERIFY(dlg.exportTo(m_dir.filePath("worksheet.docx")));
+        shot(&dlg, "research-questions");
+    }
+
+    void dictionaryDialog()
     {
         Project p;
         QVERIFY(p.create(m_dir.filePath("dictionary.tsra")));
@@ -1052,6 +1640,101 @@ private slots:
         QCOMPARE(spy.count(), 1);
         QCOMPARE(spy.last()[1].toInt(), 10);
         QCOMPARE(spy.last()[3].toLongLong(), qint64(0)); // the segment belongs to the other project
+    }
+
+    void conceptMapDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("conceptmap.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "testo di prova");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        p.addSegment(doc, code, 0, 5);
+
+        ConceptMapDialog dlg(&p);
+        dlg.show();
+        QCOMPARE(dlg.currentMapId(), qint64(0));
+        QCOMPARE(dlg.addElement(MapNodeKind::Text, 0, "x"), qint64(0)); // no map yet
+
+        const qint64 map = dlg.createMap("Modello");
+        QCOMPARE(dlg.currentMapId(), map);
+        const qint64 n1 = dlg.addElement(MapNodeKind::Code, code, {}, QPointF(0, 0));
+        const qint64 n2 = dlg.addElement(MapNodeKind::Document, doc, {}, QPointF(300, 0));
+        const qint64 n3 = dlg.addElement(MapNodeKind::Text, 0, "Ipotesi", QPointF(150, 150));
+        QVERIFY(n1 > 0 && n2 > 0 && n3 > 0);
+        QCOMPARE(dlg.addElement(MapNodeKind::Code, code), n1); // the same element is not added twice
+        QTRY_COMPARE(dlg.nodeItemCount(), 3);
+
+        MapEdge e;
+        e.mapId = map;
+        e.fromNode = n1;
+        e.toNode = n2;
+        e.label = "compare in";
+        QVERIFY(p.addMapEdge(e) > 0);
+        QTRY_COMPARE(dlg.edgeItemCount(), 1);
+
+        // Export in the three formats.
+        for (const QString &name : {"mappa.png", "mappa.svg", "mappa.pdf"}) {
+            const QString file = m_dir.filePath(name);
+            QVERIFY2(dlg.exportTo(file), qPrintable(name));
+            QVERIFY(QFileInfo(file).size() > 100);
+        }
+        QVERIFY(QImage(m_dir.filePath("mappa.png")).width() > 100);
+
+        // Undo and redo of the project are reflected by the canvas.
+        QVERIFY(p.undo());
+        QTRY_COMPARE(dlg.edgeItemCount(), 0);
+        QVERIFY(p.redo());
+        QTRY_COMPARE(dlg.edgeItemCount(), 1);
+
+        // A deleted code leaves its node, marked as deleted.
+        QVERIFY(p.deleteCode(code));
+        QTRY_COMPARE(dlg.nodeItemCount(), 3);
+        QVERIFY(!ConceptMaps::resolve(p, p.mapNode(n1)).exists);
+
+        // Another map is empty; switching back restores the first.
+        const qint64 second = dlg.createMap("Altra");
+        QTRY_COMPARE(dlg.nodeItemCount(), 0);
+        dlg.selectMap(map);
+        QCOMPARE(dlg.nodeItemCount(), 3);
+        QVERIFY(second != map);
+    }
+
+    void sentimentDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("sentiment.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "D",
+                                         "Sono molto contento. Il lavoro e' terribile. Oggi piove.");
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        p.addSegment(doc, a, 0, 19);
+
+        SentimentDialog dlg(&p, [doc] { return QList<qint64>{doc}; }, [&p] { return p.allSegments(); });
+        SegmentsPanel panel(&p);
+        connect(&dlg, &SentimentDialog::passagesRequested, &panel, &SegmentsPanel::setPassages);
+        dlg.show();
+
+        dlg.setUnit(Sentiment::Unit::Sentences);
+        dlg.analyze();
+        QCOMPARE(dlg.items().size(), 3);
+        QTableWidget *table = dlg.findChildren<QTableWidget *>().first();
+        QCOMPARE(table->rowCount(), 3);
+        QCOMPARE(dlg.visibleRows(), 3);
+        QCOMPARE(dlg.setPolarityFilter(int(Sentiment::Polarity::Negative)), 1);
+        QCOMPARE(dlg.visibleRows(), 1);
+        QCOMPARE(dlg.setPolarityFilter(-1), 3);
+
+        dlg.setUnit(Sentiment::Unit::Segments);
+        dlg.analyze();
+        QCOMPARE(dlg.items().size(), 1);
+        QCOMPARE(dlg.items().first().score.polarity, Sentiment::Polarity::Positive);
+
+        dlg.setUnit(Sentiment::Unit::Sentences);
+        dlg.analyze();
+        const qsizetype before = p.allSegments().size();
+        QCOMPARE(dlg.codeItems("Sentiment"), 3);
+        QCOMPARE(p.allSegments().size(), before + 3);
+        QVERIFY(p.undo());
+        QCOMPARE(p.allSegments().size(), before);
     }
 
     void cooccurrenceDialog()
@@ -1296,6 +1979,58 @@ private slots:
 
         QVERIFY(m_project->undo());
         QVERIFY(!m_project->memo(id).id);
+    }
+
+    void topicsDialog()
+    {
+        Project p(this);
+        QVERIFY(p.create(m_dir.filePath("topics_ui.tsra")));
+        const qint64 g = p.groups().first().id;
+        const QStringList themeA = QString("lavoro stipendio ufficio colleghi turno contratto").split(' ');
+        const QStringList themeB = QString("famiglia figli casa genitori nonni cena").split(' ');
+        for (int d = 0; d < 8; ++d) {
+            const QStringList &words = d % 2 ? themeB : themeA;
+            QStringList text;
+            for (int i = 0; i < 30; ++i)
+                text << words[(i * 5 + d) % words.size()];
+            p.addDocument(g, QString("Doc %1").arg(d), text.join(' ') + ".\n" + text.mid(3).join(' ') + ".");
+        }
+        TopicsDialog dlg(&p, [] { return QList<qint64>{}; }, [] { return QList<Segment>{}; });
+        dlg.resize(900, 600);
+        dlg.setTopicCount(2);
+        dlg.setSeed(3);
+        dlg.run();
+        QVERIFY(dlg.isBusy());
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(dlg.result().topics.size(), 2);
+        auto *topics = dlg.findChild<QTableWidget *>("topicTable");
+        auto *units = dlg.findChild<QTableWidget *>("unitTable");
+        auto *passages = dlg.findChild<QTableWidget *>("passageTable");
+        QVERIFY(topics && units && passages);
+        QCOMPARE(topics->rowCount(), 2);
+        QCOMPARE(units->rowCount(), 8);
+        QVERIFY(passages->rowCount() > 0); // the first topic is selected
+        QSignalSpy opened(&dlg, &TopicsDialog::passageActivated);
+        emit passages->cellDoubleClicked(0, 0);
+        QCOMPARE(opened.count(), 1);
+
+        // Paragraph units: two per document.
+        dlg.setParagraphs(true);
+        dlg.run();
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(units->rowCount(), 16);
+
+        // Codes from the topics, one undo step.
+        const int before = p.codes().size();
+        Topics::CodeOptions options;
+        options.codeUnits = true;
+        const Topics::CodeResult made = dlg.createCodes(options);
+        QCOMPARE(made.codes.size(), 2);
+        QCOMPARE(p.codes().size(), before + 3);
+        QVERIFY(made.segments > 0);
+        QVERIFY(p.undo());
+        QCOMPARE(p.codes().size(), before);
+        QCOMPARE(p.allSegments().size(), 0);
     }
 
     void wordFrequencies()

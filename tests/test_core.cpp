@@ -1,28 +1,36 @@
-#include "FakeHttp.h"
+﻿#include "FakeHttp.h"
 #include "core/Agreement.h"
 #include "core/ai/AiAssist.h"
 #include "core/ai/AiCodes.h"
 #include "core/ai/AiClient.h"
 #include "core/ai/AiConfig.h"
+#include "core/ConceptMaps.h"
 #include "core/Cooccurrence.h"
 #include "core/Dictionaries.h"
 #include "core/Exporters.h"
 #include "core/ForeignImport.h"
 #include "core/Images.h"
 #include "core/Importers.h"
+#include "core/Media.h"
 #include "core/Merge.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
 #include "core/Report.h"
+#include "core/ResearchWorksheet.h"
 #include "core/RichText.h"
 #include "core/Retrieval.h"
+#include "core/Sentiment.h"
 #include "core/Stats.h"
+#include "core/Team.h"
+#include "core/TeamSync.h"
 #include "core/Summaries.h"
 #include "core/Survey.h"
 #include "core/TextUtils.h"
+#include "core/Transcripts.h"
 #include "core/VariableFilter.h"
 #include "core/Updater.h"
+#include "core/Topics.h"
 #include "core/WordFrequencies.h"
 #include "core/Xlsx.h"
 
@@ -220,6 +228,46 @@ private:
     }
 
 private slots:
+    void undoLabelsAndMultiStep()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("undo-steps.tsra")));
+        QVERIFY(p.undoLabels().isEmpty());
+        QVERIFY(p.redoLabels().isEmpty());
+        const qint64 g = p.groups().first().id;
+        const qint64 a = p.addDocument(g, "A", "uno");
+        const qint64 b = p.addDocument(g, "B", "due");
+        const qint64 c = p.addDocument(g, "C", "tre");
+        QCOMPARE(p.undoLabels().size(), 3);
+        const QString newest = p.undoLabel();
+        QCOMPARE(p.undoLabels().first(), newest);
+
+        // Back two steps in one go: only the first document is left.
+        QVERIFY(p.undoSteps(2));
+        QCOMPARE(p.undoLabels().size(), 1);
+        QCOMPARE(p.redoLabels().size(), 2);
+        QCOMPARE(p.redoLabels().first(), p.redoLabel());
+        QCOMPARE(p.documents().size(), 1);
+        QCOMPARE(p.documents().first().id, a);
+
+        // Forward again, all the way.
+        QVERIFY(p.redoSteps(2));
+        QCOMPARE(p.documents().size(), 3);
+        QVERIFY(p.redoLabels().isEmpty());
+        Q_UNUSED(b);
+        Q_UNUSED(c);
+
+        // Asking for more steps than exist stops at the end and reports failure.
+        QVERIFY(!p.undoSteps(10));
+        QVERIFY(p.undoLabels().isEmpty());
+        QCOMPARE(p.redoLabels().size(), 3);
+        QVERIFY(p.documents().isEmpty());
+
+        // A new change drops the redo steps.
+        p.addDocument(g, "D", "quattro");
+        QVERIFY(p.redoLabels().isEmpty());
+        QCOMPARE(p.undoLabels().size(), 1);
+    }
     void reportDocxPdfHtml()
     {
         Project p;
@@ -3048,7 +3096,7 @@ private slots:
         QVERIFY2(report.contains("2 video"), qPrintable(report));
         QVERIFY2(report.contains("1 immagini"), qPrintable(report));
         QVERIFY2(report.contains("1 casi"), qPrintable(report));
-        QVERIFY2(report.contains("1 mappe"), qPrintable(report));
+        QVERIFY2(report.contains("Mappe concettuali: 1"), qPrintable(report)); // the empty graph became a map
         QVERIFY2(report.contains("1 selezioni"), qPrintable(report));
         QVERIFY2(report.contains("1 PDF senza file"), qPrintable(report));
     }
@@ -3498,6 +3546,85 @@ private slots:
 
     // ---------------------------------------------------------------- word frequencies (#18)
 
+    void sentimentScoresAndNegation()
+    {
+        using namespace Sentiment;
+        QVERIFY(lexiconSize() > 200);
+        QCOMPARE(wordPolarity("Bellissimo"), 2);
+        QCOMPARE(wordPolarity("problemi"), -1);
+        QCOMPARE(wordPolarity(QString::fromUtf8("DIFFICOLT\xC3\x80")), -1); // accents and case are folded
+        QCOMPARE(wordPolarity("table"), 0);
+        QCOMPARE(wordPolarity("great", Language::Italian), 0);
+
+        const Score pos = score(QString::fromUtf8("Il servizio \xC3\xA8 stato ottimo, sono molto contento."));
+        const Score neg = score("The process was terrible and I am sad.");
+        const Score neutral = score("Il documento ha tre pagine.");
+        QCOMPARE(pos.polarity, Polarity::Positive);
+        QCOMPARE(neg.polarity, Polarity::Negative);
+        QCOMPARE(neutral.polarity, Polarity::Neutral);
+        QCOMPARE(neutral.hits, 0);
+        QVERIFY(pos.value > 0 && pos.value <= 1 && neg.value < 0 && neg.value >= -1);
+
+        // Negation flips (weaker), intensifiers strengthen, diminishers weaken, a comma stops both.
+        const double base = score("Il lavoro \xC3\xA8 buono").value;
+        QVERIFY(base > 0);
+        QVERIFY(score("Il lavoro non \xC3\xA8 buono").value < 0);
+        QVERIFY(score("Il lavoro non \xC3\xA8 buono").value > -base);
+        QVERIFY(score("Il lavoro \xC3\xA8 molto buono").value > base);
+        QVERIFY(score("Il lavoro \xC3\xA8 abbastanza buono").value < base);
+        QVERIFY(score("Non c'\xC3\xA8 nulla, buono").value > 0);
+        QVERIFY(score("I don't like it, it is not good").value < 0);
+        QVERIFY(score("This is not bad").value > 0);
+
+        // Reproducible.
+        QCOMPARE(score("molto bello ma un po' faticoso").value, score("molto bello ma un po' faticoso").value);
+        QCOMPARE(score("").polarity, Polarity::Neutral);
+    }
+
+    void sentimentPassagesAndCoding()
+    {
+        Project p;
+        QVERIFY(p.create(path("sentiment.tsra")));
+        const qint64 g = p.groups().first().id;
+        const QString text = "Mi piace molto lavorare qui. Il capo e' terribile! Oggi piove. Not bad at all";
+        const qint64 d = p.addDocument(g, "D", text);
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        p.addSegment(d, code, 0, 27);   // positive
+        p.addSegment(d, code, 28, 50);  // negative
+        p.addSegment(d, p.addCode(0, "Altro", Qt::blue), 0, 27); // same passage: counted once
+
+        const QList<Segment> segs = p.allSegments();
+        QCOMPARE(Sentiment::segmentPassages(segs).size(), 2);
+
+        const QList<Sentiment::Item> bySeg = Sentiment::analyze(p, Sentiment::Unit::Segments, segs, {}, Sentiment::Language::Auto);
+        QCOMPARE(bySeg.size(), 2);
+        QCOMPARE(bySeg[0].score.polarity, Sentiment::Polarity::Positive);
+        QCOMPARE(bySeg[1].score.polarity, Sentiment::Polarity::Negative);
+
+        const QList<Sentiment::Item> sentences = Sentiment::analyze(p, Sentiment::Unit::Sentences, {}, {d}, Sentiment::Language::Auto);
+        QCOMPARE(sentences.size(), 4);
+        QCOMPARE(sentences[2].score.polarity, Sentiment::Polarity::Neutral);
+        QCOMPARE(sentences[3].score.polarity, Sentiment::Polarity::Positive);
+        QCOMPARE(sentences[3].text, QString("Not bad at all"));
+
+        const QList<Sentiment::Item> docs = Sentiment::analyze(p, Sentiment::Unit::Documents, {}, {}, Sentiment::Language::Auto);
+        QCOMPARE(docs.size(), 1); // empty list = every document
+        QCOMPARE(docs[0].end, int(text.size()));
+
+        // Coding: three sub-codes under the chosen code, one undo step, nothing twice.
+        const qsizetype before = p.allSegments().size();
+        QCOMPARE(Sentiment::codeByPolarity(p, sentences, "Sentiment"), 4);
+        const qint64 parent = p.findCode(0, "Sentiment");
+        QVERIFY(parent);
+        QVERIFY(p.findCode(parent, Sentiment::polarityName(Sentiment::Polarity::Positive)));
+        QVERIFY(p.findCode(parent, Sentiment::polarityName(Sentiment::Polarity::Negative)));
+        QVERIFY(p.findCode(parent, Sentiment::polarityName(Sentiment::Polarity::Neutral)));
+        QCOMPARE(p.allSegments().size(), before + 4);
+        QVERIFY(p.undo());
+        QCOMPARE(p.allSegments().size(), before);
+        QCOMPARE(p.findCode(0, "Sentiment"), qint64(0));
+    }
+
     void wordFrequenciesCountsAndFilters()
     {
         Project p;
@@ -3845,8 +3972,8 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 11);
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(p.schemaVersion(), 15);
+        QCOMPARE(fileVersion(file), 15);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
@@ -3998,7 +4125,7 @@ private slots:
         QCOMPARE(fileVersion(file), 7);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(fileVersion(file), 15);
         const qint64 doc = p.documents().first().id;
         const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
         QVERIFY(a > 0);
@@ -4183,11 +4310,223 @@ private slots:
         QCOMPARE(fileVersion(file), 8);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(fileVersion(file), 15);
         const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
         QVERIFY(p.setSummary(doc, p.codes().first().id, "ok"));
         QVERIFY(p.addSummaryTable("T", "{}") > 0);
-    }    void wordCloudLayoutDoesNotOverlap()
+    }
+
+    // ---- research questions worksheet (issue #17)
+
+    void researchQuestionsCrud()
+    {
+        Project p;
+        QVERIFY(p.create(path("questions.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "Il lavoro da remoto cambia tutto.");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, 0, 17);
+        Memo m;
+        m.targetType = MemoTarget::Free;
+        m.title = "Idea";
+        m.body = "Una prima idea";
+        const qint64 memo = p.saveMemo(m);
+
+        QSignalSpy spy(&p, &Project::researchQuestionsChanged);
+        const qint64 q1 = p.addResearchQuestion("Come cambia il lavoro?");
+        const qint64 q2 = p.addResearchQuestion("Quali effetti sul benessere?");
+        QVERIFY(q1 > 0 && q2 > q1);
+        QVERIFY(spy.count() >= 2);
+        QCOMPARE(p.researchQuestions().size(), 2);
+        QCOMPARE(p.researchQuestion(q1).status, QuestionStatus::Open);
+
+        ResearchQuestion q = p.researchQuestion(q1);
+        q.description = "Descrizione";
+        q.status = QuestionStatus::InProgress;
+        q.themes = {" Flessibilità ", "", "Isolamento"};
+        q.conclusions = "Prime conclusioni";
+        q.notes = "Da rivedere";
+        QVERIFY(p.updateResearchQuestion(q));
+        q = p.researchQuestion(q1);
+        QCOMPARE(q.status, QuestionStatus::InProgress);
+        QCOMPARE(q.themes, (QStringList{"Flessibilità", "Isolamento"}));
+        QCOMPARE(q.conclusions, QString("Prime conclusioni"));
+        QCOMPARE(q.notes, QString("Da rivedere"));
+        QVERIFY(!q.uuid.isEmpty());
+
+        // Evidence: references, each element once; missing elements are refused.
+        QVERIFY(p.addQuestionEvidence(q1, EvidenceKind::Segment, seg));
+        QVERIFY(p.addQuestionEvidence(q1, EvidenceKind::Code, code));
+        QVERIFY(p.addQuestionEvidence(q1, EvidenceKind::Memo, memo));
+        QVERIFY(p.addQuestionEvidence(q1, EvidenceKind::Segment, seg)); // already there
+        QVERIFY(!p.addQuestionEvidence(q1, EvidenceKind::Segment, 9999));
+        QVERIFY(!p.addQuestionEvidence(9999, EvidenceKind::Segment, seg));
+        QList<QuestionEvidence> ev = p.questionEvidence(q1);
+        QCOMPARE(ev.size(), 3);
+        QCOMPARE(ev[0].kind, EvidenceKind::Segment);
+        QCOMPARE(ev[1].kind, EvidenceKind::Code);
+        QCOMPARE(ev[2].refId, memo);
+        QVERIFY(p.questionEvidence(q2).isEmpty());
+
+        // Order of the questions.
+        QVERIFY(p.moveResearchQuestion(q2, -1));
+        QCOMPARE(p.researchQuestions().first().id, q2);
+        QVERIFY(!p.moveResearchQuestion(q2, -1));
+        QVERIFY(p.undo());
+        QCOMPARE(p.researchQuestions().first().id, q1);
+
+        // Removing an evidence, and undoing it.
+        QVERIFY(p.removeQuestionEvidence(ev[1].id));
+        QCOMPARE(p.questionEvidence(q1).size(), 2);
+        QVERIFY(p.undo());
+        QCOMPARE(p.questionEvidence(q1).size(), 3);
+
+        // Evidence disappears with its element; undo brings it back.
+        QVERIFY(p.deleteSegment(seg));
+        QCOMPARE(p.questionEvidence(q1).size(), 2);
+        QVERIFY(p.undo());
+        QCOMPARE(p.questionEvidence(q1).size(), 3);
+        QVERIFY(p.deleteCode(code));
+        QCOMPARE(p.questionEvidence(q1).size(), 1); // the code and its segment are gone, the memo stays
+        QVERIFY(p.undo());
+        QCOMPARE(p.questionEvidence(q1).size(), 3);
+
+        // Deleting a question takes its evidence along and is one undo step.
+        QVERIFY(p.deleteResearchQuestion(q1));
+        QCOMPARE(p.researchQuestions().size(), 1);
+        QVERIFY(p.undo());
+        QCOMPARE(p.researchQuestions().size(), 2);
+        QCOMPARE(p.questionEvidence(q1).size(), 3);
+        QCOMPARE(p.researchQuestion(q1).themes.size(), 2);
+    }
+
+    void researchQuestionsMigrateFromV11()
+    {
+        const QString file = path("v11-questions.tsra");
+        {
+            Project old;
+            old.setMigrations(Project::builtInMigrations().mid(0, 10)); // up to schema 11
+            QVERIFY(old.create(file));
+        }
+        QCOMPARE(fileVersion(file), 11);
+        Project p;
+        QVERIFY(p.open(file));
+        QCOMPARE(fileVersion(file), 15);
+        QVERIFY(p.addResearchQuestion("Domanda") > 0);
+    }
+
+    void researchWorksheetExport()
+    {
+        Project p;
+        QVERIFY(p.create(path("worksheet.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista 1", "Il lavoro da remoto cambia tutto.");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, 3, 19, 0, "commento <b>");
+        Memo m;
+        m.targetType = MemoTarget::Free;
+        m.title = "Idea";
+        m.body = "Una prima idea";
+        const qint64 memo = p.saveMemo(m);
+        const qint64 q1 = p.addResearchQuestion("Come cambia il lavoro?");
+        const qint64 q2 = p.addResearchQuestion("Seconda");
+        ResearchQuestion q = p.researchQuestion(q1);
+        q.description = "Contesto";
+        q.themes = {"Flessibilità"};
+        q.conclusions = "Cambia molto";
+        q.notes = "nota riservata";
+        p.updateResearchQuestion(q);
+        p.addQuestionEvidence(q1, EvidenceKind::Segment, seg);
+        p.addQuestionEvidence(q1, EvidenceKind::Code, code);
+        p.addQuestionEvidence(q1, EvidenceKind::Memo, memo);
+
+        const Report::Document d = ResearchWorksheet::build(p, {});
+        const QString html = Report::toHtml(d);
+        QVERIFY(html.contains("Come cambia il lavoro?"));
+        QVERIFY(html.contains("lavoro da remoto"));   // the text of the segment, quoted
+        QVERIFY(html.contains("Intervista 1"));
+        QVERIFY(html.contains("Una prima idea"));
+        QVERIFY(html.contains("Flessibilità"));
+        QVERIFY(html.contains("Cambia molto"));
+        QVERIFY(html.contains("commento &lt;b&gt;")); // escaped
+        QVERIFY(!html.contains("nota riservata"));    // working notes only on request
+        ResearchWorksheet::Options withNotes;
+        withNotes.notes = true;
+        QVERIFY(Report::toHtml(ResearchWorksheet::build(p, withNotes)).contains("nota riservata"));
+        ResearchWorksheet::Options only;
+        only.questions = {q2};
+        const QString one = Report::toHtml(ResearchWorksheet::build(p, only));
+        QVERIFY(one.contains("Seconda") && !one.contains("Come cambia il lavoro?"));
+
+        QString error;
+        QVERIFY2(Report::writeHtml(path("worksheet.html"), d, &error), qPrintable(error));
+        QVERIFY2(Report::writeDocx(path("worksheet.docx"), d, &error), qPrintable(error));
+        QVERIFY2(Report::writePdf(path("worksheet.pdf"), d, &error), qPrintable(error));
+        QVERIFY(QFileInfo(path("worksheet.docx")).size() > 0);
+    }
+
+    void researchQuestionsMerge()
+    {
+        const QString a = path("rq-a.tsra"), b = path("rq-b.tsra");
+        {
+            Project base;
+            base.create(a);
+            const qint64 doc = base.addDocument(base.groups().first().id, "Intervista", "Il lavoro da remoto cambia tutto.");
+            const qint64 code = base.addCode(0, "Tema", Qt::red);
+            base.addSegment(doc, code, 0, 17);
+            base.addResearchQuestion("Domanda comune");
+            base.saveCopyAs(b);
+        }
+        {
+            Project pb;
+            QVERIFY(pb.open(b));
+            const qint64 doc = pb.documents().first().id;
+            const qint64 code = pb.findCode(0, "Tema");
+            const qint64 extra = pb.addSegment(doc, code, 18, 32);
+            Memo m;
+            m.targetType = MemoTarget::Free;
+            m.title = "Pensiero";
+            m.body = "Memo libero di B";
+            const qint64 memo = pb.saveMemo(m);
+            // The shared question gains evidence in B; a new one is only in B.
+            const qint64 shared = pb.researchQuestions().first().id;
+            pb.addQuestionEvidence(shared, EvidenceKind::Segment, extra);
+            const qint64 fresh = pb.addResearchQuestion("Domanda di B");
+            ResearchQuestion q = pb.researchQuestion(fresh);
+            q.themes = {"Tema B"};
+            q.conclusions = "Conclusione B";
+            pb.updateResearchQuestion(q);
+            pb.addQuestionEvidence(fresh, EvidenceKind::Code, code);
+            pb.addQuestionEvidence(fresh, EvidenceKind::Segment, extra);
+            pb.addQuestionEvidence(fresh, EvidenceKind::Memo, memo);
+        }
+        Project pa;
+        QVERIFY(pa.open(a));
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(b, &error), qPrintable(error));
+        const Merge::Report dry = Merge::analyze(pa, src, {});
+        QCOMPARE(dry.questionsNew, 1);
+        QCOMPARE(dry.questionsExtended, 1);
+        QCOMPARE(pa.researchQuestions().size(), 1); // a dry run writes nothing
+        const Merge::Report r = Merge::apply(pa, src, {});
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(r.questionsNew, 1);
+        QCOMPARE(r.questionsExtended, 1);
+        const QList<ResearchQuestion> qs = pa.researchQuestions();
+        QCOMPARE(qs.size(), 2);
+        QCOMPARE(pa.questionEvidence(qs[0].id).size(), 1);
+        QCOMPARE(qs[1].title, QString("Domanda di B"));
+        QCOMPARE(qs[1].themes, QStringList{"Tema B"});
+        QCOMPARE(qs[1].conclusions, QString("Conclusione B"));
+        const QList<QuestionEvidence> ev = pa.questionEvidence(qs[1].id);
+        QCOMPARE(ev.size(), 3);
+        QCOMPARE(pa.segment(ev[1].refId).start, 18);
+        QCOMPARE(pa.memo(ev[2].refId).body, QString("Memo libero di B"));
+        // Merging again changes nothing.
+        QCOMPARE(Merge::apply(pa, src, {}).questionsNew, 0);
+        QCOMPARE(pa.researchQuestions().size(), 2);
+    }
+
+    void wordCloudLayoutDoesNotOverlap()
     {
         QList<QSizeF> sizes;
         for (int i = 0; i < 40; ++i)
@@ -4446,6 +4785,336 @@ private slots:
         QCOMPARE(a.findCode(0, "Inutile"), qint64(0)); // codes nobody used with that author stay out
         QVERIFY(a.dictionaries().isEmpty());
         QCOMPARE(a.allSegments().size(), 3);
+    }
+
+    void teamworkRounds()
+    {
+        const QString file = path("team-manager.tsra");
+        const QString folder = path("team-shared");
+        qint64 doc = 0, tema = 0;
+        {
+            Project m;
+            QVERIFY(m.create(file));
+            m.setAuthor("Resp");
+            doc = m.addDocument(m.groups().first().id, "Intervista", "Mi piace lavorare da casa, ma il traffico pesa.");
+            tema = m.addCode(0, "Tema", Qt::red);
+            m.addSegment(doc, tema, 0, 14);
+            QCOMPARE(m.schemaVersion(), 15);
+            QVERIFY(m.teamCycles().isEmpty());
+            QCOMPARE(m.nextTeamCycleNumber(), 1);
+
+            QVERIFY(!Team::startCycle(m, {}, folder).ok);
+            QVERIFY(!Team::startCycle(m, {"Anna", " anna "}, folder).ok); // repeated
+            QVERIFY(!Team::startCycle(m, {"Anna", " "}, folder).ok);      // blank
+            QVERIFY(m.teamCycles().isEmpty());
+
+            const Team::StartResult r = Team::startCycle(m, {"Anna", "Bruno / B"}, folder);
+            QVERIFY2(r.ok, qPrintable(r.error));
+            QCOMPARE(r.number, 1);
+            QCOMPARE(r.files.size(), 2);
+            QVERIFY(QFileInfo::exists(r.files.at(0)));
+            QVERIFY(!QFileInfo(r.files.at(1)).fileName().contains('/'));
+            const QList<TeamCycle> cycles = m.teamCycles();
+            QCOMPARE(cycles.size(), 2);
+            QCOMPARE(cycles.at(0).member, QString("Anna"));
+            QVERIFY(cycles.at(0).status == TeamCycleStatus::Sent);
+            QCOMPARE(m.nextTeamCycleNumber(), 2);
+
+            // The copies know their coder and carry no history.
+            Project a;
+            QVERIFY(a.open(r.files.at(0)));
+            QCOMPARE(a.meta(Team::MemberKey), QString("Anna"));
+            QCOMPARE(a.meta(Team::CycleKey), QString("1"));
+            QVERIFY(a.teamCycles().isEmpty());
+            a.setAuthor("Anna");
+            a.addSegment(a.documents().first().id, a.findCode(0, "Tema"), 15, 30);
+            a.addSegment(a.documents().first().id, a.addCode(0, "Solo Anna", Qt::green), 0, 2);
+            a.setAuthor("Intruso"); // work by someone else in the copy stays out
+            a.addSegment(a.documents().first().id, a.findCode(0, "Tema"), 31, 46);
+        }
+        const QString annaFile = path("team-shared/" + QFileInfo(file).completeBaseName() + "_ciclo1_Anna.tsra");
+        QVERIFY(QFileInfo::exists(annaFile));
+
+        Project m;
+        QVERIFY(m.open(file));
+        m.setAuthor("Resp");
+        // A project that is not a copy of a round, and a copy of another project, are refused.
+        const Team::ReturnResult notCopy = Team::importReturned(m, file, Merge::TextConflict::ImportCopy);
+        QVERIFY(!notCopy.ok);
+        {
+            Project other;
+            QVERIFY(other.create(path("team-other.tsra")));
+            other.setMeta(Team::MemberKey, "Carla");
+            other.setMeta(Team::CycleKey, "1");
+        }
+        QVERIFY(!Team::importReturned(m, path("team-other.tsra"), Merge::TextConflict::ImportCopy).ok);
+
+        const Team::ReturnResult dry = Team::importReturned(m, annaFile, Merge::TextConflict::ImportCopy, true);
+        QVERIFY2(dry.ok, qPrintable(dry.error));
+        QCOMPARE(dry.member, QString("Anna"));
+        QCOMPARE(dry.report.segmentsNew, 2);
+        QCOMPARE(m.allSegments().size(), 1); // nothing written
+        QVERIFY(m.teamCycles().at(0).status == TeamCycleStatus::Sent);
+
+        const Team::ReturnResult done = Team::importReturned(m, annaFile, Merge::TextConflict::ImportCopy);
+        QVERIFY2(done.ok, qPrintable(done.error));
+        QCOMPARE(m.allSegments().size(), 3);
+        QVERIFY(m.findCode(0, "Solo Anna") > 0);
+        const TeamCycle c = m.teamCycles().at(0);
+        QVERIFY(c.status == TeamCycleStatus::Merged);
+        QVERIFY(c.returnedAt.isValid() && c.mergedAt.isValid());
+        QVERIFY(!c.report.isEmpty());
+        QVERIFY(m.teamCycles().at(1).status == TeamCycleStatus::Sent);
+        QCOMPARE(Agreement::authors(m), (QStringList{"Anna", "Resp"}));
+        QCOMPARE(Agreement::byAuthor(m.allSegments(), "Anna").size(), 2);
+
+        // Merged once only; the merge is one undo step; bookkeeping survives a reopen.
+        QVERIFY(!Team::importReturned(m, annaFile, Merge::TextConflict::ImportCopy).ok);
+        QVERIFY(m.undo());
+        QCOMPARE(m.allSegments().size(), 1);
+        // The round stays "merged" after the undo: it can be reopened by hand and imported again.
+        QVERIFY(m.setTeamCycleStatus(m.teamCycles().at(0).id, TeamCycleStatus::Sent));
+        QVERIFY(m.teamCycles().at(0).status == TeamCycleStatus::Sent);
+        QVERIFY(!m.teamCycles().at(0).mergedAt.isValid());
+        m.close();
+        QVERIFY(m.open(file));
+        QCOMPARE(m.teamCycles().size(), 2);
+        QVERIFY(m.deleteTeamCycle(m.teamCycles().at(1).id));
+        QCOMPARE(m.teamCycles().size(), 1);
+        QCOMPARE(Team::copyFileName("Mio progetto", 2, "A:b"), QString("Mio_progetto_ciclo2_A_b.tsra"));
+    }
+
+    void teamSyncChangeLogs()
+    {
+        const QString shared = path("sync-shared");
+        QDir().mkpath(shared);
+        const QString baseFile = path("sync-base.tsra");
+        {
+            Project b;
+            QVERIFY(b.create(baseFile));
+            b.addDocument(b.groups().first().id, "Intervista", "Mi piace lavorare da casa, ma il traffico pesa molto.");
+            b.addCode(0, "Tema", Qt::red);
+        }
+        // Three coders, each with their own copy of the same project.
+        const QStringList names = {"Anna", "Bruno", "Carla"};
+        QHash<QString, QString> files;
+        for (const QString &n : names) {
+            files[n] = path("sync-" + n + ".tsra");
+            Project b;
+            QVERIFY(b.open(baseFile));
+            QVERIFY(b.saveCopyAs(files[n]));
+        }
+        Project a, b;
+        QVERIFY(a.open(files["Anna"]));
+        QVERIFY(b.open(files["Bruno"]));
+        a.setAuthor("Anna");
+        b.setAuthor("Bruno");
+        const qint64 doc = a.documents().first().id;
+        const qint64 tema = a.findCode(0, "Tema");
+
+        // Refusals: no author, project file inside the shared folder, no folder.
+        {
+            Project nobody;
+            QVERIFY(nobody.open(files["Carla"]));
+            nobody.setAuthor("  ");
+            QVERIFY(!TeamSync::publish(nobody, shared).ok);
+            QVERIFY(!TeamSync::synchronize(nobody, shared).ok);
+        }
+        {
+            const QString inside = path("sync-shared/inside.tsra");
+            QVERIFY(QFile::copy(baseFile, inside));
+            QFile::setPermissions(inside, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+            Project in;
+            QVERIFY(in.open(inside));
+            in.setAuthor("Dentro");
+            const TeamSync::PublishResult pr = TeamSync::publish(in, shared);
+            QVERIFY(!pr.ok);
+            QVERIFY(pr.error.contains(".tsra"));
+            QVERIFY(!TeamSync::synchronize(in, shared).ok);
+            QVERIFY(!QDir(TeamSync::syncFolder(shared, in.meta("project_uuid"))).exists());
+        }
+        QVERIFY(!TeamSync::synchronize(b, path("sync-missing")).ok);
+        QVERIFY(TeamSync::synchronize(b, shared).warnings.size() == 1); // nobody published yet
+
+        // Anna codes and publishes.
+        const qint64 soloAnna = a.addCode(0, "Solo Anna", Qt::green);
+        const qint64 segA = a.addSegment(doc, tema, 0, 14, 0, "commento A");
+        a.addSegment(doc, soloAnna, 15, 30);
+        a.addLink(doc, 0, 3, doc, 10, 14, "legame");
+        Memo memo;
+        memo.targetType = MemoTarget::Document;
+        memo.targetId = doc;
+        memo.title = "Nota";
+        memo.body = "Prima versione";
+        const qint64 memoA = a.saveMemo(memo);
+        QVERIFY(a.setSummary(doc, tema, "Sintesi di Anna"));
+        const TeamSync::PublishResult pa = TeamSync::publish(a, shared);
+        QVERIFY2(pa.ok, qPrintable(pa.error));
+        QCOMPARE(pa.records, 5);
+        QCOMPARE(pa.generation, 1);
+        QVERIFY(QFileInfo::exists(pa.path));
+        QVERIFY(pa.path.contains(".sync"));
+        // Bruno's own work, published too; his own log is never applied to himself.
+        const qint64 segB = b.addSegment(doc, tema, 31, 46);
+        QVERIFY(TeamSync::publish(b, shared).ok);
+        QCOMPARE(TeamSync::members(b, shared), (QStringList{"Anna", "Bruno"}));
+
+        // Dry run writes nothing; the real run brings everything in one undo step.
+        const TeamSync::SyncReport dry = TeamSync::synchronize(b, shared, true);
+        QVERIFY2(dry.ok, qPrintable(dry.error));
+        QCOMPARE(dry.members.size(), 1);
+        QCOMPARE(dry.members.first().segmentsNew, 2);
+        QCOMPARE(b.allSegments().size(), 1);
+        const bool hadUndo = b.canUndo();
+        const TeamSync::SyncReport first = TeamSync::synchronize(b, shared);
+        QVERIFY2(first.ok, qPrintable(first.error));
+        QCOMPARE(first.members.first().segmentsNew, 2);
+        QCOMPARE(first.members.first().linksNew, 1);
+        QCOMPARE(first.members.first().memosNew, 1);
+        QCOMPARE(first.members.first().summariesNew, 1);
+        QCOMPARE(first.members.first().codesNew, 1); // "Solo Anna"
+        QVERIFY(first.conflicts.isEmpty());
+        QCOMPARE(b.allSegments().size(), 3);
+        QVERIFY(b.findCode(0, "Solo Anna") > 0);
+        QCOMPARE(b.links().size(), 1);
+        QCOMPARE(b.links().first().author, QString("Anna"));
+        QCOMPARE(b.memoFor(MemoTarget::Document, doc).body, QString("Prima versione"));
+        QCOMPARE(b.memoFor(MemoTarget::Document, doc).author, QString("Anna"));
+        QCOMPARE(b.summary(doc, tema).body, QString("Sintesi di Anna"));
+        QCOMPARE(b.summary(doc, tema).author, QString("Anna"));
+        QCOMPARE(Agreement::byAuthor(b.allSegments(), "Anna").size(), 2);
+        // Idempotent: a second run, and a forced re-read, change nothing.
+        const TeamSync::SyncReport again = TeamSync::synchronize(b, shared);
+        QVERIFY(again.members.first().unchanged);
+        QCOMPARE(again.changes(), 0);
+        const TeamSync::SyncReport forced = TeamSync::synchronize(b, shared, false, true);
+        QCOMPARE(forced.changes(), 0);
+        QCOMPARE(b.allSegments().size(), 3);
+        QCOMPARE(b.links().size(), 1);
+        QCOMPARE(b.memos().size(), 1);
+        // One undo step undoes it all; "forget" lets it be applied again.
+        QVERIFY(b.undo());
+        QCOMPARE(b.allSegments().size(), 1);
+        QCOMPARE(b.canUndo(), hadUndo);
+        QCOMPARE(TeamSync::synchronize(b, shared).changes(), 0); // remembered as read
+        TeamSync::resetState(b);
+        QCOMPARE(TeamSync::synchronize(b, shared).members.first().segmentsNew, 2);
+        QCOMPARE(b.allSegments().size(), 3);
+
+        // The author edits their texts, Bruno had not touched them: the new version replaces the old one.
+        QVERIFY(a.setSegmentComment(segA, "commento A rivisto"));
+        Memo m2 = a.memo(memoA);
+        m2.body = "Seconda versione";
+        QVERIFY(a.saveMemo(m2));
+        QCOMPARE(TeamSync::publish(a, shared).generation, 2);
+        const TeamSync::SyncReport upd = TeamSync::synchronize(b, shared);
+        QCOMPARE(upd.members.first().updated, 2);
+        QVERIFY(upd.conflicts.isEmpty());
+        QCOMPARE(b.memoFor(MemoTarget::Document, doc).body, QString("Seconda versione"));
+        QCOMPARE(b.memos().size(), 1);
+        bool found = false;
+        for (const Segment &s : b.allSegments())
+            if (s.author == "Anna" && s.start == 0)
+                found = s.comment == "commento A rivisto";
+        QVERIFY(found);
+
+        // Both sides edit the same memo: both texts are kept, and the case is reported (once per change).
+        Memo mine = b.memoFor(MemoTarget::Document, doc);
+        mine.body = "Seconda versione, con la mia aggiunta";
+        QVERIFY(b.saveMemo(mine));
+        m2 = a.memo(memoA);
+        m2.body = "Terza versione";
+        QVERIFY(a.saveMemo(m2));
+        QVERIFY(TeamSync::publish(a, shared).ok);
+        const TeamSync::SyncReport conflict = TeamSync::synchronize(b, shared);
+        QCOMPARE(conflict.members.first().conflicts, 1);
+        QCOMPARE(conflict.conflicts.size(), 1);
+        const QString joined = b.memoFor(MemoTarget::Document, doc).body;
+        QVERIFY(joined.contains("con la mia aggiunta") && joined.contains("Terza versione"));
+        QCOMPARE(TeamSync::synchronize(b, shared, false, true).conflicts.size(), 0); // not reported again
+
+        // What Bruno deleted after it was applied does not come back.
+        const qint64 anna2 = b.allSegments().first().id;
+        for (const Segment &s : b.allSegments())
+            if (s.author == "Anna" && s.start == 15)
+                QVERIFY(b.deleteSegment(s.id));
+        Q_UNUSED(anna2)
+        QCOMPARE(b.allSegments().size(), 2);
+        QCOMPARE(TeamSync::synchronize(b, shared, false, true).changes(), 0);
+        QCOMPARE(b.allSegments().size(), 2);
+
+        // Bruno's work reaches Anna, and the ordering of the two publications does not matter.
+        const TeamSync::SyncReport toAnna = TeamSync::synchronize(a, shared);
+        QVERIFY2(toAnna.ok, qPrintable(toAnna.error));
+        QCOMPARE(toAnna.members.first().segmentsNew, 1);
+        QCOMPARE(a.segment(a.allSegments().last().id).author, QString("Bruno"));
+        Q_UNUSED(segB)
+
+        // Damaged inputs are ignored with a warning and do not stop the others.
+        const QString dir = TeamSync::syncFolder(shared, a.meta("project_uuid"));
+        const QByteArray good = [&] {
+            QFile f(QDir(dir).filePath(TeamSync::logFileName("Anna")));
+            f.open(QIODevice::ReadOnly);
+            return f.readAll();
+        }();
+        auto writeFile = [&](const QString &name, const QByteArray &data) {
+            QFile f(QDir(dir).filePath(name));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(data);
+        };
+        QByteArray truncated = good.left(good.lastIndexOf('\n', good.size() - 3));
+        auto retitle = [&](const QByteArray &data, const QByteArray &from, const QByteArray &to) {
+            QByteArray copy = data;
+            copy.replace(from, to);
+            return copy;
+        };
+        writeFile("Carla.tsrlog", retitle(truncated, "\"member\":\"Anna\"", "\"member\":\"Carla\""));       // no end line
+        writeFile("Dario.tsrlog", "this is not a log\n");
+        writeFile("Elena.tsrlog", retitle(good, "\"member\":\"Anna\"", "\"member\":\"Elena\"")
+                                      .replace("\"project\":\"", "\"project\":\"x"));                    // another project
+        writeFile("Franca.tsrlog", retitle(good, "\"member\":\"Anna\"", "\"member\":\"Franca\"")
+                                       .replace("\"v\":1", "\"v\":99"));                                  // newer format
+        // A damaged line in the middle of an otherwise complete file: that record is lost, the others are read.
+        QList<QByteArray> lines = good.split('\n');
+        int segLine = -1;
+        for (int i = 0; i < lines.size(); ++i)
+            if (lines[i].contains("\"t\":\"seg\"") && segLine < 0)
+                segLine = i;
+        QVERIFY(segLine > 0);
+        lines[segLine] = "{\"t\":\"seg\",\"id\":";
+        writeFile("Gina.tsrlog", retitle(lines.join('\n'), "\"member\":\"Anna\"", "\"member\":\"Gina\""));
+        const int before = b.allSegments().size();
+        const TeamSync::SyncReport bad = TeamSync::synchronize(b, shared);
+        QVERIFY2(bad.ok, qPrintable(bad.error));
+        QCOMPARE(bad.ignoredFiles(), 4);
+        QVERIFY(bad.warnings.size() >= 5);
+        QVERIFY(b.allSegments().size() <= before + 1); // Gina's one good coding at most
+        for (const TeamSync::MemberReport &m : bad.members)
+            if (m.member == "Gina")
+                QVERIFY(!m.ignored);
+
+        // A document with another content on the two sides: its codings are not applied.
+        {
+            Project c;
+            QVERIFY(c.open(files["Carla"]));
+            c.setAuthor("Carla");
+            QVERIFY(c.updateDocumentText(c.documents().first().id, "Un testo tutto diverso da quello degli altri.", {}, {}));
+            QVERIFY(TeamSync::synchronize(c, shared).ok);
+            QCOMPARE(c.allSegments().size(), 0);
+        }
+        // Two members whose names give the same file name: the second one does not overwrite the first.
+        {
+            Project x, y;
+            QVERIFY(x.open(files["Carla"]));
+            QVERIFY(y.open(files["Carla"]));
+            x.setAuthor("A:b");
+            y.setAuthor("A/b");
+            QVERIFY(TeamSync::publish(x, shared).ok);
+            const TeamSync::PublishResult clash = TeamSync::publish(y, shared);
+            QVERIFY(!clash.ok);
+            QVERIFY(TeamSync::publish(x, shared).ok); // the owner can publish again
+        }
+        QCOMPARE(TeamSync::logFileName("A:b"), QString("A_b.tsrlog"));
     }
 
     void mergeMediaAndOlderSchemas()
@@ -5155,11 +5824,240 @@ private slots:
         QCOMPARE(Ai::describeInput(1, 1), QString("1 documento, ~1 parola"));
     }
 
+    void conceptMapsPersistAndUndo()
+    {
+        const QString file = path("maps.tsra");
+        qint64 mapId = 0, code = 0, doc = 0, memo = 0;
+        {
+            Project p;
+            QVERIFY(p.create(file));
+            doc = p.addDocument(p.groups().first().id, "Intervista", "testo di prova");
+            code = p.addCode(0, "Tema", Qt::red);
+            Memo m;
+            m.targetType = MemoTarget::Free;
+            m.title = "Idea";
+            memo = p.saveMemo(m);
+            mapId = p.addConceptMap("Modello");
+            QVERIFY(mapId > 0);
+            MapNode a;
+            a.mapId = mapId;
+            a.kind = MapNodeKind::Code;
+            a.refId = code;
+            a.x = 10.5;
+            a.y = -20;
+            MapNode b;
+            b.mapId = mapId;
+            b.kind = MapNodeKind::Document;
+            b.refId = doc;
+            b.x = 200;
+            MapNode c;
+            c.mapId = mapId;
+            c.label = "Ipotesi libera";
+            c.y = 100;
+            c.w = 120;
+            c.h = 40;
+            ConceptMaps::Style st;
+            st.color = QColor("#336699");
+            st.width = 4;
+            st.line = "dash";
+            c.styleJson = ConceptMaps::styleToJson(st);
+            const qint64 na = p.addMapNode(a), nb = p.addMapNode(b), nc = p.addMapNode(c);
+            QVERIFY(na > 0 && nb > 0 && nc > 0);
+            MapEdge e1{0, mapId, na, nb, "compare in", {}, {}};
+            MapEdge e2{0, mapId, nb, nc, "suggerisce", st.color.isValid() ? ConceptMaps::styleToJson(st) : QString(), {}};
+            QVERIFY(p.addMapEdge(e1) > 0);
+            QVERIFY(p.addMapEdge(e2) > 0);
+        }
+        Project p;
+        QVERIFY(p.open(file));
+        QCOMPARE(p.conceptMaps().size(), 1);
+        QCOMPARE(p.conceptMaps().first().name, QString("Modello"));
+        QList<MapNode> nodes = p.mapNodes(mapId);
+        QCOMPARE(nodes.size(), 3);
+        QCOMPARE(nodes[0].x, 10.5);
+        QCOMPARE(nodes[0].y, -20.0);
+        QCOMPARE(nodes[1].kind, MapNodeKind::Document);
+        QCOMPARE(nodes[2].label, QString("Ipotesi libera"));
+        QCOMPARE(nodes[2].w, 120.0);
+        const ConceptMaps::Style st = ConceptMaps::styleFromJson(nodes[2].styleJson);
+        QCOMPARE(st.color, QColor("#336699"));
+        QCOMPARE(st.width, 4);
+        QCOMPARE(st.line, QString("dash"));
+        QCOMPARE(p.mapEdges(mapId).size(), 2);
+        QCOMPARE(p.mapEdges(mapId)[1].label, QString("suggerisce"));
+
+        // What a node shows follows its target; a deleted target leaves a marked node.
+        QCOMPARE(ConceptMaps::resolve(p, nodes[0]).caption, QString("Tema"));
+        QVERIFY(ConceptMaps::resolve(p, nodes[0]).color == QColor(Qt::red));
+        QVERIFY(p.deleteCode(code));
+        const ConceptMaps::Target gone = ConceptMaps::resolve(p, p.mapNodes(mapId)[0]);
+        QVERIFY(!gone.exists);
+        QVERIFY(gone.caption.contains("eliminato"));
+        QCOMPARE(p.mapNodes(mapId).size(), 3);
+
+        // Moving a node is one undo step; deleting a node removes its arrows, and undo brings them back.
+        nodes = p.mapNodes(mapId);
+        nodes[1].x = 999;
+        QVERIFY(p.updateMapNode(nodes[1]));
+        QCOMPARE(p.mapNode(nodes[1].id).x, 999.0);
+        QVERIFY(p.undo());
+        QCOMPARE(p.mapNode(nodes[1].id).x, 200.0);
+        QVERIFY(p.deleteMapNode(nodes[1].id));
+        QCOMPARE(p.mapNodes(mapId).size(), 2);
+        QCOMPARE(p.mapEdges(mapId).size(), 0);
+        QVERIFY(p.undo());
+        QCOMPARE(p.mapNodes(mapId).size(), 3);
+        QCOMPARE(p.mapEdges(mapId).size(), 2);
+
+        // Deleting the map removes everything; undo restores it.
+        QVERIFY(p.deleteConceptMap(mapId));
+        QVERIFY(p.conceptMaps().isEmpty());
+        QVERIFY(p.mapNodes(mapId).isEmpty());
+        QVERIFY(p.undo());
+        QCOMPARE(p.mapNodes(mapId).size(), 3);
+        QCOMPARE(p.mapEdges(mapId).size(), 2);
+    }
+
+    void conceptMapTemplates()
+    {
+        Project p;
+        QVERIFY(p.create(path("map-templates.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "Uno", "aaaa bbbb cccc");
+        const qint64 d2 = p.addDocument(g, "Due", "dddd eeee");
+        const qint64 root = p.addCode(0, "Radice", Qt::red);
+        const qint64 k1 = p.addCode(root, "Figlio 1", Qt::blue);
+        const qint64 k2 = p.addCode(root, "Figlio 2", Qt::green);
+        p.addCode(k1, "Nipote", Qt::yellow);
+        p.addSegment(d1, root, 0, 4);
+        p.addSegment(d1, root, 5, 9);
+        p.addSegment(d2, root, 0, 4);
+        p.addSegment(d1, k1, 0, 4);
+        p.addSegment(d1, k2, 10, 14);
+        const qint64 map = p.addConceptMap("T");
+
+        QCOMPARE(ConceptMaps::addCodeWithSubcodes(p, map, root), 4);
+        QCOMPARE(p.mapNodes(map).size(), 4);
+        QCOMPARE(p.mapEdges(map).size(), 3);
+        QVERIFY(p.undo()); // one step for the whole template
+        QVERIFY(p.mapNodes(map).isEmpty());
+
+        QCOMPARE(ConceptMaps::addCodeWithDocuments(p, map, root), 3);
+        const QList<MapEdge> edges = p.mapEdges(map);
+        QCOMPARE(edges.size(), 2);
+        QCOMPARE(edges[0].label, QString("2")); // two segments in "Uno"
+        QCOMPARE(edges[1].label, QString("1"));
+        QVERIFY(p.undo());
+
+        // Overlapping codings of root and k1 on [0,4): one co-occurrence; k2 stays apart.
+        QCOMPARE(ConceptMaps::addCooccurrences(p, map, {root, k1, k2}), 3);
+        QCOMPARE(p.mapEdges(map).size(), 1);
+        QCOMPARE(p.mapEdges(map).first().label, QString("1"));
+        QCOMPARE(ConceptMaps::addCodeWithSubcodes(p, 9999, root), 0);
+    }
+
+    void conceptMapsQdpxRoundTripAndMerge()
+    {
+        Project p;
+        QVERIFY(p.create(path("map-src.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "testo di prova");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, 0, 5);
+        Memo m;
+        m.targetType = MemoTarget::Free;
+        m.title = "Idea";
+        const qint64 memo = p.saveMemo(m);
+        const qint64 map = p.addConceptMap("Modello");
+        auto node = [&](MapNodeKind k, qint64 ref, const QString &label, double x, double y) {
+            MapNode n;
+            n.mapId = map;
+            n.kind = k;
+            n.refId = ref;
+            n.label = label;
+            n.x = x;
+            n.y = y;
+            n.w = 100;
+            n.h = 40;
+            return p.addMapNode(n);
+        };
+        const qint64 n1 = node(MapNodeKind::Code, code, "", 10, 20);
+        const qint64 n2 = node(MapNodeKind::Document, doc, "", 300, 20);
+        const qint64 n3 = node(MapNodeKind::Memo, memo, "", 10, 200);
+        const qint64 n4 = node(MapNodeKind::Segment, seg, "", 300, 200);
+        const qint64 n5 = node(MapNodeKind::Text, 0, "Libero", 150, 100);
+        MapEdge e;
+        e.mapId = map;
+        e.fromNode = n1;
+        e.toNode = n2;
+        e.label = "in";
+        ConceptMaps::Style st;
+        st.color = QColor("#aa0000");
+        e.styleJson = ConceptMaps::styleToJson(st);
+        QVERIFY(p.addMapEdge(e) > 0);
+        e.fromNode = n3;
+        e.toNode = n4;
+        e.label = "su";
+        e.styleJson.clear();
+        QVERIFY(p.addMapEdge(e) > 0);
+        e.fromNode = n5;
+        e.toNode = n1;
+        e.label = "causa";
+        QVERIFY(p.addMapEdge(e) > 0);
+
+        QString err, report;
+        QVERIFY2(Qdpx::exportProject(p, path("map.qdpx"), &err), qPrintable(err));
+        Project q;
+        QVERIFY(q.create(path("map-dst.tsra")));
+        QVERIFY2(Qdpx::importProject(q, path("map.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(q.conceptMaps().size(), 1);
+        const qint64 qm = q.conceptMaps().first().id;
+        QCOMPARE(q.conceptMaps().first().name, QString("Modello"));
+        const QList<MapNode> nodes = q.mapNodes(qm);
+        QCOMPARE(nodes.size(), 5);
+        QCOMPARE(nodes[0].kind, MapNodeKind::Code);
+        QCOMPARE(q.code(nodes[0].refId).name, QString("Tema"));
+        QCOMPARE(nodes[0].x, 10.0);
+        QCOMPARE(nodes[0].w, 100.0);
+        QCOMPARE(nodes[1].kind, MapNodeKind::Document);
+        QCOMPARE(q.document(nodes[1].refId).name, QString("Intervista"));
+        QCOMPARE(nodes[2].kind, MapNodeKind::Memo);
+        QCOMPARE(nodes[3].kind, MapNodeKind::Segment);
+        QCOMPARE(nodes[4].kind, MapNodeKind::Text);
+        QCOMPARE(nodes[4].label, QString("Libero"));
+        const QList<MapEdge> edges = q.mapEdges(qm);
+        QCOMPARE(edges.size(), 3);
+        QCOMPARE(edges[0].label, QString("in"));
+        QCOMPARE(edges[0].fromNode, nodes[0].id);
+        QCOMPARE(edges[0].toNode, nodes[1].id);
+        QCOMPARE(ConceptMaps::styleFromJson(edges[0].styleJson).color, QColor("#aa0000"));
+        QCOMPARE(edges[2].fromNode, nodes[4].id);
+
+        // Merge into a project that has the same code and document: the map comes along, linked to them.
+        p.close();
+        Project t;
+        QVERIFY(t.create(path("map-target.tsra")));
+        Merge::Source src;
+        QVERIFY2(src.load(path("map-src.tsra"), &err), qPrintable(err));
+        const Merge::Report rep = Merge::apply(t, src, {});
+        QVERIFY2(rep.ok, qPrintable(rep.error));
+        QCOMPARE(rep.conceptMapsNew, 1);
+        QCOMPARE(t.conceptMaps().size(), 1);
+        const QList<MapNode> mn = t.mapNodes(t.conceptMaps().first().id);
+        QCOMPARE(mn.size(), 5);
+        QCOMPARE(t.code(mn[0].refId).name, QString("Tema"));
+        QCOMPARE(t.document(mn[1].refId).name, QString("Intervista"));
+        QCOMPARE(mn[2].kind, MapNodeKind::Text); // memo nodes become text with their caption
+        QCOMPARE(mn[2].label, QString("Idea"));
+        QCOMPARE(t.mapEdges(t.conceptMaps().first().id).size(), 3);
+        // A second merge adds nothing.
+        QCOMPARE(Merge::apply(t, src, {}).conceptMapsNew, 0);
+    }
+
     void aiLogInProject()
     {
         Project p;
         QVERIFY(p.create(path("ailog.tsra")));
-        QCOMPARE(p.schemaVersion(), 11);
+        QCOMPARE(p.schemaVersion(), 15);
         QVERIFY(!p.aiLogEnabled());
         QCOMPARE(p.addAiLog("f", "local", "m", "in", "out"), qint64(0)); // off by default
         p.setAiLogEnabled(true);
@@ -5496,7 +6394,527 @@ private slots:
             QCOMPARE(run.response().kind, Ai::ErrorKind::Cancelled);
         }
     }
-};
+    // ------------------------------------------------------------ transcripts with time stamps (issue #29)
+
+    void transcriptTimeFormats()
+    {
+        QCOMPARE(Transcripts::formatTime(3723000), QString("01:02:03"));
+        QCOMPARE(Transcripts::formatTime(3723450, true), QString("01:02:03.450"));
+        QCOMPARE(Transcripts::parseTime("01:02:03"), qint64(3723000));
+        QCOMPARE(Transcripts::parseTime("2:03"), qint64(123000));
+        QCOMPARE(Transcripts::parseTime("00:00:01,5"), qint64(1500));
+        QCOMPARE(Transcripts::parseTime("1:02:03.045"), qint64(3723045));
+        QCOMPARE(Transcripts::parseTime("12"), qint64(12000));
+        QCOMPARE(Transcripts::parseTime("abc"), qint64(-1));
+        QCOMPARE(Transcripts::parseTime("1:75"), qint64(-1));
+    }
+
+    void transcriptParseSrtVtt()
+    {
+        const QString srt = "1\r\n00:00:01,000 --> 00:00:03,500\r\nBuongiorno a tutti.\r\n\r\n"
+                            "2\r\n00:00:04,000 --> 00:00:06,000\r\nPrima riga\r\nseconda riga\r\n\r\n"
+                            "3\r\n00:01:00,250 --> 00:01:02,000\r\nUltima.\r\n";
+        const Transcripts::Parsed p = Transcripts::parseSrt(srt);
+        QVERIFY(p.ok);
+        QCOMPARE(p.text, QString("Buongiorno a tutti.\nPrima riga seconda riga\nUltima."));
+        QCOMPARE(p.stamps.size(), 3);
+        QCOMPARE(p.stamps[0].textPos, 0);
+        QCOMPARE(p.stamps[0].timeMs, qint64(1000));
+        QCOMPARE(p.text.mid(p.stamps[1].textPos, 5), QString("Prima"));
+        QCOMPARE(p.stamps[2].timeMs, qint64(60250));
+        QCOMPARE(p.text.mid(p.stamps[2].textPos), QString("Ultima."));
+
+        const QString vtt = "WEBVTT\n\nNOTE un commento\n\nintro\n00:01.000 --> 00:03.000 align:start\n<v Anna>Ciao</v> <c.x>mondo</c>\n\n"
+                            "01:00:00.000 --> 01:00:02.000\nDopo un'ora\n";
+        const Transcripts::Parsed v = Transcripts::parseVtt(vtt);
+        QVERIFY(v.ok);
+        QCOMPARE(v.text, QString("Ciao mondo\nDopo un'ora"));
+        QCOMPARE(v.stamps[0].timeMs, qint64(1000));
+        QCOMPARE(v.stamps[1].timeMs, qint64(3600000));
+        QVERIFY(!Transcripts::parseSrt("niente di tutto questo").ok);
+    }
+
+    void transcriptParseBracketedAndExport()
+    {
+        const QString src = "[00:00:05] Domanda: come stai?\n[00:00:12.500] Risposta: bene.\nSenza marcatore.";
+        const Transcripts::Parsed p = Transcripts::parseBracketed(src);
+        QVERIFY(p.ok);
+        QCOMPARE(p.text, QString("Domanda: come stai?\nRisposta: bene.\nSenza marcatore."));
+        QCOMPARE(p.stamps.size(), 2);
+        QCOMPARE(p.stamps[1].timeMs, qint64(12500));
+        QCOMPARE(p.text.mid(p.stamps[1].textPos, 8), QString("Risposta"));
+        QVERIFY(!Transcripts::parseBracketed("solo [01:00] uno").ok); // a single marker is not a transcript
+
+        const QString back = Transcripts::exportTranscript(p.text, p.stamps, Transcripts::Format::Text);
+        const Transcripts::Parsed again = Transcripts::parseBracketed(back);
+        QCOMPARE(again.text, p.text);
+        QCOMPARE(again.stamps.size(), 2);
+        QCOMPARE(again.stamps[0].timeMs, qint64(5000));
+        QCOMPARE(again.stamps[1].textPos, p.stamps[1].textPos);
+
+        const QString srt = Transcripts::exportTranscript(p.text, p.stamps, Transcripts::Format::Srt);
+        QVERIFY(srt.startsWith("1\n00:00:05,000 --> 00:00:12,500\nDomanda: come stai?\n\n2\n00:00:12,500 --> 00:00:15,500\n"));
+        const Transcripts::Parsed fromSrt = Transcripts::parseSrt(srt);
+        QCOMPARE(fromSrt.stamps.size(), 2);
+        QCOMPARE(fromSrt.stamps[1].timeMs, qint64(12500));
+        const QString vtt = Transcripts::exportTranscript(p.text, p.stamps, Transcripts::Format::Vtt);
+        QVERIFY(vtt.startsWith("WEBVTT\n\n00:00:05.000 --> 00:00:12.500\n"));
+    }
+
+    void transcriptTimestampsInProject()
+    {
+        Project p;
+        QVERIFY(p.create(path("ts.tsra")));
+        QCOMPARE(p.schemaVersion(), 15);
+        const qint64 g = p.groups().first().id;
+        const qint64 d = p.addDocument(g, "Intervista", "Uno due tre quattro");
+        QSignalSpy spy(&p, &Project::timestampsChanged);
+        const qint64 t1 = p.addTimestamp(d, 0, 1000);
+        const qint64 t2 = p.addTimestamp(d, 8, 5000); // "tre"
+        QVERIFY(t1 > 0 && t2 > 0);
+        QVERIFY(spy.count() >= 2);
+        QCOMPARE(p.addTimestamp(d, 999, 0), qint64(0));  // outside the text
+        QCOMPARE(p.addTimestamp(d, 3, -1), qint64(0));   // negative time
+        QCOMPARE(p.timestamps(d).size(), 2);
+
+        // Editing the text before the second stamp moves it; editing after leaves it.
+        QVERIFY(p.updateDocumentText(d, "Zero Uno due tre quattro", {}, {}));
+        QCOMPARE(p.timestamps(d)[0].textPos, 0);
+        QCOMPARE(p.timestamps(d)[1].textPos, 13);
+        QCOMPARE(p.documentText(d).mid(13, 3), QString("tre"));
+        QVERIFY(p.updateDocumentText(d, "Zero Uno due tre", {}, {}));
+        QCOMPARE(p.timestamps(d)[1].textPos, 13);
+        // The text around a stamp is removed: the stamp stays at the edit.
+        QVERIFY(p.updateDocumentText(d, "Zero tre", {}, {}));
+        QVERIFY(p.timestamps(d)[1].textPos >= 5 && p.timestamps(d)[1].textPos <= 8);
+
+        QVERIFY(p.setTimestampTime(t2, 7000));
+        QCOMPARE(p.timestamps(d)[1].timeMs, qint64(7000));
+        QVERIFY(p.shiftTimestamps(d, -2000));
+        QCOMPARE(p.timestamps(d)[0].timeMs, qint64(0)); // clamped
+        QCOMPARE(p.timestamps(d)[1].timeMs, qint64(5000));
+
+        QVERIFY(p.setDocumentMediaPath(d, "C:/rec/intervista.mp3"));
+        QCOMPARE(p.documentMediaPath(d), QString("C:/rec/intervista.mp3"));
+        QVERIFY(p.undo());
+        QVERIFY(p.documentMediaPath(d).isEmpty());
+        QVERIFY(p.undo()); // shift
+        QCOMPARE(p.timestamps(d)[1].timeMs, qint64(7000));
+        QVERIFY(p.deleteTimestamp(t1));
+        QCOMPARE(p.timestamps(d).size(), 1);
+        QVERIFY(p.undo());
+        QCOMPARE(p.timestamps(d).size(), 2);
+
+        QList<Timestamp> repl;
+        Timestamp a;
+        a.textPos = 2;
+        a.timeMs = 10;
+        Timestamp bad;
+        bad.textPos = 500;
+        bad.timeMs = 10;
+        repl << a << bad;
+        QVERIFY(p.setTimestamps(d, repl));
+        QCOMPARE(p.timestamps(d).size(), 1);
+
+        QVERIFY(p.deleteDocument(d));
+        QCOMPARE(p.timestamps(d).size(), 0);
+    }
+
+    void transcriptImportAndMerge()
+    {
+        const QString srtPath = path("sub.srt");
+        {
+            QFile f(srtPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("1\n00:00:01,000 --> 00:00:02,000\nCiao\n\n2\n00:00:03,000 --> 00:00:04,000\nMondo\n");
+        }
+        const Importers::Result r = Importers::importFile(srtPath);
+        QVERIFY(r.ok);
+        QCOMPARE(r.text, QString("Ciao\nMondo"));
+        QCOMPARE(r.stamps.size(), 2);
+        QVERIFY(Importers::supportedSuffixes().contains("srt"));
+        const QString badPath = path("bad.vtt");
+        {
+            QFile f(badPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("WEBVTT\n\nnessun tempo\n");
+        }
+        QVERIFY(!Importers::importFile(badPath).ok);
+        const QString txtPath = path("marked.txt");
+        {
+            QFile f(txtPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("[00:00:01] a\n[00:00:02] b\n");
+        }
+        QCOMPARE(Importers::importFile(txtPath).stamps.size(), 2);
+
+        {
+            Project a;
+            QVERIFY(a.create(path("ts-a.tsra")));
+            const qint64 d = a.addDocument(a.groups().first().id, "Trascrizione", r.text);
+            QVERIFY(a.setTimestamps(d, r.stamps));
+            QVERIFY(a.setDocumentMediaPath(d, "C:/rec/x.wav"));
+        }
+        Project b;
+        QVERIFY(b.create(path("ts-b.tsra")));
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(path("ts-a.tsra"), &error), qPrintable(error));
+        QVERIFY(Merge::apply(b, src, {}).ok);
+        qint64 copied = 0;
+        for (const Document &doc : b.documents())
+            if (doc.name == "Trascrizione")
+                copied = doc.id;
+        QVERIFY(copied > 0);
+        QCOMPARE(b.timestamps(copied).size(), 2);
+        QCOMPARE(b.timestamps(copied)[1].timeMs, qint64(3000));
+        QCOMPARE(b.documentMediaPath(copied), QString("C:/rec/x.wav"));
+    }
+
+    // ---------------------------------------------------------------- topic modeling (#38)
+
+    // Three themes with separate vocabularies, 12 short documents each, a little noise from other themes.
+private:
+    struct TopicCorpus {
+        QList<QStringList> themes;
+        QList<QString> texts;
+        QList<int> theme; // per text
+    };
+    static TopicCorpus topicCorpus()
+    {
+        TopicCorpus c;
+        c.themes = {QString("lavoro stipendio ufficio colleghi turno contratto azienda orario carriera capo").split(' '),
+                    QString("famiglia figli casa genitori nonni cena bambini vacanza fratello madre").split(' '),
+                    QString("salute ospedale medico cura terapia dolore farmaci visita malattia infermiere").split(' ')};
+        quint32 state = 12345;
+        auto next = [&state](int n) {
+            state = state * 1664525u + 1013904223u;
+            return int((state >> 8) % quint32(n));
+        };
+        for (int t = 0; t < 3; ++t)
+            for (int d = 0; d < 12; ++d) {
+                QStringList words;
+                for (int i = 0; i < 24; ++i) {
+                    const bool noise = next(20) == 0;
+                    const int theme = noise ? (t + 1 + next(2)) % 3 : t;
+                    words << c.themes[theme][next(10)];
+                    if (i % 6 == 5)
+                        words << "molto"; // a word of every document
+                }
+                c.texts << words.join(' ') + ".";
+                c.theme << t;
+            }
+        return c;
+    }
+
+private slots:
+    void topicModelFindsSeparatedThemes()
+    {
+        const TopicCorpus c = topicCorpus();
+        QHash<qint64, QString> texts;
+        QList<Words::Source> units;
+        for (int i = 0; i < c.texts.size(); ++i) {
+            texts.insert(i + 1, c.texts[i]);
+            units.append({qint64(i + 1), 0, -1});
+        }
+        Topics::Options o;
+        o.topics = 3;
+        o.seed = 7;
+        const Topics::Result r = Topics::model(units, texts, o);
+        QVERIFY(r.complete);
+        QCOMPARE(r.topics.size(), 3);
+        QCOMPARE(r.units.size(), 36);
+        QVERIFY(r.vocabulary >= 30);
+
+        // Each topic's best words belong to one theme, and the three topics cover the three themes.
+        QSet<int> themesFound;
+        QList<int> themeOfTopic;
+        for (const Topics::Topic &t : r.topics) {
+            QVERIFY(t.words.size() >= 5);
+            QMap<int, int> votes;
+            for (int i = 0; i < 5; ++i)
+                for (int th = 0; th < 3; ++th)
+                    if (c.themes[th].contains(t.words[i].word))
+                        votes[th]++;
+            QCOMPARE(votes.size(), 1);
+            QCOMPARE(votes.first(), 5);
+            themeOfTopic << votes.firstKey();
+            themesFound.insert(votes.firstKey());
+        }
+        QCOMPARE(themesFound.size(), 3);
+        QVERIFY(!r.topics[0].words.isEmpty() && r.topics[0].words[0].word != "molto");
+
+        // Every document goes to the topic of its theme.
+        for (int i = 0; i < c.texts.size(); ++i) {
+            QCOMPARE(themeOfTopic[r.dominant[i]], c.theme[i]);
+            double sum = 0;
+            for (double v : r.theta[i])
+                sum += v;
+            QVERIFY(qAbs(sum - 1.0) < 1e-9);
+        }
+        double shares = 0;
+        for (const Topics::Topic &t : r.topics) {
+            shares += t.share;
+            QCOMPARE(t.units, 12);
+            QVERIFY(!t.topUnits.isEmpty());
+        }
+        QVERIFY(qAbs(shares - 1.0) < 1e-9);
+        QVERIFY(r.topics[0].share >= r.topics[1].share && r.topics[1].share >= r.topics[2].share);
+
+        // Same options and seed, same result.
+        const Topics::Result again = Topics::model(units, texts, o);
+        QCOMPARE(again.dominant, r.dominant);
+        QCOMPARE(again.theta, r.theta);
+        for (int k = 0; k < 3; ++k)
+            QCOMPARE(again.topics[k].words.first().word, r.topics[k].words.first().word);
+
+        // Cancelling stops the computation.
+        QVERIFY(!Topics::model(units, texts, o, [](int, int) { return false; }).complete);
+
+        // The automatic number of topics is within bounds, and the result is usable.
+        o.topics = 0;
+        const int chosen = Topics::chooseTopicCount(units, texts, o);
+        QCOMPARE(chosen, 3);
+        const Topics::Result automatic = Topics::model(units, texts, o);
+        QCOMPARE(automatic.topics.size(), 3);
+
+        // Tables for the export.
+        const QList<QStringList> rows = Topics::topicRows(r);
+        QCOMPARE(rows.size(), 4);
+        QCOMPARE(rows[1].size(), rows[0].size());
+        QHash<qint64, QString> names;
+        names.insert(1, "D1");
+        const QList<QStringList> assign = Topics::assignmentRows(r, names, texts);
+        QCOMPARE(assign.size(), 37);
+        QCOMPARE(assign[1][0], QString("D1"));
+        QCOMPARE(assign[0].size(), assign[1].size());
+    }
+
+    void topicModelEdgeCases()
+    {
+        // No usable words: an empty result, no crash.
+        QHash<qint64, QString> texts{{1, "a b c"}, {2, ""}};
+        const QList<Words::Source> units{{1, 0, -1}, {2, 0, -1}};
+        Topics::Options o;
+        o.topics = 2;
+        const Topics::Result r = Topics::model(units, texts, o);
+        QVERIFY(r.topics.isEmpty());
+        QCOMPARE(r.units.size(), 2);
+        QVERIFY(Topics::model({}, {}, o).topics.isEmpty());
+        o.topics = 0;
+        QVERIFY(Topics::model(units, texts, o).topics.isEmpty());
+
+        // More topics than distinct words is allowed.
+        QHash<qint64, QString> small{{1, "alpha beta alpha beta"}, {2, "alpha beta beta"}, {3, "alpha beta"}};
+        o.topics = 5;
+        const Topics::Result s = Topics::model({{1, 0, -1}, {2, 0, -1}, {3, 0, -1}}, small, o);
+        QCOMPARE(s.topics.size(), 5);
+    }
+
+    void topicParagraphSources()
+    {
+        const QString text = QString("Prima riga lunga abbastanza per essere un paragrafo da sola, davvero.\n"
+                                     "breve\n"
+                                     "ancora breve\n"
+                                     "\n"
+                                     "Un secondo paragrafo che supera la soglia minima di sessanta caratteri.\n"
+                                     "fine");
+        const QHash<qint64, QString> texts{{1, text}};
+        const QList<Words::Source> out = Topics::paragraphSources({{1, 0, -1}}, texts, 60);
+        QCOMPARE(out.size(), 3);
+        QCOMPARE(text.mid(out[0].start, out[0].end - out[0].start).left(5), QString("Prima"));
+        QVERIFY(text.mid(out[1].start, out[1].end - out[1].start).startsWith("breve"));
+        QVERIFY(text.mid(out[1].start, out[1].end - out[1].start).endsWith("breve"));
+        // The short last line joins the previous paragraph.
+        QVERIFY(text.mid(out[2].start, out[2].end - out[2].start).endsWith("fine"));
+        QVERIFY(text.mid(out[2].start, out[2].end - out[2].start).startsWith("Un secondo"));
+        QVERIFY(Topics::paragraphSources({{1, 0, -1}}, {{1, "  \n \n"}}, 60).isEmpty());
+    }
+
+    void topicCreateCodes()
+    {
+        const TopicCorpus c = topicCorpus();
+        Project p;
+        QVERIFY(p.create(path("topics.tsra")));
+        const qint64 g = p.groups().first().id;
+        QList<qint64> ids;
+        for (int i = 0; i < c.texts.size(); ++i)
+            ids << p.addDocument(g, QString("Doc %1").arg(i), c.texts[i]);
+        const QList<Words::Source> units = Words::documentSources(ids);
+        const QHash<qint64, QString> texts = Words::loadTexts(p, units);
+        Topics::Options o;
+        o.topics = 3;
+        o.seed = 7;
+        const Topics::Result r = Topics::model(units, texts, o);
+
+        const int codesBefore = p.codes().size();
+        Topics::CodeOptions co;
+        co.parentName = "Temi";
+        const Topics::CodeResult onlyCodes = Topics::createCodes(p, r, co, texts);
+        QCOMPARE(onlyCodes.codes.size(), 3);
+        QCOMPARE(onlyCodes.segments, 0);
+        QCOMPARE(p.codes().size(), codesBefore + 4);
+        QCOMPARE(p.code(onlyCodes.codes[0]).parentId, onlyCodes.parentCode);
+        QVERIFY(p.code(onlyCodes.codes[0]).name.contains(r.topics[0].words[0].word));
+        QVERIFY(p.undo()); // one step
+        QCOMPARE(p.codes().size(), codesBefore);
+
+        co.codeUnits = true;
+        co.threshold = 0.5;
+        const Topics::CodeResult coded = Topics::createCodes(p, r, co, texts);
+        QCOMPARE(coded.segments, 36);
+        QCOMPARE(p.allSegments().size(), 36);
+        for (const Segment &s : p.allSegments())
+            QCOMPARE(p.code(s.codeId).parentId, coded.parentCode);
+        // Running it again reuses the codes and the segments.
+        const int codes = p.codes().size();
+        Topics::createCodes(p, r, co, texts);
+        QCOMPARE(p.codes().size(), codes);
+        QCOMPARE(p.allSegments().size(), 36);
+        QVERIFY(p.undo());
+        QVERIFY(p.undo());
+        QCOMPARE(p.allSegments().size(), 0);
+        QCOMPARE(p.codes().size(), codesBefore);
+    }
+
+    void mediaKindsAndPaths()
+    {
+        QCOMPARE(Media::kindForFile("a/Intervista.MP3"), DocumentKind::Audio);
+        QCOMPARE(Media::kindForFile("clip.mov"), DocumentKind::Video);
+        QCOMPARE(Media::kindForFile("note.txt"), DocumentKind::Text);
+        QVERIFY(Media::isMediaFile("x.m4a") && !Media::isMediaFile("x.pdf"));
+        QVERIFY(Media::fileDialogFilter().contains("*.mp4"));
+        QVERIFY(Importers::fileDialogFilter().contains("*.wav")); // the import dialog offers recordings too
+
+        const QString project = path("proj.tsra");
+        QVERIFY(QDir().mkpath(path("rec")));
+        const QString wav = path("rec/a.wav");
+        {
+            QFile f(wav);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("RIFF");
+        }
+        // Inside the project folder the path is relative (a moved folder keeps working); elsewhere it is absolute.
+        QCOMPARE(Media::storedPath(project, wav), QString("rec/a.wav"));
+        QCOMPARE(Media::storedPath(project, "C:/altrove/x.wav"), QString("C:/altrove/x.wav"));
+        QCOMPARE(Media::resolvePath(project, "rec/a.wav"), QFileInfo(wav).absoluteFilePath());
+        QCOMPARE(Media::resolvePath(project, wav), QFileInfo(wav).absoluteFilePath());
+        QVERIFY(Media::resolvePath(project, "rec/mancante.wav").isEmpty());
+        QVERIFY(Media::resolvePath(project, "").isEmpty());
+        // A recording that was moved next to the project is found by its name.
+        {
+            QFile f(path("vicino.mp3"));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("ID3");
+        }
+        QCOMPARE(Media::resolvePath(project, "D:/vecchia/cartella/vicino.mp3"), QFileInfo(path("vicino.mp3")).absoluteFilePath());
+    }
+
+    void mediaTimeMapping()
+    {
+        QCOMPARE(Media::formatRange(750000, 785000), QString("00:12:30") + QChar(0x2013) + "00:13:05");
+        QCOMPARE(Media::formatRange(1000, -1), QString("00:00:01") + QChar(0x2013));
+
+        QList<Timestamp> stamps(3);
+        stamps[0].textPos = 0;
+        stamps[0].timeMs = 1000;
+        stamps[1].textPos = 10;
+        stamps[1].timeMs = 5000;
+        stamps[2].textPos = 20;
+        stamps[2].timeMs = 9000;
+        QCOMPARE(Media::stampIndexAtTime(stamps, 0), -1);
+        QCOMPARE(Media::stampIndexAtTime(stamps, 1000), 0);
+        QCOMPARE(Media::stampIndexAtTime(stamps, 6000), 1);
+        QCOMPARE(Media::stampIndexAtTime(stamps, 99999), 2);
+        QCOMPARE(Media::stampIndexAtTime({}, 5), -1);
+        QCOMPARE(Media::stampIndexAtPosition(stamps, 5), 0);
+        QCOMPARE(Media::stampIndexAtPosition(stamps, 10), 1);
+        QCOMPARE(Media::stampIndexAtPosition(stamps, 25), 2);
+        QCOMPARE(Media::textSpanOfStamp(stamps, 1, 30), (std::pair<int, int>{10, 20}));
+        QCOMPARE(Media::textSpanOfStamp(stamps, 2, 30), (std::pair<int, int>{20, 30}));
+        QCOMPARE(Media::textSpanOfStamp(stamps, 7, 30), (std::pair<int, int>{0, 0}));
+
+        // A passage plays from the stamp that governs its start to the first stamp after its end.
+        QCOMPARE(Media::timeRangeOfText(stamps, 12, 15), (std::pair<qint64, qint64>{5000, 9000}));
+        QCOMPARE(Media::timeRangeOfText(stamps, 0, 5), (std::pair<qint64, qint64>{1000, 5000}));
+        QCOMPARE(Media::timeRangeOfText(stamps, 22, 25), (std::pair<qint64, qint64>{9000, -1})); // to the end
+        QCOMPARE(Media::timeRangeOfText({}, 0, 5), (std::pair<qint64, qint64>{-1, -1}));
+        QList<Timestamp> late(1);
+        late[0].textPos = 5;
+        late[0].timeMs = 2000;
+        QCOMPARE(Media::timeRangeOfText(late, 0, 3).first, qint64(0)); // before the first stamp: from the start
+    }
+
+    void recordingDocuments()
+    {
+        QVERIFY(QDir().mkpath(path("rec")));
+        const QString mp3 = path("rec/intervista.mp3");
+        {
+            QFile f(mp3);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("ID3");
+        }
+        const QString projectFile = path("recdocs.tsra");
+        qint64 audio = 0;
+        {
+            Project p;
+            QVERIFY(p.create(projectFile));
+            const qint64 group = p.groups().first().id;
+            audio = p.addRecordingDocument(group, mp3);
+            QVERIFY(audio > 0);
+            QCOMPARE(p.document(audio).kind, DocumentKind::Audio);
+            QCOMPARE(p.document(audio).name, QString("intervista"));
+            QCOMPARE(p.documentMediaPath(audio), QString("rec/intervista.mp3")); // relative to the project
+            QCOMPARE(p.resolvedMediaPath(audio), QFileInfo(mp3).absoluteFilePath());
+            QVERIFY(p.documentData(audio).isEmpty()); // linked, not embedded
+
+            QCOMPARE(p.addRecordingDocument(group, path("note.txt")), qint64(0)); // not a recording
+            QVERIFY(!p.lastError().isEmpty());
+            const qint64 video = p.addRecordingDocument(group, "C:/non/esiste/clip.mp4", "Clip");
+            QCOMPARE(p.document(video).kind, DocumentKind::Video);
+            QCOMPARE(p.documentMediaPath(video), QString("C:/non/esiste/clip.mp4"));
+            QVERIFY(p.resolvedMediaPath(video).isEmpty()); // missing: the player offers to relink
+
+            const qint64 code = p.addCode(0, "Tema", Qt::red);
+            const qint64 seg = p.addTimeSegment(audio, code, 12000, 15000);
+            QVERIFY(seg > 0);
+            QCOMPARE(p.segmentsForDocument(audio, true).size(), 1);
+            QVERIFY(p.segmentsForDocument(audio).isEmpty()); // time intervals are not text
+
+            // The table of retrieved segments gives the times.
+            const Exporters::Table table = Exporters::segmentsTable(p, p.segmentsForDocument(audio, true));
+            QCOMPARE(table.size(), 2);
+            QCOMPARE(table[1][3], QString("00:00:12"));
+            QCOMPARE(table[1][4], QString("00:00:15"));
+            QCOMPARE(table[1][9], Media::formatRange(12000, 15000));
+
+            // Importing a recording is one undo step.
+            QVERIFY(p.undo()); // the time segment
+            QVERIFY(p.undo()); // the code
+            QVERIFY(p.undo()); // the video
+            QVERIFY(!p.document(video).id);
+            QVERIFY(p.document(audio).id);
+            QVERIFY(p.redo());
+            QVERIFY(p.redo());
+            QVERIFY(p.redo());
+        }
+
+        // Merge: the recording and its intervals arrive in the other project, still found on disk.
+        Project target;
+        QVERIFY(target.create(path("recdocs-target.tsra")));
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(projectFile, &error), qPrintable(error));
+        QVERIFY(Merge::apply(target, src, {}).ok);
+        qint64 copied = 0;
+        for (const Document &d : target.documents())
+            if (d.kind == DocumentKind::Audio)
+                copied = d.id;
+        QVERIFY(copied > 0);
+        QCOMPARE(target.resolvedMediaPath(copied), QFileInfo(mp3).absoluteFilePath());
+        QCOMPARE(target.segmentsForDocument(copied, true).size(), 1);
+        QCOMPARE(target.segmentsForDocument(copied, true).first().tStartMs, qint64(12000));
+    }};
 
 QTEST_MAIN(TestCore)
 #include "test_core.moc"

@@ -61,6 +61,12 @@ public:
     QString redoLabel() const { return canRedo() ? m_redoSteps.last().label : QString(); }
     bool undo();
     bool redo();
+    // Labels of the steps that can be undone (most recent first) and redone (next one first).
+    QStringList undoLabels() const;
+    QStringList redoLabels() const;
+    // Undo/redo several steps in a row; stops at the first failure. Returns false if any step failed.
+    bool undoSteps(int count);
+    bool redoSteps(int count);
     void clearUndoHistory();
     void setUndoLabel(const QString &label);
     static constexpr int MaxUndoSteps = 200;
@@ -237,6 +243,59 @@ public:
     bool updateSummaryTable(qint64 id, const QString &name, const QString &configJson);
     bool deleteSummaryTable(qint64 id);
 
+    // Concept maps (issue #15). Deleting a map deletes its nodes and arrows; deleting a node deletes its arrows.
+    // Nodes may point at elements that are later deleted: they are kept (see MapNode). Moving a node is one
+    // updateMapNode call, so the editor calls it on mouse release only.
+    QList<ConceptMap> conceptMaps() const;
+    ConceptMap conceptMap(qint64 id) const;
+    qint64 addConceptMap(const QString &name, const QString &uuid = {});
+    bool renameConceptMap(qint64 id, const QString &name);
+    bool deleteConceptMap(qint64 id);
+    QList<MapNode> mapNodes(qint64 mapId) const;
+    MapNode mapNode(qint64 id) const;
+    qint64 addMapNode(const MapNode &node); // id/uuid ignored (uuid kept if given)
+    bool updateMapNode(const MapNode &node);
+    bool deleteMapNode(qint64 id);
+    QList<MapEdge> mapEdges(qint64 mapId) const;
+    qint64 addMapEdge(const MapEdge &edge);
+    bool updateMapEdge(const MapEdge &edge);
+    bool deleteMapEdge(qint64 id);
+    // Research questions worksheet (issue #17). Evidence refers to segments, codes and memos and disappears
+    // with the element it refers to (or with the question). An element is attached to a question only once.
+    QList<ResearchQuestion> researchQuestions() const;
+    ResearchQuestion researchQuestion(qint64 id) const; // id == 0 if missing
+    qint64 addResearchQuestion(const QString &title, const QString &uuid = {});
+    bool updateResearchQuestion(const ResearchQuestion &question); // everything but id, position and uuid
+    bool deleteResearchQuestion(qint64 id);
+    bool moveResearchQuestion(qint64 id, int delta);              // -1 up, +1 down
+    QList<QuestionEvidence> questionEvidence(qint64 questionId) const;
+    bool addQuestionEvidence(qint64 questionId, EvidenceKind kind, qint64 refId); // false if missing; true if already there
+    bool removeQuestionEvidence(qint64 evidenceId);
+    static QString questionStatusToString(QuestionStatus status);
+    static QuestionStatus questionStatusFromString(const QString &s);
+    // Transcript time stamps of a text document (issue #29, v12), ordered by position then time. They
+    // follow edits of the text (updateDocumentText); deleting the document deletes them.
+    QList<Timestamp> timestamps(qint64 documentId) const;
+    qint64 addTimestamp(qint64 documentId, int textPos, qint64 timeMs);
+    bool setTimestampTime(qint64 id, qint64 timeMs);
+    bool deleteTimestamp(qint64 id);
+    // Replaces every time stamp of the document (one undo step); invalid ones (position outside the text,
+    // negative time) are skipped.
+    bool setTimestamps(qint64 documentId, const QList<Timestamp> &stamps);
+    // Moves every time stamp of the document by `deltaMs` (not below zero).
+    bool shiftTimestamps(qint64 documentId, qint64 deltaMs);
+    // Recording associated with a text document (a path: media can be large, so it is not embedded).
+    QString documentMediaPath(qint64 documentId) const;
+    bool setDocumentMediaPath(qint64 documentId, const QString &path);
+    // Audio/video documents (issue #28): the recording is linked, not embedded. The stored path (media_path) is
+    // relative to the folder of the project file when the recording is under it (see Media::storedPath).
+    // `name` empty = the file name without suffix. Returns 0 (lastError set) if the file is not audio or video.
+    qint64 addRecordingDocument(qint64 groupId, const QString &mediaFile, const QString &name = {});
+    // Path to keep in the project for a recording file.
+    QString storableMediaPath(const QString &mediaFile) const;
+    // The recording of a document as an existing file; empty when it has none or the file is missing.
+    QString resolvedMediaPath(qint64 documentId) const;
+
     // Log of the requests made to language models (issue #39). Optional, off by default (meta "ai_log"):
     // addAiLog does nothing and returns 0 while it is off. Not undoable, not merged, not exported. Never holds keys.
     bool aiLogEnabled() const;
@@ -246,9 +305,21 @@ public:
     QList<AiLogEntry> aiLog() const;
     bool clearAiLog();
 
+    // Rounds of team work (issue #24); see Team.h for the workflow. Bookkeeping only: not undoable, not merged.
+    QList<TeamCycle> teamCycles() const; // by round number, then creation
+    int nextTeamCycleNumber() const;
+    qint64 addTeamCycleEntry(int number, const QString &member, const QString &fileName);
+    // Sent: back to "handed out"; Returned/Merged: stamps the time and keeps `report` (the merge summary).
+    bool setTeamCycleStatus(qint64 id, TeamCycleStatus status, const QString &report = {});
+    bool deleteTeamCycle(qint64 id);
+    bool clearTeamCycles();
+
 signals:
     void opened();
+    void teamCyclesChanged();
     void summariesChanged();
+    void mapsChanged();
+    void researchQuestionsChanged();
     void aiLogChanged();
     void closed();
     void groupsChanged();
@@ -260,6 +331,7 @@ signals:
     void variablesChanged();
     void linksChanged();
     void dictionariesChanged();
+    void timestampsChanged();
     void undoStateChanged();
 
 private:

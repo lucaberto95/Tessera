@@ -1,11 +1,14 @@
 #include "core/ai/AiAssist.h"
 #include "ui/DocumentView.h"
 #include "core/Images.h"
+#include "core/Media.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
+#include "core/Transcripts.h"
 #include "ui/CodingStripe.h"
 #include "ui/ImageView.h"
+#include "ui/MediaPlayerWidget.h"
 #include "ui/PdfView.h"
 #include "ui/UiUtils.h"
 
@@ -238,10 +241,19 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
             lines << QStringLiteral("&#8596; ") + linkLabel(l, position).toHtmlEscaped();
         if (!here.isEmpty())
             lines << QStringLiteral("<span style='color:gray'>%1</span>").arg(tr("Ctrl+clic per aprire il collegamento"));
+        if (hasRecording() && !m_stamps.isEmpty()) {
+            const int idx = Media::stampIndexAtPosition(m_stamps, position);
+            if (idx >= 0)
+                lines << QStringLiteral("<span style='color:gray'>%1</span>")
+                             .arg(tr("%1 · Ctrl+clic per riprodurre da qui").arg(Transcripts::formatTime(m_stamps[idx].timeMs)).toHtmlEscaped());
+        }
         return lines.join(QStringLiteral("<br>"));
     };
-    m_edit->hasLinkAt = [this](int position) { return !linksAt(position).isEmpty(); };
-    m_edit->onLinkClicked = [this](int position) { return followLinkAt(position); };
+    m_edit->hasLinkAt = [this](int position) {
+        return !linksAt(position).isEmpty() || (hasRecording() && !m_stamps.isEmpty());
+    };
+    // Ctrl+click: a link is followed; otherwise, in a transcript with a recording, it plays from that point.
+    m_edit->onLinkClicked = [this](int position) { return followLinkAt(position) || playFromTextPosition(position); };
     m_edit->viewport()->setMouseTracking(true);
     connect(m_edit, &QTextEdit::selectionChanged, this, &DocumentView::selectionChanged);
     connect(m_stripe, &CodingStripe::segmentClicked, this, [this](qint64 id) {
@@ -345,6 +357,23 @@ DocumentView::DocumentView(Project *project, QWidget *parent)
     docLayout->addWidget(line);
     buildFindBar();
     docLayout->addWidget(m_findBar);
+    // Player of the recording: full for audio/video documents, compact above the text of a transcript.
+    m_player = new MediaPlayerWidget;
+    m_player->hide();
+    docLayout->addWidget(m_player);
+    connect(m_player, &MediaPlayerWidget::positionChanged, this, &DocumentView::onPlayerPosition);
+    connect(m_player, &MediaPlayerWidget::relinkRequested, this, &DocumentView::relinkRecording);
+    connect(m_player, &MediaPlayerWidget::selectionChanged, this, &DocumentView::selectionChanged);
+    connect(m_player, &MediaPlayerWidget::bandContextMenu, this, &DocumentView::showMediaSegmentMenu);
+    connect(m_player, &MediaPlayerWidget::codeDropped, this, [this](qint64 codeId) { codeSelection(codeId); });
+    connect(m_player, &MediaPlayerWidget::codeSelectionRequested, this, [this] {
+        const qint64 code = m_currentCode ? m_currentCode() : 0;
+        if (!code)
+            emit statusMessage(tr("Seleziona un codice nell'elenco dei codici per codificare l'intervallo."));
+        else
+            codeSelection(code);
+    });
+    connect(m_project, &Project::timestampsChanged, this, &DocumentView::reloadStamps);
     m_textBody = new QWidget;
     m_textBody->setLayout(body);
     docLayout->addWidget(m_textBody, 1);
@@ -389,9 +418,19 @@ void DocumentView::openDocument(qint64 id)
     }
     m_docId = id;
     m_highlighted = 0;
+    m_playSpan = {0, 0};
+    m_playStampIndex = -1;
+    m_stamps.clear();
     setImageMode(doc.kind == DocumentKind::Image);
     setPdfMode(doc.kind == DocumentKind::Pdf);
-    if (m_isImage) {
+    setMediaMode(doc.kind == DocumentKind::Audio || doc.kind == DocumentKind::Video);
+    m_player->clear(); // a new document starts without the interval, bands and position of the previous one
+    if (m_isMedia) {
+        m_edit->clear();
+        m_links.clear();
+        m_recordingPath.clear();
+        syncRecording();
+    } else if (m_isImage) {
         m_edit->clear();
         m_links.clear();
         m_imageView->setImage(m_project->documentImage(id));
@@ -405,6 +444,9 @@ void DocumentView::openDocument(qint64 id)
         setDisplayedText(m_project->documentText(id), m_project->documentRichContent(id));
         m_edit->moveCursor(QTextCursor::Start);
         m_links = m_project->linksForDocument(id);
+        m_stamps = m_project->timestamps(id);
+        m_recordingPath.clear();
+        syncRecording();
     }
     m_stack->setCurrentIndex(1);
     onDocumentsChanged();
@@ -442,6 +484,12 @@ void DocumentView::closeDocument()
     m_stripe->setSegments({}, {});
     setImageMode(false);
     setPdfMode(false);
+    setMediaMode(false);
+    m_player->clear();
+    m_player->hide();
+    m_recordingPath.clear();
+    m_stamps.clear();
+    m_playSpan = {0, 0};
     m_imageView->clear();
     m_pdfView->clear();
     m_stack->setCurrentIndex(0);
@@ -454,20 +502,29 @@ bool DocumentView::hasSelection() const
         return m_docId && m_imageView->hasSelection();
     if (m_isPdf)
         return m_docId && m_pdfView->hasSelection();
+    if (m_isMedia)
+        return m_docId && m_player->hasSelection();
     return m_docId && m_edit->textCursor().hasSelection();
 }
 
 std::pair<int, int> DocumentView::selection() const
 {
-    if (m_isImage || m_isPdf)
+    if (m_isImage || m_isPdf || m_isMedia)
         return {0, 0};
     const QTextCursor c = m_edit->textCursor();
     return {c.selectionStart(), c.selectionEnd()};
 }
 
+int DocumentView::cursorPosition() const
+{
+    if (!m_docId || m_isImage || m_isPdf || m_isMedia)
+        return -1;
+    return m_edit->textCursor().position();
+}
+
 QString DocumentView::selectedText() const
 {
-    if (m_isImage)
+    if (m_isImage || m_isMedia)
         return {};
     if (m_isPdf)
         return m_pdfView->selection().text;
@@ -494,6 +551,8 @@ qint64 DocumentView::codeSelection(qint64 codeId)
         const PdfView::Selection sel = m_pdfView->selection();
         return codePdfArea(codeId, sel.page, sel.rect, sel.text);
     }
+    if (m_isMedia)
+        return codeMediaInterval(codeId);
     if (m_editing) {
         Ui::showError(this, tr("Termina la modifica del testo prima di codificare."));
         return 0;
@@ -529,7 +588,7 @@ void DocumentView::startLink()
 {
     if (!m_docId)
         return;
-    if (m_isImage || m_isPdf) {
+    if (m_isImage || m_isPdf || m_isMedia) {
         emit statusMessage(tr("I collegamenti non sono disponibili per immagini e PDF."));
         return;
     }
@@ -553,7 +612,7 @@ qint64 DocumentView::completeLink()
 {
     if (!m_docId || !hasPendingLink())
         return 0;
-    if (m_isImage || m_isPdf) {
+    if (m_isImage || m_isPdf || m_isMedia) {
         emit statusMessage(tr("I collegamenti non sono disponibili per immagini e PDF."));
         return 0;
     }
@@ -682,6 +741,18 @@ void DocumentView::onLinksChanged()
 
 void DocumentView::selectRange(int start, int end, qint64 segmentId)
 {
+    if (m_isMedia) { // an interval is identified by its segment
+        for (const Segment &s : std::as_const(m_segments)) {
+            if (s.id == segmentId && s.kind == SegmentKind::Time) {
+                m_player->setSelection(s.tStartMs, s.tEndMs);
+                m_player->seek(s.tStartMs);
+                m_highlighted = s.id;
+                reloadMediaBands();
+                return;
+            }
+        }
+        return;
+    }
     if (m_isImage) { // an area is identified by its segment; positions mean nothing here
         for (const Segment &s : std::as_const(m_segments)) {
             if (s.id == segmentId && s.kind == SegmentKind::Area) {
@@ -728,7 +799,11 @@ void DocumentView::selectRange(int start, int end, qint64 segmentId)
 
 void DocumentView::reloadSegments()
 {
-    m_segments = m_docId ? m_project->segmentsForDocument(m_docId, m_isImage || m_isPdf) : QList<Segment>{};
+    m_segments = m_docId ? m_project->segmentsForDocument(m_docId, m_isImage || m_isPdf || m_isMedia) : QList<Segment>{};
+    if (m_isMedia) {
+        reloadMediaBands();
+        return;
+    }
     if (m_isImage) {
         reloadImageAreas();
         return;
@@ -783,6 +858,15 @@ void DocumentView::refreshHighlights()
     }
     if (m_pendingLink.documentId && m_pendingLink.documentId == m_docId)
         addLinkEnd(m_pendingLink.start, m_pendingLink.end, true);
+    // The text being played (the stretch of the current time stamp) in a cool tone, under the find matches.
+    if (!m_editing && m_playSpan.second > m_playSpan.first && m_player->hasMedia()) {
+        QTextEdit::ExtraSelection sel;
+        sel.cursor = QTextCursor(m_edit->document());
+        sel.cursor.setPosition(qBound(0, m_playSpan.first, len));
+        sel.cursor.setPosition(qBound(0, m_playSpan.second, len), QTextCursor::KeepAnchor);
+        sel.format.setBackground(QColor(33, 150, 243, 55));
+        extras << sel;
+    }
     // Find matches go last so they stay visible over the coding colours; warm tones never match a code.
     for (int i = 0; i < m_findMatches.size(); ++i) {
         QTextEdit::ExtraSelection sel;
@@ -959,6 +1043,226 @@ void DocumentView::updateZoomLabel()
 {
     const double zoom = m_isPdf ? m_pdfView->zoom() : m_imageView->zoom();
     m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(zoom * 100)));
+}
+
+// ---------------------------------------------------------------- audio, video and transcripts
+
+void DocumentView::setMediaMode(bool media)
+{
+    if (media == m_isMedia)
+        return;
+    m_isMedia = media;
+    if (media) {
+        hideFindBar();
+        m_fitButton->hide();
+        m_actualButton->hide();
+        m_zoomLabel->hide();
+        m_pageSpin->hide();
+    }
+    m_textBody->setVisible(!media && !m_isImage && !m_isPdf);
+    m_editButton->setVisible(!media && !m_isImage && !m_isPdf);
+    m_player->setCompact(!media);
+}
+
+bool DocumentView::hasRecording() const
+{
+    if (!m_docId || m_isImage || m_isPdf)
+        return false;
+    return m_isMedia || !m_project->documentMediaPath(m_docId).isEmpty();
+}
+
+// Loads (or drops) the recording of the open document; cheap when nothing changed.
+void DocumentView::syncRecording()
+{
+    if (!m_docId || !m_project->isOpen() || m_isImage || m_isPdf || !hasRecording()) {
+        m_player->clear();
+        m_player->hide();
+        m_recordingPath.clear();
+        return;
+    }
+    const Document doc = m_project->document(m_docId);
+    const QString stored = m_project->documentMediaPath(m_docId);
+    const QString resolved = m_project->resolvedMediaPath(m_docId);
+    m_player->show();
+    m_player->setCompact(!m_isMedia);
+    m_player->setVideoVisible(doc.kind == DocumentKind::Video);
+    const QString key = stored + QLatin1Char('\n') + resolved;
+    if (key == m_recordingPath)
+        return;
+    m_recordingPath = key;
+    m_player->setMedia(resolved, stored);
+    if (m_isMedia)
+        reloadMediaBands();
+}
+
+void DocumentView::reloadMediaBands()
+{
+    QList<MediaTimeline::Band> bands;
+    for (const Segment &s : std::as_const(m_segments)) {
+        if (s.kind != SegmentKind::Time)
+            continue;
+        QColor color = m_codes.value(s.codeId).color;
+        if (!color.isValid())
+            color = Qt::gray;
+        bands.append({s.id, s.tStartMs, s.tEndMs, color, segmentLabel(s) + QStringLiteral(" · ") + Media::formatRange(s.tStartMs, s.tEndMs)});
+    }
+    m_player->setBands(bands);
+}
+
+void DocumentView::reloadStamps()
+{
+    if (!m_docId || !m_project->isOpen() || m_isMedia || m_isImage || m_isPdf)
+        return;
+    m_stamps = m_project->timestamps(m_docId);
+    m_playStampIndex = -2; // force the next position to recompute the highlighted text
+    onPlayerPosition(m_player->position());
+}
+
+// While a transcript plays, the text of the current time stamp is highlighted and kept in view.
+void DocumentView::onPlayerPosition(qint64 ms)
+{
+    if (m_isMedia || m_isImage || m_isPdf || m_editing || !m_docId)
+        return;
+    if (m_stamps.isEmpty() || !m_player->hasMedia()) {
+        if (m_playSpan != std::pair<int, int>{0, 0}) {
+            m_playSpan = {0, 0};
+            m_playStampIndex = -1;
+            refreshHighlights();
+        }
+        return;
+    }
+    const int idx = Media::stampIndexAtTime(m_stamps, ms);
+    if (idx == m_playStampIndex)
+        return;
+    m_playStampIndex = idx;
+    const int len = m_edit->document()->characterCount() - 1;
+    m_playSpan = idx < 0 ? std::pair<int, int>{0, 0} : Media::textSpanOfStamp(m_stamps, idx, len);
+    refreshHighlights();
+    if (idx >= 0 && m_player->isPlaying()) {
+        QTextCursor c(m_edit->document());
+        c.setPosition(qBound(0, m_playSpan.first, len));
+        const QRect r = m_edit->cursorRect(c);
+        if (r.top() < 0 || r.bottom() > m_edit->viewport()->height())
+            m_edit->verticalScrollBar()->setValue(m_edit->verticalScrollBar()->value() + r.top() - 40);
+    }
+}
+
+bool DocumentView::playFromTextPosition(int position)
+{
+    if (!m_docId || m_isMedia || m_stamps.isEmpty())
+        return false;
+    if (!m_player->hasMedia()) {
+        emit statusMessage(tr("La registrazione non è disponibile: ricollega il file dal lettore."));
+        return false;
+    }
+    const int idx = qMax(0, Media::stampIndexAtPosition(m_stamps, position));
+    m_player->seek(m_stamps[idx].timeMs);
+    m_player->play();
+    return true;
+}
+
+qint64 DocumentView::insertTimestampAtCursor()
+{
+    if (!m_docId || m_isMedia || m_isImage || m_isPdf)
+        return 0;
+    if (!m_player->hasMedia()) {
+        emit statusMessage(tr("Per inserire un time stamp serve una registrazione associata e disponibile."));
+        return 0;
+    }
+    const bool wasEditing = m_editing;
+    if (wasEditing && !commitEdits()) // positions refer to the stored text
+        return 0;
+    const int pos = m_edit->textCursor().position();
+    const qint64 ms = m_player->position();
+    qint64 id = 0;
+    for (const Timestamp &ts : m_project->timestamps(m_docId)) {
+        if (ts.textPos == pos) { // one stamp per position: the new time replaces the old one
+            if (m_project->setTimestampTime(ts.id, ms))
+                id = ts.id;
+            break;
+        }
+    }
+    if (!id)
+        id = m_project->addTimestamp(m_docId, pos, ms);
+    if (wasEditing)
+        setEditing(true);
+    if (id)
+        emit statusMessage(tr("Time stamp %1 inserito").arg(Transcripts::formatTime(ms)));
+    else
+        Ui::showError(this, m_project->lastError());
+    return id;
+}
+
+bool DocumentView::playSegment(const Segment &s)
+{
+    if (!m_docId || m_docId != s.documentId || !m_player->hasMedia())
+        return false;
+    if (s.kind == SegmentKind::Time && m_isMedia) {
+        m_player->playRange(s.tStartMs, s.tEndMs);
+        return true;
+    }
+    if (s.kind == SegmentKind::Text && !m_isMedia && !m_stamps.isEmpty()) {
+        const auto [from, to] = Media::timeRangeOfText(m_stamps, s.start, s.end);
+        if (from < 0)
+            return false;
+        m_player->playRange(from, to);
+        return true;
+    }
+    return false;
+}
+
+qint64 DocumentView::codeMediaInterval(qint64 codeId)
+{
+    if (!m_player->hasSelection()) {
+        emit statusMessage(tr("Trascina sulla linea del tempo, o usa \"Inizio qui\" e \"Fine qui\", per scegliere l'intervallo da codificare."));
+        return 0;
+    }
+    const qint64 id = m_project->addTimeSegment(m_docId, codeId, m_player->selectionStart(), m_player->selectionEnd());
+    if (id)
+        emit statusMessage(tr("Codificato con \"%1\"").arg(m_project->codePath(codeId)));
+    else
+        Ui::showError(this, m_project->lastError());
+    return id;
+}
+
+void DocumentView::relinkRecording()
+{
+    if (!m_docId)
+        return;
+    const QString path = Ui::openFileName(this, tr("Ricollega la registrazione"), Media::fileDialogFilter());
+    if (!path.isEmpty())
+        m_project->setDocumentMediaPath(m_docId, m_project->storableMediaPath(path));
+}
+
+void DocumentView::showMediaSegmentMenu(qint64 segmentId, const QPoint &globalPos)
+{
+    for (const Segment &s : std::as_const(m_segments)) {
+        if (s.id != segmentId)
+            continue;
+        QMenu menu(this);
+        menu.addAction(tr("Riproduci l'intervallo"), this, [this, s] { playSegment(s); });
+        menu.addAction(tr("Seleziona l'intervallo"), this, [this, s] { selectRange(s.start, s.end, s.id); });
+        menu.addSeparator();
+        menu.addAction(tr("Commento…"), this, [this, s] {
+            bool ok = false;
+            const QString c =
+                QInputDialog::getMultiLineText(this, tr("Commento al segmento"), tr("Commento:"), s.comment, &ok);
+            if (ok)
+                m_project->setSegmentComment(s.id, c.trimmed());
+        });
+        menu.addAction(tr("Peso…"), this, [this, s] {
+            bool ok = false;
+            const int w = QInputDialog::getInt(this, tr("Peso del segmento"), tr("Peso (0-100):"), s.weight, 0, 100, 1, &ok);
+            if (ok)
+                m_project->setSegmentWeight(s.id, w);
+        });
+        menu.addAction(Ui::memoIcon(), tr("Memo…"), this,
+                       [this, s] { Ui::editMemo(this, m_project, int(MemoTarget::Segment), s.id); });
+        menu.addSeparator();
+        menu.addAction(tr("Rimuovi codifica"), this, [this, s] { m_project->deleteSegment(s.id); });
+        menu.exec(globalPos);
+        return;
+    }
 }
 
 // ---------------------------------------------------------------- PDF documents
@@ -1312,6 +1616,14 @@ void DocumentView::onDocumentsChanged()
         updatePdfInfo();
         return;
     }
+    if (m_isMedia) {
+        syncRecording();
+        m_info->setText(doc.kind == DocumentKind::Video ? tr("Video") : tr("Audio"));
+        return;
+    }
+    syncRecording();
+    if (!m_editing)
+        m_stamps = m_project->timestamps(m_docId);
     const QString text = m_editing ? rawText(m_edit) : m_project->documentText(m_docId);
     const QString rich = m_editing ? m_richShown : m_project->documentRichContent(m_docId);
     if (!m_editing && (text != rawText(m_edit) || rich != m_richShown)) {
@@ -1330,7 +1642,7 @@ void DocumentView::setEditing(bool editing)
     if (editing == m_editing)
         return;
     if (editing) {
-        if (!m_docId || m_isImage || m_isPdf) {
+        if (!m_docId || m_isImage || m_isPdf || m_isMedia) {
             m_editButton->setChecked(false);
             return;
         }
@@ -1448,7 +1760,7 @@ void DocumentView::buildFindBar()
 
 void DocumentView::showFindBar()
 {
-    if (!m_docId || m_isImage || m_isPdf)
+    if (!m_docId || m_isImage || m_isPdf || m_isMedia)
         return;
     // Like an editor: a one-line selection becomes the search term.
     const QString selected = selectedText();

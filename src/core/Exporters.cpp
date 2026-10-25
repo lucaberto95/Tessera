@@ -1,5 +1,7 @@
 #include "core/Exporters.h"
 #include "core/Images.h"
+#include "core/Media.h"
+#include "core/Transcripts.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
@@ -212,6 +214,12 @@ Table segmentsTable(const Project &project, const QList<Segment> &segments, bool
                                 s.areaText.isEmpty() ? Images::areaLabel(s) : s.areaText};
             continue;
         }
+        if (s.kind == SegmentKind::Time) { // an interval of a recording: start and end are times
+            rows << QStringList{groupNames.value(d.groupId), d.name, codePaths.value(s.codeId),
+                                Transcripts::formatTime(s.tStartMs), Transcripts::formatTime(s.tEndMs), QString::number(s.weight),
+                                s.comment, s.author, dateString(s.createdAt, isoDates), Media::formatRange(s.tStartMs, s.tEndMs)};
+            continue;
+        }
         rows << QStringList{groupNames.value(d.groupId), d.name, codePaths.value(s.codeId), QString::number(s.start),
                             QString::number(s.end), QString::number(s.weight), s.comment, s.author,
                             dateString(s.createdAt, isoDates), texts.value(s.documentId).mid(s.start, s.length())};
@@ -264,6 +272,17 @@ bool exportSegmentsHtml(const Project &project, const QList<Segment> &segments, 
                                                  QStringLiteral("\">"));
             if (!s.areaText.isEmpty())
                 html += QStringLiteral("<div class=\"text\">") + htmlEscape(s.areaText) + QStringLiteral("</div>");
+            if (!s.comment.isEmpty())
+                html += QStringLiteral("<div class=\"comment\">") + htmlEscape(s.comment) + QStringLiteral("</div>");
+            html += QStringLiteral("</div>");
+            continue;
+        }
+        if (s.kind == SegmentKind::Time) {
+            html += QStringLiteral("<div class=\"seg\" style=\"border-left-color:%1\"><div class=\"meta\">"
+                                   "<span class=\"code\">%2</span> · %3 · %4%5</div>")
+                        .arg(c.color.name(), htmlEscape(project.codePath(s.codeId)), htmlEscape(docs.value(s.documentId).name),
+                             htmlEscape(Media::formatRange(s.tStartMs, s.tEndMs)),
+                             s.weight ? QStringLiteral(" · ") + QObject::tr("peso %1").arg(s.weight) : QString());
             if (!s.comment.isEmpty())
                 html += QStringLiteral("<div class=\"comment\">") + htmlEscape(s.comment) + QStringLiteral("</div>");
             html += QStringLiteral("</div>");

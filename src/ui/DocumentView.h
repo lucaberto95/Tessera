@@ -11,6 +11,7 @@
 class CodingStripe;
 class DocTextEdit;
 class ImageView;
+class MediaPlayerWidget;
 class PdfView;
 class Project;
 class QMenu;
@@ -39,12 +40,34 @@ public:
     // drag) on a page; both are coded as an area with its text. Links, text editing and Ctrl+F do not apply.
     bool isPdf() const { return m_isPdf; }
     PdfView *pdfView() const { return m_pdfView; }
+    // Audio and video documents show a MediaPlayerWidget (issue #28): the selection is an interval of the
+    // timeline (drag on it, or the In/Out buttons) and is coded as a time segment. Links, text editing and
+    // Ctrl+F do not apply.
+    bool isMedia() const { return m_isMedia; }
+    // The player: full for audio/video documents; compact above the text of a transcript that has a recording
+    // (issue #29). hasRecording() tells whether the open document has one (found on disk or not).
+    MediaPlayerWidget *player() const { return m_player; }
+    bool hasRecording() const;
+    // Time stamps of the open transcript.
+    QList<Timestamp> transcriptStamps() const { return m_stamps; }
+    // Plays the recording from the time stamp that governs the text position (clicks with Ctrl on the text do
+    // this); false when there is no recording or no time stamp there.
+    bool playFromTextPosition(int position);
+    // Inserts a time stamp at the text cursor with the current time of the recording (F8; replaces the time of
+    // a stamp already there). In editing mode the text is saved first. Returns the stamp id or 0.
+    qint64 insertTimestampAtCursor();
+    // Plays a coded segment: a time interval, or a text passage between time stamps. False when it cannot be played.
+    bool playSegment(const Segment &segment);
+    // The highlighted span of the text during playback ({0,0}: none).
+    std::pair<int, int> playbackSpan() const { return m_playSpan; }
     void openDocument(qint64 id);
     void closeDocument();
 
     bool hasSelection() const;
     std::pair<int, int> selection() const;
     QString selectedText() const;
+    // Position of the text cursor in the stored text; -1 for images, PDFs and when no document is open.
+    int cursorPosition() const;
     // Codes the current selection; returns the segment id or 0.
     qint64 codeSelection(qint64 codeId);
     void selectRange(int start, int end, qint64 segmentId = 0);
@@ -116,6 +139,14 @@ private:
     void addSegmentActions(QMenu *menu, const Segment &s);
     void setImageMode(bool image);
     void setPdfMode(bool pdf);
+    void setMediaMode(bool media);
+    void syncRecording();        // loads the recording of the open document into the player
+    void reloadMediaBands();     // coded intervals on the timeline
+    void onPlayerPosition(qint64 ms);
+    void reloadStamps();
+    qint64 codeMediaInterval(qint64 codeId);
+    void relinkRecording();
+    void showMediaSegmentMenu(qint64 segmentId, const QPoint &globalPos);
     void reloadPdfAreas();
     void updatePdfInfo();
     void onPdfAreaClicked(const QList<qint64> &ids);
@@ -152,6 +183,12 @@ private:
     QLabel *m_zoomLabel;
     bool m_isImage = false;
     bool m_isPdf = false;
+    bool m_isMedia = false;
+    MediaPlayerWidget *m_player = nullptr;
+    QList<Timestamp> m_stamps;           // of the open text document
+    QString m_recordingPath;             // stored path currently loaded in the player
+    std::pair<int, int> m_playSpan{0, 0}; // text being played, highlighted
+    int m_playStampIndex = -1;
 
     qint64 m_docId = 0;
     QList<Segment> m_segments;

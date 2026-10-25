@@ -1,6 +1,9 @@
 #pragma once
 
+#include "core/Model.h"
+
 #include <QByteArray>
+#include <QList>
 #include <QString>
 #include <QStringList>
 
@@ -12,6 +15,8 @@ struct Result {
     QString error;
     // Formatting (JSON, see RichText.h) of `text`; empty when the file had none worth keeping.
     QString richContent;
+    // Transcript time stamps found in the file (.srt, .vtt, or "[hh:mm:ss]" markers in .txt), see Transcripts.h.
+    QList<Timestamp> stamps;
 };
 
 QStringList supportedSuffixes();

@@ -1,4 +1,5 @@
 #include "core/Qdpx.h"
+#include "core/ConceptMaps.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
@@ -439,6 +440,66 @@ bool exportProject(const Project &project, const QString &path, QString *error)
     }
     w.writeEndElement(); // Sets
 
+    // Concept maps (issue #15) -> Graphs. A vertex that stands for a code, document, memo or selection of the
+    // project carries its GUID in representedGUID; free text nodes and nodes of deleted elements are plain
+    // vertices. Colours travel as #rrggbb; line width and style have no counterpart and are not exported.
+    const QList<ConceptMap> conceptMaps = project.conceptMaps();
+    if (!conceptMaps.isEmpty()) {
+        w.writeStartElement(QStringLiteral("Graphs"));
+        for (const ConceptMap &cm : conceptMaps) {
+            w.writeStartElement(QStringLiteral("Graph"));
+            w.writeAttribute(QStringLiteral("guid"), cm.uuid);
+            w.writeAttribute(QStringLiteral("name"), cm.name);
+            QSet<qint64> written;
+            for (const MapNode &n : project.mapNodes(cm.id)) {
+                const ConceptMaps::Target target = ConceptMaps::resolve(project, n);
+                QString represented;
+                if (target.exists) {
+                    if (n.kind == MapNodeKind::Code)
+                        represented = codeGuid.value(n.refId);
+                    else if (n.kind == MapNodeKind::Document)
+                        represented = docGuid.value(n.refId);
+                    else if (n.kind == MapNodeKind::Memo)
+                        represented = project.memo(n.refId).uuid;
+                    else if (n.kind == MapNodeKind::Segment)
+                        represented = project.segment(n.refId).uuid;
+                }
+                w.writeEmptyElement(QStringLiteral("Vertex"));
+                w.writeAttribute(QStringLiteral("guid"), n.uuid);
+                w.writeAttribute(QStringLiteral("name"), target.exists ? target.caption : n.label);
+                if (!represented.isEmpty())
+                    w.writeAttribute(QStringLiteral("representedGUID"), represented);
+                w.writeAttribute(QStringLiteral("firstX"), QString::number(qRound(n.x)));
+                w.writeAttribute(QStringLiteral("firstY"), QString::number(qRound(n.y)));
+                w.writeAttribute(QStringLiteral("secondX"), QString::number(qRound(n.x + n.w)));
+                w.writeAttribute(QStringLiteral("secondY"), QString::number(qRound(n.y + n.h)));
+                const QColor color = ConceptMaps::styleFromJson(n.styleJson).color;
+                if (color.isValid())
+                    w.writeAttribute(QStringLiteral("color"), color.name());
+                written.insert(n.id);
+            }
+            QHash<qint64, QString> vertexGuid;
+            for (const MapNode &n : project.mapNodes(cm.id))
+                vertexGuid.insert(n.id, n.uuid);
+            for (const MapEdge &e : project.mapEdges(cm.id)) {
+                if (!written.contains(e.fromNode) || !written.contains(e.toNode))
+                    continue;
+                w.writeEmptyElement(QStringLiteral("Edge"));
+                w.writeAttribute(QStringLiteral("guid"), e.uuid);
+                if (!e.label.isEmpty())
+                    w.writeAttribute(QStringLiteral("name"), e.label);
+                w.writeAttribute(QStringLiteral("sourceVertex"), vertexGuid.value(e.fromNode));
+                w.writeAttribute(QStringLiteral("targetVertex"), vertexGuid.value(e.toNode));
+                w.writeAttribute(QStringLiteral("direction"), QStringLiteral("OneWay"));
+                const QColor color = ConceptMaps::styleFromJson(e.styleJson).color;
+                if (color.isValid())
+                    w.writeAttribute(QStringLiteral("color"), color.name());
+            }
+            w.writeEndElement(); // Graph
+        }
+        w.writeEndElement(); // Graphs
+    }
+
     writeNoteRefs(MemoTarget::Project, 0);
     w.writeEndElement(); // Project
     w.writeEndDocument();
@@ -512,6 +573,29 @@ struct PendingSet {
     QStringList noteGuids; // MemberNote
 };
 
+struct PendingVertex {
+    QString guid;
+    QString name;
+    QString represented;
+    double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    QString color;
+};
+
+struct PendingEdge {
+    QString guid;
+    QString name;
+    QString source;
+    QString target;
+    QString color;
+};
+
+struct PendingGraph {
+    QString guid;
+    QString name;
+    QList<PendingVertex> vertices;
+    QList<PendingEdge> edges;
+};
+
 struct PendingLink {
     QString guid;
     QString name;
@@ -539,6 +623,7 @@ struct Importer {
     QString origin; // Project/@origin, e.g. "Tessera 0.1.0"
     QList<PendingSet> sets;
     QList<PendingLink> links;
+    QList<PendingGraph> graphs;
     QList<std::tuple<MemoTarget, QString, QString>> noteRefs; // target type, target guid, note guid
     QStringList projectNoteRefs;
     QStringList warnings;
@@ -785,6 +870,43 @@ struct Importer {
         }
     }
 
+    void parseGraphs()
+    {
+        while (r.readNextStartElement()) {
+            if (r.name() != QLatin1String("Graph")) {
+                r.skipCurrentElement();
+                continue;
+            }
+            PendingGraph g;
+            g.guid = attr(QStringLiteral("guid"));
+            g.name = attr(QStringLiteral("name"));
+            while (r.readNextStartElement()) {
+                if (r.name() == QLatin1String("Vertex")) {
+                    PendingVertex v;
+                    v.guid = attr(QStringLiteral("guid"));
+                    v.name = attr(QStringLiteral("name"));
+                    v.represented = attr(QStringLiteral("representedGUID"));
+                    v.x1 = attr(QStringLiteral("firstX")).toDouble();
+                    v.y1 = attr(QStringLiteral("firstY")).toDouble();
+                    v.x2 = attr(QStringLiteral("secondX")).toDouble();
+                    v.y2 = attr(QStringLiteral("secondY")).toDouble();
+                    v.color = attr(QStringLiteral("color"));
+                    g.vertices << v;
+                } else if (r.name() == QLatin1String("Edge")) {
+                    PendingEdge e;
+                    e.guid = attr(QStringLiteral("guid"));
+                    e.name = attr(QStringLiteral("name"));
+                    e.source = attr(QStringLiteral("sourceVertex"));
+                    e.target = attr(QStringLiteral("targetVertex"));
+                    e.color = attr(QStringLiteral("color"));
+                    g.edges << e;
+                }
+                r.skipCurrentElement();
+            }
+            graphs << g;
+        }
+    }
+
     void parseLinks()
     {
         while (r.readNextStartElement()) {
@@ -872,14 +994,14 @@ struct Importer {
                 parseSets();
             } else if (n == QLatin1String("Links")) {
                 parseLinks();
-            } else if (n == QLatin1String("Cases") || n == QLatin1String("Graphs")) {
-                // Tessera has no cases (the document is the case) and no graphs yet (issue #15).
-                int count = 0;
+            } else if (n == QLatin1String("Graphs")) {
+                parseGraphs();
+            } else if (n == QLatin1String("Cases")) {
+                // Tessera has no cases (the document is the case).
                 while (r.readNextStartElement()) {
-                    ++count;
+                    ++skippedCases;
                     r.skipCurrentElement();
                 }
-                (n == QLatin1String("Cases") ? skippedCases : skippedGraphs) += count;
             } else if (n == QLatin1String("NoteRef")) {
                 projectNoteRefs << attr(QStringLiteral("targetGUID"));
                 r.skipCurrentElement();
@@ -1127,6 +1249,66 @@ struct Importer {
                                                    0, n));
         }
 
+        // Graphs -> concept maps. A vertex that names something imported becomes a node on it; any other
+        // vertex a free text node. An edge whose ends are not both vertices of the graph is dropped.
+        int importedGraphs = 0;
+        for (const PendingGraph &g : graphs) {
+            const qint64 mapId = project.addConceptMap(g.name.isEmpty() ? QObject::tr("Mappa") : g.name, g.guid);
+            if (!mapId) {
+                ++skippedGraphs;
+                continue;
+            }
+            ++importedGraphs;
+            QHash<QString, qint64> nodeOfVertex;
+            for (const PendingVertex &v : g.vertices) {
+                MapNode node;
+                node.mapId = mapId;
+                node.label = v.name;
+                node.x = v.x1;
+                node.y = v.y1;
+                node.w = qMax(0.0, v.x2 - v.x1);
+                node.h = qMax(0.0, v.y2 - v.y1);
+                node.uuid = nodeOfVertex.contains(v.guid) ? QString() : v.guid;
+                if (qint64 id = codes.value(v.represented)) {
+                    node.kind = MapNodeKind::Code;
+                    node.refId = id;
+                } else if (qint64 id = docIds.value(v.represented)) {
+                    node.kind = MapNodeKind::Document;
+                    node.refId = id;
+                } else if (qint64 id = memoOfNote.value(v.represented)) {
+                    node.kind = MapNodeKind::Memo;
+                    node.refId = id;
+                } else if (qint64 id = segmentIds.value(v.represented)) {
+                    node.kind = MapNodeKind::Segment;
+                    node.refId = id;
+                }
+                if (QColor c(v.color); c.isValid()) {
+                    ConceptMaps::Style st;
+                    st.color = c;
+                    node.styleJson = ConceptMaps::styleToJson(st);
+                }
+                const qint64 id = project.addMapNode(node);
+                if (id && !nodeOfVertex.contains(v.guid))
+                    nodeOfVertex.insert(v.guid, id);
+            }
+            for (const PendingEdge &e : g.edges) {
+                if (!nodeOfVertex.contains(e.source) || !nodeOfVertex.contains(e.target))
+                    continue;
+                MapEdge edge;
+                edge.mapId = mapId;
+                edge.fromNode = nodeOfVertex.value(e.source);
+                edge.toNode = nodeOfVertex.value(e.target);
+                edge.label = e.name;
+                edge.uuid = e.guid;
+                if (QColor c(e.color); c.isValid()) {
+                    ConceptMaps::Style st;
+                    st.color = c;
+                    edge.styleJson = ConceptMaps::styleToJson(st);
+                }
+                project.addMapEdge(edge);
+            }
+        }
+
         // Links between two text selections become document links; REFI-QDA also links other
         // objects (codes, notes, whole sources), which Tessera cannot represent.
         int importedLinks = 0, skippedLinks = 0;
@@ -1153,6 +1335,8 @@ struct Importer {
                      .arg(project.allSegments().size())
                      .arg(project.memos().size())
                      .arg(variables.size());
+        if (importedGraphs)
+            report += QLatin1Char(' ') + QObject::tr("Mappe concettuali: %1.").arg(importedGraphs);
         if (importedLinks)
             report += QLatin1Char(' ') + QObject::tr("Collegamenti tra documenti: %1.").arg(importedLinks);
         if (skippedLinks)
@@ -1169,7 +1353,7 @@ struct Importer {
         if (skippedCases)
             warnings << QObject::tr("%1 casi ignorati (in Tessera il caso è il documento).").arg(skippedCases);
         if (skippedGraphs)
-            warnings << QObject::tr("%1 mappe (grafi) ignorate.").arg(skippedGraphs);
+            warnings << QObject::tr("%1 mappe (grafi) non importabili.").arg(skippedGraphs);
         if (unresolvedCodes)
             warnings << QObject::tr("%1 codifiche con codice inesistente ignorate.").arg(unresolvedCodes);
         if (invalidSelections)

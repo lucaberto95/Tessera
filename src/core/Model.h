@@ -169,6 +169,73 @@ struct SummaryTable {
     QString uuid;
 };
 
+// Concept maps (issue #15): a canvas of nodes joined by labelled arrows. A node is free text or points at a
+// code, a document, a memo or a segment (`refId`); a node whose target was deleted stays, shown as deleted.
+// Geometry is in scene units; `styleJson` holds optional {"color": "#rrggbb", "width": n, "line": "solid|dash|dot"}.
+enum class MapNodeKind { Text, Code, Document, Memo, Segment };
+
+struct ConceptMap {
+    qint64 id = 0;
+    QString name;
+    int position = 0;
+    QString uuid;
+};
+
+struct MapNode {
+    qint64 id = 0;
+    qint64 mapId = 0;
+    MapNodeKind kind = MapNodeKind::Text;
+    qint64 refId = 0;
+    QString label; // text of a free node; for the others, the caption last seen (used if the target is gone)
+    double x = 0, y = 0, w = 0, h = 0; // w/h == 0: size from the content
+    QString styleJson;
+    QString uuid;
+};
+
+struct MapEdge {
+    qint64 id = 0;
+    qint64 mapId = 0;
+    qint64 fromNode = 0;
+    qint64 toNode = 0;
+    QString label;
+    QString styleJson;
+    QString uuid;
+};
+
+// Research questions worksheet (issue #17): a question with its status, notes, themes (one per line),
+// conclusions and evidence. Evidence only refers to segments, codes and memos (never copies them).
+enum class QuestionStatus { Open, InProgress, Answered };
+
+struct ResearchQuestion {
+    qint64 id = 0;
+    QString title;
+    QString description;
+    QuestionStatus status = QuestionStatus::Open;
+    QStringList themes;
+    QString conclusions;
+    QString notes;
+    int position = 0;
+    QString uuid;
+};
+
+enum class EvidenceKind { Segment, Code, Memo };
+
+struct QuestionEvidence {
+    qint64 id = 0;
+    qint64 questionId = 0;
+    EvidenceKind kind = EvidenceKind::Segment;
+    qint64 refId = 0;
+    int position = 0;
+};
+// A time marker of a transcript (issue #29): the text from `textPos` (UTF-16 offset) on was said at
+// `timeMs` of the document's associated recording. It follows edits of the text like a segment does.
+struct Timestamp {
+    qint64 id = 0;
+    qint64 documentId = 0;
+    int textPos = 0;
+    qint64 timeMs = 0;
+};
+
 // One request made to a language model (issue #39), kept for transparency and reproducibility. Not part of undo.
 struct AiLogEntry {
     qint64 id = 0;
@@ -179,6 +246,25 @@ struct AiLogEntry {
     QString inputSummary; // what was sent, in words ("3 documenti, ~12.000 parole"), not the text itself
     QString output;
 };
+
+// A round of team work (issue #24): the project manager hands a copy to each member, the members code it and
+// send it back, the manager merges the returned copies. Bookkeeping of the manager's project only: not part of
+// undo, not merged, not exported (the copies given to the members carry no cycle history).
+enum class TeamCycleStatus { Sent, Returned, Merged };
+struct TeamCycle {
+    qint64 id = 0;
+    int number = 0;     // 1, 2, ... in order of creation of the round
+    QString member;     // coder the copy was given to (the author name recorded on their codings)
+    QString fileName;   // file name of the copy handed out
+    TeamCycleStatus status = TeamCycleStatus::Sent;
+    QDateTime sentAt;
+    QDateTime returnedAt; // null until the copy came back
+    QDateTime mergedAt;   // null until it was merged
+    QString report;       // summary of the merge, for the history
+};
+
+QString teamCycleStatusToString(TeamCycleStatus s);
+TeamCycleStatus teamCycleStatusFromString(const QString &s);
 
 QString documentKindToString(DocumentKind k);
 DocumentKind documentKindFromString(const QString &s);

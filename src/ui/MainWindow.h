@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QPointer>
 
 class CodeTree;
 class DocumentTree;
 class DocumentView;
 class Project;
+class QDialog;
 class QLabel;
 class QMenu;
 class QSplitter;
@@ -64,15 +66,23 @@ private:
     void showRetrieval();
     void showCooccurrence();
     void showAgreement();
+    void showTeamwork();
     void showStats();
     void showSummaryGrid();
     void showSummaryTables();
+    void showConceptMaps();
+    void showResearchQuestions();
     void showDictionaries();
+    void showSentiment();
     void showWordFrequencies();
+    void showTopics();
     void showVariableFilter();
     void showVariables();
+    void showUndoHistory();
     void showMemos();
     void showLinks();
+    void showTranscript();
+    void playSegment(qint64 documentId, qint64 segmentId);
     void editProjectMemo();
     void exportCodebook();
     void createReport();
@@ -117,6 +127,8 @@ private:
     QAction *m_quit = nullptr;
     QAction *m_undo = nullptr;
     QAction *m_redo = nullptr;
+    QAction *m_undoHistory = nullptr;
+    QPointer<QDialog> m_undoHistoryDialog;
     QAction *m_importDocs = nullptr;
     QAction *m_importSurvey = nullptr;
     QAction *m_newTextDoc = nullptr;
@@ -133,6 +145,10 @@ private:
     QAction *m_startLink = nullptr;
     QAction *m_completeLink = nullptr;
     QAction *m_links = nullptr;
+    QAction *m_transcript = nullptr;
+    QAction *m_insertStamp = nullptr;
+    QAction *m_playPause = nullptr;
+    QAction *m_rewindMedia = nullptr;
     QAction *m_exportCodebook = nullptr;
     QAction *m_createReport = nullptr;
     QAction *m_search = nullptr;
@@ -140,11 +156,16 @@ private:
     QAction *m_retrieval = nullptr;
     QAction *m_cooccurrence = nullptr;
     QAction *m_agreement = nullptr;
+    QAction *m_teamwork = nullptr;
     QAction *m_statsAction = nullptr;
     QAction *m_summaryGrid = nullptr;
     QAction *m_summaryTables = nullptr;
+    QAction *m_conceptMaps = nullptr;
+    QAction *m_researchQuestions = nullptr;
     QAction *m_dictionaries = nullptr;
+    QAction *m_sentiment = nullptr;
     QAction *m_wordFrequencies = nullptr;
+    QAction *m_topics = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;
     QAction *m_exportSegmentsXlsx = nullptr;
     QAction *m_exportSegmentsCsv = nullptr;

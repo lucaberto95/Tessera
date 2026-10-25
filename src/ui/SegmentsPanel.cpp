@@ -1,6 +1,7 @@
 #include "ui/SegmentsPanel.h"
 #include "core/Exporters.h"
 #include "core/Images.h"
+#include "core/Media.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
 #include "core/TextUtils.h"
@@ -15,6 +16,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QStyle>
 #include <QTableWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -35,6 +37,7 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     , m_table(new QTableWidget)
     , m_back(new QToolButton)
     , m_codeResults(new QToolButton)
+    , m_play(new QToolButton)
 {
     m_back->setText(tr("Torna al recupero semplice"));
     m_back->setVisible(false);
@@ -47,6 +50,17 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     m_filter->setClearButtonEnabled(true);
     m_filter->setMaximumWidth(280);
     connect(m_filter, &QLineEdit::textChanged, this, &SegmentsPanel::applyFilter);
+
+    m_play->setText(tr("Riproduci"));
+    m_play->setIcon(style()->standardIcon(QStyle::SP_MediaPlay));
+    m_play->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_play->setToolTip(tr("Riproduci la registrazione del segmento selezionato"));
+    m_play->setEnabled(false);
+    connect(m_play, &QToolButton::clicked, this, [this] {
+        const int row = m_table->currentRow();
+        if (row >= 0 && row < m_segments.size() && isPlayable(m_segments[row]))
+            emit segmentPlayRequested(m_segments[row].documentId, m_segments[row].id);
+    });
 
     auto *html = new QToolButton;
     html->setText(tr("Esporta HTML"));
@@ -64,6 +78,7 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     bar->addWidget(m_back);
     bar->addWidget(m_codeResults);
     bar->addWidget(m_filter);
+    bar->addWidget(m_play);
     bar->addWidget(html);
     bar->addWidget(xlsx);
     bar->addWidget(csv);
@@ -88,6 +103,11 @@ SegmentsPanel::SegmentsPanel(Project *project, QWidget *parent)
     m_table->setColumnWidth(DocumentColumn, 160);
     m_table->setColumnWidth(CodeColumn, 180);
     m_table->setColumnWidth(CommentColumn, 180);
+    connect(m_table, &QTableWidget::itemSelectionChanged, this, [this] {
+        const int row = m_table->currentRow();
+        m_play->setEnabled(row >= 0 && row < m_segments.size() && m_table->selectionModel()->hasSelection()
+                           && isPlayable(m_segments[row]));
+    });
     connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int row) {
         if (row >= 0 && row < m_segments.size()) {
             const Segment &s = m_segments[row];
@@ -143,6 +163,20 @@ void SegmentsPanel::refresh()
     QHash<qint64, std::shared_ptr<Pdfs::Doc>> pdfs;
     for (int row = 0; row < m_segments.size(); ++row) {
         const Segment &s = m_segments[row];
+        if (s.kind == SegmentKind::Time) { // an interval of a recording
+            auto *doc = new QTableWidgetItem(docNames.value(s.documentId));
+            doc->setToolTip(Ui::plainToolTip(Media::formatRange(s.tStartMs, s.tEndMs)));
+            auto *code = new QTableWidgetItem(Ui::colorIcon(codes.value(s.codeId).color), m_project->codePath(s.codeId));
+            auto *range = new QTableWidgetItem(style()->standardIcon(QStyle::SP_MediaPlay), Media::formatRange(s.tStartMs, s.tEndMs));
+            auto *weight = new QTableWidgetItem(s.weight ? QString::number(s.weight) : QString());
+            weight->setTextAlignment(Qt::AlignCenter);
+            m_table->setItem(row, DocumentColumn, doc);
+            m_table->setItem(row, CodeColumn, code);
+            m_table->setItem(row, TextColumn, range);
+            m_table->setItem(row, WeightColumn, weight);
+            m_table->setItem(row, CommentColumn, new QTableWidgetItem(s.comment));
+            continue;
+        }
         if (s.kind == SegmentKind::Area) {
             // PDF area with text: the text it was coded with. Otherwise (images, PDF areas without text) a
             // thumbnail of the cropped region.
@@ -224,6 +258,17 @@ void SegmentsPanel::refresh()
                            (m_documentIds.isEmpty() ? tr("tutti i documenti")
                                                     : tr("%n documenti attivi", nullptr, int(m_documentIds.size()))));
     applyFilter();
+}
+
+// A time interval always plays; a text passage plays when its document has a recording and time stamps.
+bool SegmentsPanel::isPlayable(const Segment &s) const
+{
+    if (!s.id)
+        return false;
+    if (s.kind == SegmentKind::Time)
+        return true;
+    return s.kind == SegmentKind::Text && !m_project->documentMediaPath(s.documentId).isEmpty()
+           && !m_project->timestamps(s.documentId).isEmpty();
 }
 
 void SegmentsPanel::applyFilter()
@@ -334,7 +379,13 @@ void SegmentsPanel::contextMenuEvent(QContextMenuEvent *event)
     QMenu menu(this);
     menu.addAction(tr("Mostra nel documento"), this,
                    [this, seg] { emit segmentActivated(seg.documentId, seg.start, seg.end, seg.id); });
-    if (seg.kind == SegmentKind::Area) {
+    if (isPlayable(seg))
+        menu.addAction(style()->standardIcon(QStyle::SP_MediaPlay), tr("Riproduci"), this,
+                       [this, seg] { emit segmentPlayRequested(seg.documentId, seg.id); });
+    if (seg.kind == SegmentKind::Time) {
+        menu.addAction(tr("Copia intervallo"), this,
+                       [seg] { QApplication::clipboard()->setText(Media::formatRange(seg.tStartMs, seg.tEndMs)); });
+    } else if (seg.kind == SegmentKind::Area) {
         menu.addAction(tr("Copia immagine"), this, [this, seg] {
             if (seg.page > 0) {
                 Pdfs::Doc doc;

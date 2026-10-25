@@ -2,7 +2,9 @@
 #include "core/DemoProject.h"
 #include "core/Exporters.h"
 #include "core/Images.h"
+#include "core/Media.h"
 #include "core/Merge.h"
+#include "core/Team.h"
 #include "core/Importers.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
@@ -24,18 +26,27 @@
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
 #include "ui/SummaryGridDialog.h"
+#include "ui/ResearchQuestionsDialog.h"
 #include "ui/SummaryTablesDialog.h"
+#include "ui/ConceptMapDialog.h"
 #include "ui/MatrixDialog.h"
 #include "ui/MergeDialog.h"
+#include "ui/TeamDialog.h"
+#include "ui/TeamSyncDialog.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/LinksDialog.h"
+#include "ui/UndoHistoryDialog.h"
+#include "ui/TranscriptDialog.h"
+#include "ui/MediaPlayerWidget.h"
 #include "ui/MemoManager.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
 #include "ui/SurveyImportDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/VariablesDialog.h"
+#include "ui/SentimentDialog.h"
+#include "ui/TopicsDialog.h"
 #include "ui/WordFrequencyDialog.h"
 
 #include <QApplication>
@@ -167,6 +178,7 @@ void MainWindow::createActions()
             Ui::showError(this, m_project->lastError());
     }, QKeySequence::Redo, true, QStyle::SP_ArrowForward);
     m_redo->setShortcuts({QKeySequence::Redo, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)});
+    m_undoHistory = make(tr("&Cronologia di annulla…"), &MainWindow::showUndoHistory);
 
     m_importDocs = make(tr("&Importa documenti…"), [this] { importDocuments(m_documents->currentGroupId()); },
                         QKeySequence(Qt::CTRL | Qt::Key_I), true, QStyle::SP_FileIcon);
@@ -200,6 +212,12 @@ void MainWindow::createActions()
     m_completeLink = make(tr("Completa co&llegamento"), [this] { m_view->completeLink(); },
                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
     m_links = make(tr("C&ollegamenti…"), &MainWindow::showLinks);
+    m_transcript = make(tr("&Time stamp della trascrizione…"), &MainWindow::showTranscript);
+    m_insertStamp = make(tr("Inserisci time stamp al &tempo corrente"), [this] { m_view->insertTimestampAtCursor(); },
+                         QKeySequence(Qt::Key_F8));
+    m_playPause = make(tr("Riproduci / &pausa"), [this] { m_view->player()->togglePlay(); }, QKeySequence(Qt::Key_F9));
+    m_rewindMedia = make(tr("&Riavvolgi la registrazione"), [this] { m_view->player()->rewind(); },
+                         QKeySequence(Qt::Key_F7));
     m_exportCodebook = make(tr("Esporta &codebook…"), &MainWindow::exportCodebook);
     m_createReport = make(tr("Crea &report (Word, PDF, HTML)…"), &MainWindow::createReport);
 
@@ -209,12 +227,17 @@ void MainWindow::createActions()
     m_matrix = make(tr("&Matrice codici × documenti…"), &MainWindow::showMatrix, QKeySequence(Qt::CTRL | Qt::Key_M));
     m_retrieval = make(tr("Recupero &complesso…"), &MainWindow::showRetrieval, QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
     m_cooccurrence = make(tr("Co-&occorrenze dei codici…"), &MainWindow::showCooccurrence);
+    m_teamwork = make(tr("Lavoro di &gruppo…"), &MainWindow::showTeamwork);
     m_agreement = make(tr("Accordo tra codi&ficatori…"), &MainWindow::showAgreement);
     m_statsAction = make(tr("&Statistiche e tabelle incrociate…"), &MainWindow::showStats);
     m_summaryGrid = make(tr("&Griglia delle sintesi…"), &MainWindow::showSummaryGrid);
     m_summaryTables = make(tr("Tabelle &riassuntive…"), &MainWindow::showSummaryTables);
+    m_conceptMaps = make(tr("Mappe conce&ttuali…"), &MainWindow::showConceptMaps);
+    m_researchQuestions = make(tr("Domande di &ricerca…"), &MainWindow::showResearchQuestions);
     m_wordFrequencies = make(tr("&Frequenze di parole, nuvola e parole in contesto…"), &MainWindow::showWordFrequencies);
+    m_topics = make(tr("&Topic modeling…"), &MainWindow::showTopics);
     m_dictionaries = make(tr("&Dizionari e analisi del contenuto…"), &MainWindow::showDictionaries);
+    m_sentiment = make(tr("Analisi del &sentiment…"), &MainWindow::showSentiment);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
     m_exportSegmentsXlsx = make(tr("Esporta segmenti recuperati (&Excel .xlsx)…"), [this] { m_segments->exportXlsx(); });
     m_exportSegmentsCsv = make(tr("Esporta segmenti recuperati (CS&V per Excel)…"), [this] { m_segments->exportCsv(); });
@@ -275,6 +298,7 @@ void MainWindow::createMenus()
     QMenu *edit = menuBar()->addMenu(tr("&Modifica"));
     edit->addAction(m_undo);
     edit->addAction(m_redo);
+    edit->addAction(m_undoHistory);
 
     QMenu *docs = menuBar()->addMenu(tr("&Documenti"));
     docs->addAction(m_importDocs);
@@ -287,6 +311,10 @@ void MainWindow::createMenus()
     docs->addAction(m_startLink);
     docs->addAction(m_completeLink);
     docs->addAction(m_links);
+    docs->addAction(m_transcript);
+    docs->addAction(m_insertStamp);
+    docs->addAction(m_playPause);
+    docs->addAction(m_rewindMedia);
     docs->addSeparator();
     docs->addAction(m_variables);
     docs->addSeparator();
@@ -314,12 +342,17 @@ void MainWindow::createMenus()
     analysis->addAction(m_matrix);
     analysis->addAction(m_retrieval);
     analysis->addAction(m_cooccurrence);
+    analysis->addAction(m_teamwork);
     analysis->addAction(m_agreement);
     analysis->addAction(m_statsAction);
     analysis->addAction(m_summaryGrid);
     analysis->addAction(m_summaryTables);
+    analysis->addAction(m_conceptMaps);
+    analysis->addAction(m_researchQuestions);
     analysis->addAction(m_wordFrequencies);
+    analysis->addAction(m_topics);
     analysis->addAction(m_dictionaries);
+    analysis->addAction(m_sentiment);
     analysis->addAction(m_activateByVariables);
     analysis->addSeparator();
     analysis->addAction(m_exportSegmentsHtml);
@@ -433,9 +466,20 @@ void MainWindow::createToolBar()
 void MainWindow::connectProject()
 {
     connect(m_project, &Project::opened, this, [this] {
+        // A copy handed out for team work knows who its coder is: the author stays stable, whatever the
+        // user name set on this computer (issue #24).
+        const QString member = m_project->meta(QLatin1String(Team::MemberKey));
+        const QString saved = QSettings().value(QStringLiteral("user/name")).toString();
+        if (!member.isEmpty())
+            m_project->setAuthor(member);
+        else if (!saved.isEmpty())
+            m_project->setAuthor(saved);
         refreshAll();
         updateActions();
         updateTitle();
+        const QString synced = TeamSyncDialog::runAutoSync(*m_project); // only if the user asked for it (issue #24)
+        if (!synced.isEmpty())
+            statusBar()->showMessage(synced, 10000);
     });
     connect(m_project, &Project::closed, this, [this] {
         m_view->closeDocument();
@@ -452,6 +496,7 @@ void MainWindow::connectProject()
         m_documents->rebuild();
         updateRetrieval();
         updateStats();
+        updateActions(); // a recording may have been (re)linked
     });
     connect(m_project, &Project::documentSetsChanged, m_documents, &DocumentTree::rebuild);
     connect(m_project, &Project::codesChanged, this, [this] {
@@ -495,6 +540,7 @@ void MainWindow::connectProject()
         updateActions();
     });
     connect(m_segments, &SegmentsPanel::segmentActivated, this, &MainWindow::openSegment);
+    connect(m_segments, &SegmentsPanel::segmentPlayRequested, this, &MainWindow::playSegment);
 }
 
 void MainWindow::updateActions()
@@ -508,7 +554,12 @@ void MainWindow::updateActions()
     m_startLink->setEnabled(canCode);
     m_completeLink->setEnabled(canCode && m_view->hasPendingLink());
     m_newSubcode->setEnabled(open && m_codes->currentCodeId());
-    m_editText->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf());
+    m_editText->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf() && !m_view->isMedia());
+    m_transcript->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf() && !m_view->isMedia());
+    const bool playable = open && m_view->documentId() && m_view->player()->hasMedia();
+    m_insertStamp->setEnabled(playable && !m_view->isMedia());
+    m_playPause->setEnabled(playable);
+    m_rewindMedia->setEnabled(playable);
 
     // While editing a document's text, Ctrl+Z belongs to the text editor.
     const bool editing = m_view->isEditing();
@@ -813,6 +864,14 @@ void MainWindow::importDocuments(qint64 groupId)
                                 (error.isEmpty() ? m_project->lastError() : error);
             continue;
         }
+        if (Media::isMediaFile(files[i])) { // linked, not embedded: recordings can be huge
+            const qint64 id = m_project->addRecordingDocument(groupId, files[i]);
+            if (id)
+                lastId = id;
+            else
+                failures << QFileInfo(files[i]).fileName() + QStringLiteral(": ") + m_project->lastError();
+            continue;
+        }
         if (pdfAsPages && Pdfs::isPdfFile(files[i])) {
             QString error;
             const QByteArray data = Pdfs::readFile(files[i], &error);
@@ -838,6 +897,8 @@ void MainWindow::importDocuments(qint64 groupId)
         lastId = m_project->addDocument(groupId, QFileInfo(files[i]).completeBaseName(), r.text, files[i]);
         if (lastId && !r.richContent.isEmpty())
             m_project->setDocumentRichContent(lastId, r.richContent);
+        if (lastId && !r.stamps.isEmpty())
+            m_project->setTimestamps(lastId, r.stamps);
     }
     progress.setValue(int(files.size()));
     m_project->commitBatch();
@@ -908,6 +969,19 @@ void MainWindow::showVariables()
 {
     VariablesDialog dlg(m_project, this);
     dlg.exec();
+}
+
+void MainWindow::showUndoHistory()
+{
+    if (m_undoHistoryDialog) {
+        m_undoHistoryDialog->raise();
+        m_undoHistoryDialog->activateWindow();
+        return;
+    }
+    auto *dlg = new UndoHistoryDialog(m_project, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    m_undoHistoryDialog = dlg;
+    dlg->show();
 }
 
 // ---------------------------------------------------------------- coding
@@ -999,6 +1073,15 @@ void MainWindow::showCooccurrence()
     dlg->show();
 }
 
+void MainWindow::showTeamwork()
+{
+    m_view->commitEdits();
+    TeamDialog dlg(m_project, this);
+    dlg.exec();
+    if (dlg.agreementRequested())
+        showAgreement();
+}
+
 void MainWindow::showAgreement()
 {
     auto *dlg = new AgreementDialog(m_project, m_documents->activeDocumentIds(), m_codes->activeCodeIds(), this);
@@ -1038,11 +1121,82 @@ void MainWindow::showSummaryTables()
     dlg->show();
 }
 
+void MainWindow::showConceptMaps()
+{
+    auto *dlg = new ConceptMapDialog(m_project, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &ConceptMapDialog::elementActivated, this, [this](int kind, qint64 id) {
+        switch (static_cast<MapNodeKind>(kind)) {
+        case MapNodeKind::Document:
+            openSegment(id, 0, 0, 0);
+            break;
+        case MapNodeKind::Code:
+            m_codes->setCurrentCode(id);
+            break;
+        case MapNodeKind::Memo: {
+            const Memo memo = m_project->memo(id);
+            if (memo.id)
+                Ui::openMemo(this, m_project, memo);
+            break;
+        }
+        case MapNodeKind::Segment: {
+            const Segment s = m_project->segment(id);
+            if (s.id)
+                openSegment(s.documentId, s.start, s.end, s.id);
+            break;
+        }
+        default:
+            break;
+        }
+    });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showResearchQuestions()
+{
+    auto *dlg = new ResearchQuestionsDialog(m_project, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &ResearchQuestionsDialog::evidenceActivated, this, [this](int kind, qint64 id) {
+        switch (EvidenceKind(kind)) {
+        case EvidenceKind::Segment: {
+            const Segment s = m_project->segment(id);
+            if (s.id)
+                openSegment(s.documentId, s.start, s.end, s.id);
+            break;
+        }
+        case EvidenceKind::Code:
+            m_codes->setCurrentCode(id);
+            break;
+        case EvidenceKind::Memo: {
+            const Memo m = m_project->memo(id);
+            if (m.id)
+                Ui::openMemo(this, m_project, m);
+            break;
+        }
+        }
+    });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
 void MainWindow::showDictionaries()
 {
     auto *dlg = new DictionaryDialog(m_project, [this] { return m_documents->activeDocumentIds(); }, this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &DictionaryDialog::documentActivated, this, [this](qint64 doc) { m_view->openDocument(doc); });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showSentiment()
+{
+    auto *dlg = new SentimentDialog(m_project, [this] { return m_documents->activeDocumentIds(); },
+                                    [this] { return m_segments->segments(); }, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &SentimentDialog::passagesRequested, m_segments, &SegmentsPanel::setPassages);
+    connect(dlg, &SentimentDialog::passageActivated, this,
+            [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }
@@ -1065,6 +1219,17 @@ void MainWindow::showWordFrequencies()
         search->show();
         search->searchFor(word);
     });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showTopics()
+{
+    auto *dlg = new TopicsDialog(m_project, [this] { return m_documents->activeDocumentIds(); },
+                                 [this] { return m_segments->segments(); }, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &TopicsDialog::passageActivated, this,
+            [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }
@@ -1097,6 +1262,20 @@ void MainWindow::showMatrix()
     dlg->show();
 }
 
+// Opens the document of a segment and plays it: a time interval, or a transcript passage between time stamps.
+void MainWindow::playSegment(qint64 documentId, qint64 segmentId)
+{
+    for (const Segment &s : m_project->segmentsForDocument(documentId, true)) {
+        if (s.id != segmentId)
+            continue;
+        m_view->openDocument(documentId);
+        m_documents->setCurrentDocument(documentId);
+        if (!m_view->playSegment(s))
+            statusBar()->showMessage(tr("Questo segmento non si può riprodurre: manca la registrazione o i time stamp."), 5000);
+        return;
+    }
+}
+
 void MainWindow::openSegment(qint64 documentId, int start, int end, qint64 segmentId)
 {
     m_view->openDocument(documentId);
@@ -1126,6 +1305,29 @@ void MainWindow::showLinks()
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &LinksDialog::endActivated, this,
             [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showTranscript()
+{
+    const qint64 doc = m_view->documentId();
+    if (!doc || m_view->isImage() || m_view->isPdf() || m_view->isMedia())
+        return;
+    auto *dlg = new TranscriptDialog(m_project, doc, [this] { return m_view->cursorPosition(); }, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &TranscriptDialog::playRequested, this, [this](qint64 id, qint64 timeMs) {
+        m_view->openDocument(id);
+        m_documents->setCurrentDocument(id);
+        if (m_view->player()->hasMedia()) {
+            m_view->player()->seek(timeMs);
+            m_view->player()->play();
+        } else {
+            statusBar()->showMessage(tr("La registrazione non è disponibile: ricollega il file dal lettore."), 5000);
+        }
+    });
+    connect(dlg, &TranscriptDialog::positionActivated, this,
+            [this](qint64 id, int pos) { openSegment(id, pos, pos, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

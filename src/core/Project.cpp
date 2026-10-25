@@ -1,4 +1,5 @@
 #include "core/Project.h"
+#include "core/Media.h"
 #include "core/RichText.h"
 
 #include <QBuffer>
@@ -427,6 +428,9 @@ void Project::emitAllChanged()
     emit linksChanged();
     emit dictionariesChanged();
     emit summariesChanged();
+    emit mapsChanged();
+    emit researchQuestionsChanged();
+    emit timestampsChanged();
 }
 
 // ---------------------------------------------------------------- undo / redo
@@ -446,7 +450,8 @@ bool Project::installUndoTriggers()
                                          "memos", "variables", "variable_values",
                                          "document_sets", "document_set_members", "links", "memo_links",
                                          "dictionaries", "dict_categories", "dict_entries", "document_data",
-                                         "summaries", "summary_tables"};
+                                         "summaries", "summary_tables", "maps", "map_nodes", "map_edges",
+                                         "research_questions", "research_evidence", "timestamps"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -582,6 +587,38 @@ bool Project::redo()
     return true;
 }
 
+QStringList Project::undoLabels() const
+{
+    QStringList out;
+    for (qsizetype i = m_undoSteps.size() - 1; i >= 0; --i)
+        out.append(m_undoSteps.at(i).label);
+    return out;
+}
+
+QStringList Project::redoLabels() const
+{
+    QStringList out;
+    for (qsizetype i = m_redoSteps.size() - 1; i >= 0; --i)
+        out.append(m_redoSteps.at(i).label);
+    return out;
+}
+
+bool Project::undoSteps(int count)
+{
+    for (int i = 0; i < count; ++i)
+        if (!undo())
+            return false;
+    return true;
+}
+
+bool Project::redoSteps(int count)
+{
+    for (int i = 0; i < count; ++i)
+        if (!redo())
+            return false;
+    return true;
+}
+
 void Project::clearUndoHistory()
 {
     takeUndoLog();
@@ -711,6 +748,61 @@ QList<Project::Migration> Project::builtInMigrations()
                          " id INTEGER PRIMARY KEY, function TEXT NOT NULL, provider TEXT NOT NULL,"
                          " model TEXT NOT NULL, created_at TEXT NOT NULL, input_summary TEXT NOT NULL DEFAULT '',"
                          " output TEXT NOT NULL DEFAULT '')")}},
+        {12,
+         {// Concept maps (issue #15).
+          QStringLiteral("CREATE TABLE maps ("
+                         " id INTEGER PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,"
+                         " uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE TABLE map_nodes ("
+                         " id INTEGER PRIMARY KEY, map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,"
+                         " kind TEXT NOT NULL, ref_id INTEGER NOT NULL DEFAULT 0, label TEXT NOT NULL DEFAULT '',"
+                         " x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0, w REAL NOT NULL DEFAULT 0,"
+                         " h REAL NOT NULL DEFAULT 0, style_json TEXT NOT NULL DEFAULT '', uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE INDEX idx_map_nodes_map ON map_nodes(map_id)"),
+          QStringLiteral("CREATE TABLE map_edges ("
+                         " id INTEGER PRIMARY KEY, map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,"
+                         " from_node INTEGER NOT NULL REFERENCES map_nodes(id) ON DELETE CASCADE,"
+                         " to_node INTEGER NOT NULL REFERENCES map_nodes(id) ON DELETE CASCADE,"
+                         " label TEXT NOT NULL DEFAULT '', style_json TEXT NOT NULL DEFAULT '', uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE INDEX idx_map_edges_map ON map_edges(map_id)")}},
+        {13,
+         {// Research questions worksheet (issue #17). Evidence refers to a segment, a code or a memo through
+          // one nullable foreign key each, so deleting the element removes its evidence (and undo restores it).
+          QStringLiteral("CREATE TABLE research_questions ("
+                         " id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',"
+                         " status TEXT NOT NULL DEFAULT 'open', themes TEXT NOT NULL DEFAULT '',"
+                         " conclusions TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',"
+                         " position INTEGER NOT NULL DEFAULT 0, uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE TABLE research_evidence ("
+                         " id INTEGER PRIMARY KEY,"
+                         " question_id INTEGER NOT NULL REFERENCES research_questions(id) ON DELETE CASCADE,"
+                         " segment_id INTEGER REFERENCES segments(id) ON DELETE CASCADE,"
+                         " code_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,"
+                         " memo_id INTEGER REFERENCES memos(id) ON DELETE CASCADE,"
+                         " position INTEGER NOT NULL DEFAULT 0,"
+                         " CHECK ((segment_id IS NOT NULL) + (code_id IS NOT NULL) + (memo_id IS NOT NULL) = 1))"),
+          QStringLiteral("CREATE INDEX idx_research_evidence_question ON research_evidence(question_id)"),
+          QStringLiteral("CREATE UNIQUE INDEX idx_research_evidence_segment ON research_evidence(question_id, segment_id)"
+                         " WHERE segment_id IS NOT NULL"),
+          QStringLiteral("CREATE UNIQUE INDEX idx_research_evidence_code ON research_evidence(question_id, code_id)"
+                         " WHERE code_id IS NOT NULL"),
+          QStringLiteral("CREATE UNIQUE INDEX idx_research_evidence_memo ON research_evidence(question_id, memo_id)"
+                         " WHERE memo_id IS NOT NULL")}},
+        {14,
+         {// Rounds of team work (issue #24). Bookkeeping of the manager's project, deliberately outside the undo
+          // triggers like ai_log.
+          QStringLiteral("CREATE TABLE team_cycles ("
+                         " id INTEGER PRIMARY KEY, number INTEGER NOT NULL, member TEXT NOT NULL,"
+                         " file_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'sent',"
+                         " sent_at TEXT NOT NULL, returned_at TEXT, merged_at TEXT, report TEXT NOT NULL DEFAULT '')")}},
+        {15,
+         {// Transcript time stamps (issue #29) and the recording a text document is the transcript of.
+          QStringLiteral("CREATE TABLE timestamps ("
+                         " id INTEGER PRIMARY KEY,"
+                         " document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,"
+                         " text_pos INTEGER NOT NULL, time_ms INTEGER NOT NULL)"),
+          QStringLiteral("CREATE INDEX idx_timestamps_document ON timestamps(document_id)"),
+          QStringLiteral("ALTER TABLE documents ADD COLUMN media_path TEXT NOT NULL DEFAULT ''")}},
     };
 }
 
@@ -1143,6 +1235,7 @@ bool Project::deleteDocument(qint64 id)
     notify(&Project::memosChanged);
     notify(&Project::variablesChanged);
     notify(&Project::linksChanged);
+    notify(&Project::timestampsChanged);
     notifySegments(id);
     return commitBatch();
 }
@@ -1153,17 +1246,36 @@ bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Seg
     setUndoLabel(tr("Modifica testo"));
     // The formatting follows the edit like segments do (it is only read when the document has any).
     const QString oldRich = documentRichContent(id);
-    const QString oldText = oldRich.isEmpty() ? QString() : documentText(id);
-    beginBatch();
-    bool ok = exec(QStringLiteral("UPDATE documents SET content = ? WHERE id = ?"), {text, id});
-    if (ok && !oldRich.isEmpty() && oldText != text) {
-        int prefix = 0;
+    const bool hasStamps = scalar(QStringLiteral("SELECT COUNT(*) FROM timestamps WHERE document_id = ?"), {id}).toInt() > 0;
+    const QString oldText = (oldRich.isEmpty() && !hasStamps) ? QString() : documentText(id);
+    // The edit, as the common prefix and suffix of the old and new text (formatting and time stamps follow it).
+    int prefix = 0, suffix = 0;
+    if (oldText != text) {
         const int limit = int(qMin(oldText.size(), text.size()));
         while (prefix < limit && oldText.at(prefix) == text.at(prefix))
             ++prefix;
-        int suffix = 0;
         while (suffix < limit - prefix && oldText.at(oldText.size() - 1 - suffix) == text.at(text.size() - 1 - suffix))
             ++suffix;
+    }
+    beginBatch();
+    bool ok = exec(QStringLiteral("UPDATE documents SET content = ? WHERE id = ?"), {text, id});
+    if (ok && hasStamps && oldText != text) {
+        const int removed = int(oldText.size()) - prefix - suffix, added = int(text.size()) - prefix - suffix;
+        for (const Timestamp &ts : timestamps(id)) {
+            // A marker at or before the edit stays; after it, it moves; inside the removed text, it goes to the edit.
+            int pos = ts.textPos;
+            if (pos <= prefix)
+                ; // before the edit, or exactly at its start (text typed there follows the marker)
+            else if (pos >= prefix + removed)
+                pos += added - removed;
+            else
+                pos = prefix;
+            pos = qBound(0, pos, int(text.size()));
+            if (ok && pos != ts.textPos)
+                ok = exec(QStringLiteral("UPDATE timestamps SET text_pos = ? WHERE id = ?"), {pos, ts.id});
+        }
+    }
+    if (ok && !oldRich.isEmpty() && oldText != text) {
         RichText::Formatting f = RichText::fromJson(oldRich);
         RichText::adjustForEdit(f, prefix, int(oldText.size()) - prefix - suffix, int(text.size()) - prefix - suffix);
         RichText::clamp(f, int(text.size()));
@@ -1218,8 +1330,144 @@ bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Seg
     notify(&Project::documentsChanged);
     notify(&Project::memosChanged);
     notify(&Project::linksChanged);
+    if (hasStamps)
+        notify(&Project::timestampsChanged);
     notifySegments(id);
     return commitBatch();
+}
+
+// ---------------------------------------------------------------- transcript time stamps
+
+QList<Timestamp> Project::timestamps(qint64 documentId) const
+{
+    QList<Timestamp> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, document_id, text_pos, time_ms FROM timestamps WHERE document_id = ?"
+                             " ORDER BY text_pos, time_ms, id"));
+    q.addBindValue(documentId);
+    q.exec();
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toLongLong(), q.value(2).toInt(), q.value(3).toLongLong()});
+    return out;
+}
+
+qint64 Project::addTimestamp(qint64 documentId, int textPos, qint64 timeMs)
+{
+    setUndoLabel(tr("Nuovo time stamp"));
+    const Document d = document(documentId);
+    if (!d.id || d.kind != DocumentKind::Text) {
+        fail(tr("I time stamp si inseriscono solo nei documenti di testo"));
+        return 0;
+    }
+    if (textPos < 0 || textPos > documentText(documentId).size() || timeMs < 0) {
+        fail(tr("Time stamp non valido"));
+        return 0;
+    }
+    const qint64 id = insert(QStringLiteral("INSERT INTO timestamps(document_id, text_pos, time_ms) VALUES (?, ?, ?)"),
+                             {documentId, textPos, timeMs});
+    if (id)
+        notify(&Project::timestampsChanged);
+    return id;
+}
+
+bool Project::setTimestampTime(qint64 id, qint64 timeMs)
+{
+    setUndoLabel(tr("Modifica time stamp"));
+    if (timeMs < 0)
+        return fail(tr("Time stamp non valido"));
+    if (!exec(QStringLiteral("UPDATE timestamps SET time_ms = ? WHERE id = ?"), {timeMs, id}))
+        return false;
+    notify(&Project::timestampsChanged);
+    return true;
+}
+
+bool Project::deleteTimestamp(qint64 id)
+{
+    setUndoLabel(tr("Elimina time stamp"));
+    if (!exec(QStringLiteral("DELETE FROM timestamps WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::timestampsChanged);
+    return true;
+}
+
+bool Project::setTimestamps(qint64 documentId, const QList<Timestamp> &stamps)
+{
+    setUndoLabel(tr("Sostituisci time stamp"));
+    const Document d = document(documentId);
+    if (!d.id || d.kind != DocumentKind::Text)
+        return fail(tr("I time stamp si inseriscono solo nei documenti di testo"));
+    const int length = int(documentText(documentId).size());
+    beginBatch();
+    bool ok = exec(QStringLiteral("DELETE FROM timestamps WHERE document_id = ?"), {documentId});
+    for (const Timestamp &ts : stamps) {
+        if (!ok)
+            break;
+        if (ts.textPos < 0 || ts.textPos > length || ts.timeMs < 0)
+            continue;
+        ok = insert(QStringLiteral("INSERT INTO timestamps(document_id, text_pos, time_ms) VALUES (?, ?, ?)"),
+                    {documentId, ts.textPos, ts.timeMs}) != 0;
+    }
+    if (!ok) {
+        rollbackBatch();
+        return false;
+    }
+    notify(&Project::timestampsChanged);
+    return commitBatch();
+}
+
+bool Project::shiftTimestamps(qint64 documentId, qint64 deltaMs)
+{
+    setUndoLabel(tr("Sposta time stamp"));
+    if (!exec(QStringLiteral("UPDATE timestamps SET time_ms = MAX(0, time_ms + ?) WHERE document_id = ?"),
+              {deltaMs, documentId}))
+        return false;
+    notify(&Project::timestampsChanged);
+    return true;
+}
+
+QString Project::documentMediaPath(qint64 documentId) const
+{
+    return scalar(QStringLiteral("SELECT media_path FROM documents WHERE id = ?"), {documentId}).toString();
+}
+
+bool Project::setDocumentMediaPath(qint64 documentId, const QString &path)
+{
+    setUndoLabel(tr("Registrazione associata"));
+    if (!document(documentId).id)
+        return fail(tr("Documento inesistente"));
+    if (!exec(QStringLiteral("UPDATE documents SET media_path = ? WHERE id = ?"), {path, documentId}))
+        return false;
+    notify(&Project::documentsChanged);
+    return true;
+}
+
+qint64 Project::addRecordingDocument(qint64 groupId, const QString &mediaFile, const QString &name)
+{
+    setUndoLabel(tr("Nuovo documento"));
+    const DocumentKind kind = Media::kindForFile(mediaFile);
+    if (kind == DocumentKind::Text) {
+        fail(tr("%1 non è un file audio o video").arg(QFileInfo(mediaFile).fileName()));
+        return 0;
+    }
+    beginBatch();
+    const qint64 id = addMediaDocument(groupId, name.isEmpty() ? QFileInfo(mediaFile).completeBaseName() : name, kind,
+                                       QFileInfo(mediaFile).absoluteFilePath());
+    if (!id || !setDocumentMediaPath(id, storableMediaPath(mediaFile))) {
+        rollbackBatch();
+        return 0;
+    }
+    commitBatch();
+    return id;
+}
+
+QString Project::storableMediaPath(const QString &mediaFile) const
+{
+    return Media::storedPath(m_path, mediaFile);
+}
+
+QString Project::resolvedMediaPath(qint64 documentId) const
+{
+    return Media::resolvePath(m_path, documentMediaPath(documentId));
 }
 
 // ---------------------------------------------------------------- document sets
@@ -2214,8 +2462,474 @@ bool Project::deleteSummaryTable(qint64 id)
     notify(&Project::summariesChanged);
     return true;
 }
-// ---------------------------------------------------------------- AI log
+// ---------------------------------------------------------------- concept maps
 
+namespace {
+QString kindToString(MapNodeKind k)
+{
+    switch (k) {
+    case MapNodeKind::Code: return QStringLiteral("code");
+    case MapNodeKind::Document: return QStringLiteral("document");
+    case MapNodeKind::Memo: return QStringLiteral("memo");
+    case MapNodeKind::Segment: return QStringLiteral("segment");
+    default: return QStringLiteral("text");
+    }
+}
+
+MapNodeKind kindFromString(const QString &s)
+{
+    if (s == QLatin1String("code")) return MapNodeKind::Code;
+    if (s == QLatin1String("document")) return MapNodeKind::Document;
+    if (s == QLatin1String("memo")) return MapNodeKind::Memo;
+    if (s == QLatin1String("segment")) return MapNodeKind::Segment;
+    return MapNodeKind::Text;
+}
+
+const char *const kNodeColumns = "id, map_id, kind, ref_id, label, x, y, w, h, style_json, uuid";
+
+MapNode nodeFrom(const QSqlQuery &q)
+{
+    return {q.value(0).toLongLong(), q.value(1).toLongLong(), kindFromString(q.value(2).toString()),
+            q.value(3).toLongLong(), q.value(4).toString(), q.value(5).toDouble(), q.value(6).toDouble(),
+            q.value(7).toDouble(), q.value(8).toDouble(), q.value(9).toString(), q.value(10).toString()};
+}
+} // namespace
+
+QList<ConceptMap> Project::conceptMaps() const
+{
+    QList<ConceptMap> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id, name, position, uuid FROM maps ORDER BY position, id"));
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toInt(), q.value(3).toString()});
+    return out;
+}
+
+ConceptMap Project::conceptMap(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, name, position, uuid FROM maps WHERE id = ?"));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return {q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toInt(), q.value(3).toString()};
+    return {};
+}
+
+qint64 Project::addConceptMap(const QString &name, const QString &uuid)
+{
+    setUndoLabel(tr("Nuova mappa concettuale"));
+    const qint64 id = insert(QStringLiteral("INSERT INTO maps(name, position, uuid) VALUES (?, ?, ?)"),
+                             {name, nextPosition(QStringLiteral("maps")), uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notify(&Project::mapsChanged);
+    return id;
+}
+
+bool Project::renameConceptMap(qint64 id, const QString &name)
+{
+    setUndoLabel(tr("Rinomina mappa concettuale"));
+    if (!exec(QStringLiteral("UPDATE maps SET name = ? WHERE id = ?"), {name, id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+bool Project::deleteConceptMap(qint64 id)
+{
+    setUndoLabel(tr("Elimina mappa concettuale"));
+    if (!exec(QStringLiteral("DELETE FROM maps WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+QList<MapNode> Project::mapNodes(qint64 mapId) const
+{
+    QList<MapNode> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT %1 FROM map_nodes WHERE map_id = ? ORDER BY id").arg(QLatin1String(kNodeColumns)));
+    q.addBindValue(mapId);
+    if (q.exec())
+        while (q.next())
+            out.append(nodeFrom(q));
+    return out;
+}
+
+MapNode Project::mapNode(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT %1 FROM map_nodes WHERE id = ?").arg(QLatin1String(kNodeColumns)));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return nodeFrom(q);
+    return {};
+}
+
+qint64 Project::addMapNode(const MapNode &n)
+{
+    setUndoLabel(tr("Nuovo nodo della mappa"));
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO map_nodes(map_id, kind, ref_id, label, x, y, w, h, style_json, uuid)"
+                       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+        {n.mapId, kindToString(n.kind), n.refId, n.label, n.x, n.y, n.w, n.h, n.styleJson,
+         n.uuid.isEmpty() ? newUuid() : n.uuid});
+    if (id)
+        notify(&Project::mapsChanged);
+    return id;
+}
+
+bool Project::updateMapNode(const MapNode &n)
+{
+    setUndoLabel(tr("Modifica nodo della mappa"));
+    if (!exec(QStringLiteral("UPDATE map_nodes SET kind = ?, ref_id = ?, label = ?, x = ?, y = ?, w = ?, h = ?,"
+                             " style_json = ? WHERE id = ?"),
+              {kindToString(n.kind), n.refId, n.label, n.x, n.y, n.w, n.h, n.styleJson, n.id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+bool Project::deleteMapNode(qint64 id)
+{
+    setUndoLabel(tr("Elimina nodo della mappa"));
+    if (!exec(QStringLiteral("DELETE FROM map_nodes WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+QList<MapEdge> Project::mapEdges(qint64 mapId) const
+{
+    QList<MapEdge> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, map_id, from_node, to_node, label, style_json, uuid FROM map_edges"
+                             " WHERE map_id = ? ORDER BY id"));
+    q.addBindValue(mapId);
+    if (q.exec())
+        while (q.next())
+            out.append({q.value(0).toLongLong(), q.value(1).toLongLong(), q.value(2).toLongLong(),
+                        q.value(3).toLongLong(), q.value(4).toString(), q.value(5).toString(),
+                        q.value(6).toString()});
+    return out;
+}
+
+qint64 Project::addMapEdge(const MapEdge &e)
+{
+    setUndoLabel(tr("Nuova freccia della mappa"));
+    const qint64 id = insert(QStringLiteral("INSERT INTO map_edges(map_id, from_node, to_node, label, style_json, uuid)"
+                                            " VALUES (?, ?, ?, ?, ?, ?)"),
+                             {e.mapId, e.fromNode, e.toNode, e.label, e.styleJson,
+                              e.uuid.isEmpty() ? newUuid() : e.uuid});
+    if (id)
+        notify(&Project::mapsChanged);
+    return id;
+}
+
+bool Project::updateMapEdge(const MapEdge &e)
+{
+    setUndoLabel(tr("Modifica freccia della mappa"));
+    if (!exec(QStringLiteral("UPDATE map_edges SET label = ?, style_json = ? WHERE id = ?"),
+              {e.label, e.styleJson, e.id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+bool Project::deleteMapEdge(qint64 id)
+{
+    setUndoLabel(tr("Elimina freccia della mappa"));
+    if (!exec(QStringLiteral("DELETE FROM map_edges WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+
+// ---------------------------------------------------------------- research questions
+
+QString Project::questionStatusToString(QuestionStatus status)
+{
+    switch (status) {
+    case QuestionStatus::Open: return QStringLiteral("open");
+    case QuestionStatus::InProgress: return QStringLiteral("working");
+    case QuestionStatus::Answered: return QStringLiteral("answered");
+    }
+    return QStringLiteral("open");
+}
+
+QuestionStatus Project::questionStatusFromString(const QString &s)
+{
+    if (s == QLatin1String("working"))
+        return QuestionStatus::InProgress;
+    if (s == QLatin1String("answered"))
+        return QuestionStatus::Answered;
+    return QuestionStatus::Open;
+}
+
+namespace {
+const QString kQuestionColumns =
+    QStringLiteral("id, title, description, status, themes, conclusions, notes, position, uuid");
+
+ResearchQuestion questionFromRow(const QSqlQuery &q)
+{
+    ResearchQuestion r;
+    r.id = q.value(0).toLongLong();
+    r.title = q.value(1).toString();
+    r.description = q.value(2).toString();
+    r.status = Project::questionStatusFromString(q.value(3).toString());
+    for (const QString &line : q.value(4).toString().split(QLatin1Char('\n')))
+        if (!line.trimmed().isEmpty())
+            r.themes << line.trimmed();
+    r.conclusions = q.value(5).toString();
+    r.notes = q.value(6).toString();
+    r.position = q.value(7).toInt();
+    r.uuid = q.value(8).toString();
+    return r;
+}
+} // namespace
+
+QList<ResearchQuestion> Project::researchQuestions() const
+{
+    QList<ResearchQuestion> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT ") + kQuestionColumns + QStringLiteral(" FROM research_questions ORDER BY position, id"));
+    while (q.next())
+        out.append(questionFromRow(q));
+    return out;
+}
+
+ResearchQuestion Project::researchQuestion(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT ") + kQuestionColumns + QStringLiteral(" FROM research_questions WHERE id = ?"));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return questionFromRow(q);
+    return {};
+}
+
+qint64 Project::addResearchQuestion(const QString &title, const QString &uuid)
+{
+    setUndoLabel(tr("Nuova domanda di ricerca"));
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO research_questions(title, position, uuid) VALUES (?, ?, ?)"),
+        {title, nextPosition(QStringLiteral("research_questions")), uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notify(&Project::researchQuestionsChanged);
+    return id;
+}
+
+bool Project::updateResearchQuestion(const ResearchQuestion &question)
+{
+    setUndoLabel(tr("Modifica domanda di ricerca"));
+    QStringList themes;
+    for (const QString &t : question.themes)
+        if (!t.trimmed().isEmpty())
+            themes << t.trimmed();
+    if (!exec(QStringLiteral("UPDATE research_questions SET title = ?, description = ?, status = ?, themes = ?,"
+                             " conclusions = ?, notes = ? WHERE id = ?"),
+              {question.title, question.description, questionStatusToString(question.status),
+               themes.join(QLatin1Char('\n')), question.conclusions, question.notes, question.id}))
+        return false;
+    notify(&Project::researchQuestionsChanged);
+    return true;
+}
+
+bool Project::deleteResearchQuestion(qint64 id)
+{
+    setUndoLabel(tr("Elimina domanda di ricerca"));
+    if (!exec(QStringLiteral("DELETE FROM research_questions WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::researchQuestionsChanged);
+    return true;
+}
+
+bool Project::moveResearchQuestion(qint64 id, int delta)
+{
+    const QList<ResearchQuestion> all = researchQuestions();
+    int index = -1;
+    for (int i = 0; i < all.size(); ++i)
+        if (all[i].id == id)
+            index = i;
+    const int target = index + (delta < 0 ? -1 : 1);
+    if (index < 0 || target < 0 || target >= all.size())
+        return false;
+    setUndoLabel(tr("Sposta domanda di ricerca"));
+    beginBatch();
+    // Positions are renumbered so that ties (equal positions) never leave the order ambiguous.
+    QList<qint64> order;
+    for (const ResearchQuestion &r : all)
+        order << r.id;
+    order.swapItemsAt(index, target);
+    bool ok = true;
+    for (int i = 0; i < order.size() && ok; ++i)
+        ok = exec(QStringLiteral("UPDATE research_questions SET position = ? WHERE id = ?"), {i, order[i]});
+    if (!ok) {
+        rollbackBatch();
+        return false;
+    }
+    notify(&Project::researchQuestionsChanged);
+    return commitBatch();
+}
+
+QList<QuestionEvidence> Project::questionEvidence(qint64 questionId) const
+{
+    QList<QuestionEvidence> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, segment_id, code_id, memo_id, position FROM research_evidence"
+                             " WHERE question_id = ? ORDER BY position, id"));
+    q.addBindValue(questionId);
+    if (!q.exec())
+        return out;
+    while (q.next()) {
+        QuestionEvidence e;
+        e.id = q.value(0).toLongLong();
+        e.questionId = questionId;
+        if (!q.value(1).isNull()) {
+            e.kind = EvidenceKind::Segment;
+            e.refId = q.value(1).toLongLong();
+        } else if (!q.value(2).isNull()) {
+            e.kind = EvidenceKind::Code;
+            e.refId = q.value(2).toLongLong();
+        } else {
+            e.kind = EvidenceKind::Memo;
+            e.refId = q.value(3).toLongLong();
+        }
+        e.position = q.value(4).toInt();
+        out.append(e);
+    }
+    return out;
+}
+
+bool Project::addQuestionEvidence(qint64 questionId, EvidenceKind kind, qint64 refId)
+{
+    const char *column = kind == EvidenceKind::Segment ? "segment_id" : kind == EvidenceKind::Code ? "code_id" : "memo_id";
+    const char *table = kind == EvidenceKind::Segment ? "segments" : kind == EvidenceKind::Code ? "codes" : "memos";
+    if (!scalar(QStringLiteral("SELECT 1 FROM research_questions WHERE id = ?"), {questionId}).isValid() ||
+        !scalar(QStringLiteral("SELECT 1 FROM %1 WHERE id = ?").arg(QLatin1String(table)), {refId}).isValid())
+        return false;
+    if (scalar(QStringLiteral("SELECT 1 FROM research_evidence WHERE question_id = ? AND %1 = ?")
+                   .arg(QLatin1String(column)),
+               {questionId, refId})
+            .isValid())
+        return true;
+    setUndoLabel(tr("Aggiungi evidenza alla domanda di ricerca"));
+    const qint64 id = insert(QStringLiteral("INSERT INTO research_evidence(question_id, %1, position) VALUES (?, ?, ?)")
+                                 .arg(QLatin1String(column)),
+                             {questionId, refId,
+                              nextPosition(QStringLiteral("research_evidence"), QStringLiteral("question_id = ?"),
+                                           {questionId})});
+    if (!id)
+        return false;
+    notify(&Project::researchQuestionsChanged);
+    return true;
+}
+
+bool Project::removeQuestionEvidence(qint64 evidenceId)
+{
+    setUndoLabel(tr("Rimuovi evidenza dalla domanda di ricerca"));
+    if (!exec(QStringLiteral("DELETE FROM research_evidence WHERE id = ?"), {evidenceId}))
+        return false;
+    notify(&Project::researchQuestionsChanged);
+    return true;
+}
+
+// ---------------------------------------------------------------- team cycles
+
+QString teamCycleStatusToString(TeamCycleStatus s)
+{
+    switch (s) {
+    case TeamCycleStatus::Sent: return QStringLiteral("sent");
+    case TeamCycleStatus::Returned: return QStringLiteral("returned");
+    case TeamCycleStatus::Merged: return QStringLiteral("merged");
+    }
+    return QStringLiteral("sent");
+}
+
+TeamCycleStatus teamCycleStatusFromString(const QString &s)
+{
+    if (s == QLatin1String("returned"))
+        return TeamCycleStatus::Returned;
+    if (s == QLatin1String("merged"))
+        return TeamCycleStatus::Merged;
+    return TeamCycleStatus::Sent;
+}
+
+QList<TeamCycle> Project::teamCycles() const
+{
+    QList<TeamCycle> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id, number, member, file_name, status, sent_at, returned_at, merged_at, report "
+                          "FROM team_cycles ORDER BY number, id"));
+    while (q.next()) {
+        TeamCycle c;
+        c.id = q.value(0).toLongLong();
+        c.number = q.value(1).toInt();
+        c.member = q.value(2).toString();
+        c.fileName = q.value(3).toString();
+        c.status = teamCycleStatusFromString(q.value(4).toString());
+        c.sentAt = fromIso(q.value(5)).toLocalTime();
+        c.returnedAt = fromIso(q.value(6)).toLocalTime();
+        c.mergedAt = fromIso(q.value(7)).toLocalTime();
+        c.report = q.value(8).toString();
+        out.append(c);
+    }
+    return out;
+}
+
+int Project::nextTeamCycleNumber() const
+{
+    return scalar(QStringLiteral("SELECT COALESCE(MAX(number), 0) + 1 FROM team_cycles")).toInt();
+}
+
+qint64 Project::addTeamCycleEntry(int number, const QString &member, const QString &fileName)
+{
+    const qint64 id = insert(QStringLiteral("INSERT INTO team_cycles(number, member, file_name, status, sent_at) "
+                                            "VALUES (?, ?, ?, 'sent', ?)"),
+                             {number, member, fileName, isoNow()});
+    if (id)
+        emit teamCyclesChanged();
+    return id;
+}
+
+bool Project::setTeamCycleStatus(qint64 id, TeamCycleStatus status, const QString &report)
+{
+    const QString column = status == TeamCycleStatus::Merged ? QStringLiteral("merged_at")
+                                                             : QStringLiteral("returned_at");
+    bool ok = true;
+    if (status == TeamCycleStatus::Sent) {
+        ok = exec(QStringLiteral("UPDATE team_cycles SET status = 'sent', returned_at = NULL, merged_at = NULL, "
+                                 "report = '' WHERE id = ?"),
+                  {id});
+    } else {
+        // A merged copy has necessarily come back: stamp the return time too if it is still missing.
+        ok = exec(QStringLiteral("UPDATE team_cycles SET status = ?, %1 = ?, report = ?, "
+                                 "returned_at = COALESCE(returned_at, ?) WHERE id = ?")
+                      .arg(column),
+                  {teamCycleStatusToString(status), isoNow(), report, isoNow(), id});
+    }
+    if (ok)
+        emit teamCyclesChanged();
+    return ok;
+}
+
+bool Project::deleteTeamCycle(qint64 id)
+{
+    if (!exec(QStringLiteral("DELETE FROM team_cycles WHERE id = ?"), {id}))
+        return false;
+    emit teamCyclesChanged();
+    return true;
+}
+
+bool Project::clearTeamCycles()
+{
+    if (!exec(QStringLiteral("DELETE FROM team_cycles")))
+        return false;
+    emit teamCyclesChanged();
+    return true;
+}
+
+// ---------------------------------------------------------------- AI log
 bool Project::aiLogEnabled() const
 {
     return meta(QStringLiteral("ai_log")) == QLatin1String("1");

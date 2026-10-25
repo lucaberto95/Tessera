@@ -4,7 +4,7 @@ project(Tessera VERSION 0.29.3 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Concurrent Network Test LinguistTools)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core CorePrivate Gui Widgets Sql Pdf Charts Svg Concurrent Network Multimedia MultimediaWidgets Test LinguistTools)
 qt_standard_project_setup()
 
 if(MSVC)
@@ -22,19 +22,27 @@ qt_add_library(tessera_core STATIC
     src/core/Qdpx.h src/core/Qdpx.cpp
     src/core/ForeignImport.h src/core/ForeignImport.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
+    src/core/Transcripts.h src/core/Transcripts.cpp
+    src/core/Media.h src/core/Media.cpp
     src/core/RichText.h src/core/RichText.cpp
     src/core/Retrieval.h src/core/Retrieval.cpp
     src/core/Agreement.h src/core/Agreement.cpp
     src/core/Cooccurrence.h src/core/Cooccurrence.cpp
+    src/core/ConceptMaps.h src/core/ConceptMaps.cpp
+    src/core/Sentiment.h src/core/Sentiment.cpp
     src/core/Stats.h src/core/Stats.cpp
     src/core/Summaries.h src/core/Summaries.cpp
     src/core/Report.h src/core/Report.cpp
+    src/core/ResearchWorksheet.h src/core/ResearchWorksheet.cpp
     src/core/Merge.h src/core/Merge.cpp
+    src/core/Team.h src/core/Team.cpp
+    src/core/TeamSync.h src/core/TeamSync.cpp
     src/core/VariableFilter.h src/core/VariableFilter.cpp
     src/core/Xlsx.h src/core/Xlsx.cpp
     src/core/Survey.h src/core/Survey.cpp
     src/core/Dictionaries.h src/core/Dictionaries.cpp
     src/core/WordFrequencies.h src/core/WordFrequencies.cpp
+    src/core/Topics.h src/core/Topics.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
     src/core/Updater.h src/core/Updater.cpp
     src/core/ai/AiConfig.h src/core/ai/AiConfig.cpp
@@ -77,21 +85,30 @@ qt_add_library(tessera_ui STATIC
     src/ui/MemoDialog.h src/ui/MemoDialog.cpp
     src/ui/MemoManager.h src/ui/MemoManager.cpp
     src/ui/LinksDialog.h src/ui/LinksDialog.cpp
+    src/ui/UndoHistoryDialog.h src/ui/UndoHistoryDialog.cpp
+    src/ui/TranscriptDialog.h src/ui/TranscriptDialog.cpp
+    src/ui/MediaPlayerWidget.h src/ui/MediaPlayerWidget.cpp
     src/ui/VariablesDialog.h src/ui/VariablesDialog.cpp
     src/ui/SearchDialog.h src/ui/SearchDialog.cpp
     src/ui/MatrixDialog.h src/ui/MatrixDialog.cpp
     src/ui/RetrievalDialog.h src/ui/RetrievalDialog.cpp
     src/ui/AgreementDialog.h src/ui/AgreementDialog.cpp
     src/ui/CooccurrenceDialog.h src/ui/CooccurrenceDialog.cpp
+    src/ui/ConceptMapDialog.h src/ui/ConceptMapDialog.cpp
+    src/ui/SentimentDialog.h src/ui/SentimentDialog.cpp
     src/ui/StatsDialog.h src/ui/StatsDialog.cpp
     src/ui/SummaryGridDialog.h src/ui/SummaryGridDialog.cpp
     src/ui/SummaryTablesDialog.h src/ui/SummaryTablesDialog.cpp
     src/ui/ReportDialog.h src/ui/ReportDialog.cpp
+    src/ui/ResearchQuestionsDialog.h src/ui/ResearchQuestionsDialog.cpp
     src/ui/MergeDialog.h src/ui/MergeDialog.cpp
+    src/ui/TeamDialog.h src/ui/TeamDialog.cpp
+    src/ui/TeamSyncDialog.h src/ui/TeamSyncDialog.cpp
     src/ui/VariableFilterDialog.h src/ui/VariableFilterDialog.cpp
     src/ui/SurveyImportDialog.h src/ui/SurveyImportDialog.cpp
     src/ui/DictionaryDialog.h src/ui/DictionaryDialog.cpp
     src/ui/WordFrequencyDialog.h src/ui/WordFrequencyDialog.cpp
+    src/ui/TopicsDialog.h src/ui/TopicsDialog.cpp
     src/ui/AiSettingsDialog.h src/ui/AiSettingsDialog.cpp
     src/ui/AiAssistDialog.h src/ui/AiAssistDialog.cpp
     src/ui/AiCodesDialog.h src/ui/AiCodesDialog.cpp
@@ -99,7 +116,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/UiUtils.h src/ui/UiUtils.cpp
     src/ui/Language.h src/ui/Language.cpp
 )
-target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent)
+target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent Qt6::Multimedia Qt6::MultimediaWidgets)
 
 qt_add_executable(Tessera WIN32 src/main.cpp src/tessera.rc)
 qt_add_resources(Tessera icons PREFIX "/" BASE "${CMAKE_SOURCE_DIR}/installer" FILES installer/tessera.svg)

@@ -1,14 +1,18 @@
 #include "core/Merge.h"
+#include "core/Media.h"
 
+#include "core/ConceptMaps.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
 #include "core/Summaries.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QPair>
 #include <QSet>
 #include <QTemporaryDir>
 
@@ -27,6 +31,10 @@ QByteArray fingerprint(const Project &p, const Document &d)
     h.addData(p.documentText(d.id).toUtf8());
     h.addData(QByteArray(1, '\0'));
     h.addData(p.documentData(d.id));
+    if (d.kind == DocumentKind::Audio || d.kind == DocumentKind::Video) { // the recording is linked: its name tells them apart
+        h.addData(QByteArray(1, '\0'));
+        h.addData(QFileInfo(p.documentMediaPath(d.id)).fileName().toUtf8());
+    }
     return h.result();
 }
 
@@ -111,6 +119,8 @@ private:
     void mergeSummaries();
     void mergeDictionaries();
     void mergeSummaryTables();
+    void mergeConceptMaps();
+    void mergeResearchQuestions();
 
     Project &t;
     const Project &s;
@@ -217,6 +227,12 @@ qint64 Merger::createDocument(const Document &od, const QString &uuid, const QSt
         id = t.addDocument(group, name, text, od.sourcePath, uuid);
         if (id && !s.documentRichContent(od.id).isEmpty())
             t.setDocumentRichContent(id, s.documentRichContent(od.id));
+        if (id && !s.documentMediaPath(od.id).isEmpty()) {
+            const QString found = s.resolvedMediaPath(od.id);
+            t.setDocumentMediaPath(id, found.isEmpty() ? s.documentMediaPath(od.id) : t.storableMediaPath(found));
+        }
+        if (id && !s.timestamps(od.id).isEmpty())
+            t.setTimestamps(id, s.timestamps(od.id));
         break;
     case DocumentKind::Image:
         id = t.addImageDocument(group, name, data, od.sourcePath, uuid);
@@ -229,6 +245,11 @@ qint64 Merger::createDocument(const Document &od, const QString &uuid, const QSt
         id = t.addMediaDocument(group, name, od.kind, od.sourcePath, uuid);
         if (id && !data.isEmpty() && !t.setDocumentData(id, data))
             id = 0;
+        if (id && !s.documentMediaPath(od.id).isEmpty()) {
+            // A relative path is relative to the other project: keep it valid for this one.
+            const QString found = s.resolvedMediaPath(od.id);
+            t.setDocumentMediaPath(id, found.isEmpty() ? s.documentMediaPath(od.id) : t.storableMediaPath(found));
+        }
         break;
     }
     return check(id);
@@ -729,6 +750,142 @@ void Merger::mergeSummaryTables()
     }
 }
 
+// Maps of the other project that are not here (same uuid or name). Nodes of codes and documents follow the
+// merged codes and documents; memo and segment nodes become free text nodes with the caption they had, as
+// those elements are not matched one to one across projects.
+void Merger::mergeConceptMaps()
+{
+    const QList<ConceptMap> current = t.conceptMaps();
+    for (const ConceptMap &cm : s.conceptMaps()) {
+        if (m_failed)
+            return;
+        bool present = false;
+        for (const ConceptMap &c : current)
+            if ((!cm.uuid.isEmpty() && c.uuid == cm.uuid) || c.name == cm.name)
+                present = true;
+        if (present)
+            continue;
+        ++report.conceptMapsNew;
+        if (m_dry)
+            continue;
+        const qint64 mapId = t.addConceptMap(cm.name, cm.uuid);
+        if (!mapId) {
+            fail();
+            return;
+        }
+        QHash<qint64, qint64> nodeMap;
+        for (MapNode n : s.mapNodes(cm.id)) {
+            const qint64 old = n.id;
+            n.mapId = mapId;
+            if (n.kind == MapNodeKind::Code || n.kind == MapNodeKind::Document) {
+                const qint64 mapped = n.kind == MapNodeKind::Code ? ensureCode(n.refId) : ensureDoc(n.refId);
+                if (mapped) {
+                    n.refId = mapped;
+                } else {
+                    n.kind = MapNodeKind::Text;
+                    n.refId = 0;
+                }
+            } else if (n.kind != MapNodeKind::Text) {
+                n.label = ConceptMaps::resolve(s, n).caption;
+                n.kind = MapNodeKind::Text;
+                n.refId = 0;
+            }
+            n.uuid.clear();
+            const qint64 id = t.addMapNode(n);
+            if (m_failed || !id) {
+                fail();
+                return;
+            }
+            nodeMap.insert(old, id);
+        }
+        for (MapEdge e : s.mapEdges(cm.id)) {
+            if (!nodeMap.contains(e.fromNode) || !nodeMap.contains(e.toNode))
+                continue;
+            e.mapId = mapId;
+            e.fromNode = nodeMap.value(e.fromNode);
+            e.toNode = nodeMap.value(e.toNode);
+            e.uuid.clear();
+            if (!t.addMapEdge(e)) {
+                fail();
+                return;
+            }
+        }
+    }
+}
+
+// Research questions are matched by uuid, else by title. A new one is copied with its evidence, mapped to the
+// target's segments, codes and memos (evidence whose element did not come across is dropped); a question already
+// there only gains the evidence it lacks, its own texts are never overwritten.
+void Merger::mergeResearchQuestions()
+{
+    QHash<QString, qint64> tMemoByUuidNow;
+    for (const Memo &m : t.memos())
+        tMemoByUuidNow.insert(m.uuid, m.id);
+    QHash<qint64, QString> srcMemoUuid;
+    for (const Memo &m : s.memos())
+        srcMemoUuid.insert(m.id, m.uuid);
+
+    for (const ResearchQuestion &oq : s.researchQuestions()) {
+        if (m_failed)
+            return;
+        ResearchQuestion existing;
+        for (const ResearchQuestion &c : t.researchQuestions())
+            if ((!oq.uuid.isEmpty() && c.uuid == oq.uuid) || c.title == oq.title)
+                existing = c;
+
+        QList<QPair<EvidenceKind, qint64>> mapped;
+        for (const QuestionEvidence &e : s.questionEvidence(oq.id)) {
+            qint64 id = 0;
+            switch (e.kind) {
+            case EvidenceKind::Segment: id = segMap.value(e.refId, 0); break;
+            case EvidenceKind::Code: id = ensureCode(e.refId); break;
+            case EvidenceKind::Memo: id = tMemoByUuidNow.value(srcMemoUuid.value(e.refId), 0); break;
+            }
+            if (id)
+                mapped.append({e.kind, id});
+        }
+        if (m_failed)
+            return;
+
+        if (existing.id) {
+            QSet<QPair<int, qint64>> have;
+            for (const QuestionEvidence &e : t.questionEvidence(existing.id))
+                have.insert({int(e.kind), e.refId});
+            bool added = false;
+            for (const auto &e : mapped) {
+                if (have.contains({int(e.first), e.second}))
+                    continue;
+                added = true;
+                if (!m_dry && e.second > 0 && !t.addQuestionEvidence(existing.id, e.first, e.second)) {
+                    fail();
+                    return;
+                }
+            }
+            if (added)
+                ++report.questionsExtended;
+            continue;
+        }
+
+        ++report.questionsNew;
+        if (m_dry)
+            continue;
+        const qint64 id = check(t.addResearchQuestion(oq.title, oq.uuid));
+        if (!id)
+            return;
+        ResearchQuestion copy = oq;
+        copy.id = id;
+        if (!t.updateResearchQuestion(copy)) {
+            fail();
+            return;
+        }
+        for (const auto &e : mapped)
+            if (!t.addQuestionEvidence(id, e.first, e.second)) {
+                fail();
+                return;
+            }
+    }
+}
+
 Report Merger::run()
 {
     buildIndexes();
@@ -767,6 +924,9 @@ Report Merger::run()
     if (!m_failed && !filtering()) {
         mergeDictionaries();
         mergeSummaryTables();
+        mergeConceptMaps();
+        if (!m_failed)
+            mergeResearchQuestions();
     }
     return report;
 }
@@ -802,6 +962,15 @@ bool Source::load(const QString &path, QString *error)
         QFile::setPermissions(local, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
         if (!m_project->open(local))
             return fail(m_project->lastError());
+        // Recordings are linked by paths relative to the original project: make them absolute in the copy.
+        for (const Document &d : m_project->documents()) {
+            const QString stored = m_project->documentMediaPath(d.id);
+            if (!stored.isEmpty() && !QDir::isAbsolutePath(stored)) {
+                const QString found = Media::resolvePath(path, stored);
+                if (!found.isEmpty())
+                    m_project->setDocumentMediaPath(d.id, found);
+            }
+        }
     }
     return true;
 }
