@@ -128,6 +128,8 @@ QString MergeDialog::reportText(const Merge::Report &r, bool done)
     add(tr("dizionari nuovi"), r.dictionariesNew);
     add(tr("tabelle riassuntive nuove"), r.summaryTablesNew);
     add(tr("mappe concettuali nuove"), r.conceptMapsNew);
+    add(tr("domande di ricerca nuove"), r.questionsNew);
+    add(tr("domande di ricerca con evidenze aggiunte"), r.questionsExtended);
     flush(tr("Altro"));
 
     if (!r.conflictDocuments.isEmpty())

@@ -428,6 +428,7 @@ void Project::emitAllChanged()
     emit dictionariesChanged();
     emit summariesChanged();
     emit mapsChanged();
+    emit researchQuestionsChanged();
 }
 
 // ---------------------------------------------------------------- undo / redo
@@ -447,7 +448,8 @@ bool Project::installUndoTriggers()
                                          "memos", "variables", "variable_values",
                                          "document_sets", "document_set_members", "links", "memo_links",
                                          "dictionaries", "dict_categories", "dict_entries", "document_data",
-                                         "summaries", "summary_tables", "maps", "map_nodes", "map_edges"};
+                                         "summaries", "summary_tables", "maps", "map_nodes", "map_edges",
+                                         "research_questions", "research_evidence"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -761,6 +763,29 @@ QList<Project::Migration> Project::builtInMigrations()
                          " to_node INTEGER NOT NULL REFERENCES map_nodes(id) ON DELETE CASCADE,"
                          " label TEXT NOT NULL DEFAULT '', style_json TEXT NOT NULL DEFAULT '', uuid TEXT NOT NULL)"),
           QStringLiteral("CREATE INDEX idx_map_edges_map ON map_edges(map_id)")}},
+        {13,
+         {// Research questions worksheet (issue #17). Evidence refers to a segment, a code or a memo through
+          // one nullable foreign key each, so deleting the element removes its evidence (and undo restores it).
+          QStringLiteral("CREATE TABLE research_questions ("
+                         " id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',"
+                         " status TEXT NOT NULL DEFAULT 'open', themes TEXT NOT NULL DEFAULT '',"
+                         " conclusions TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',"
+                         " position INTEGER NOT NULL DEFAULT 0, uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE TABLE research_evidence ("
+                         " id INTEGER PRIMARY KEY,"
+                         " question_id INTEGER NOT NULL REFERENCES research_questions(id) ON DELETE CASCADE,"
+                         " segment_id INTEGER REFERENCES segments(id) ON DELETE CASCADE,"
+                         " code_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,"
+                         " memo_id INTEGER REFERENCES memos(id) ON DELETE CASCADE,"
+                         " position INTEGER NOT NULL DEFAULT 0,"
+                         " CHECK ((segment_id IS NOT NULL) + (code_id IS NOT NULL) + (memo_id IS NOT NULL) = 1))"),
+          QStringLiteral("CREATE INDEX idx_research_evidence_question ON research_evidence(question_id)"),
+          QStringLiteral("CREATE UNIQUE INDEX idx_research_evidence_segment ON research_evidence(question_id, segment_id)"
+                         " WHERE segment_id IS NOT NULL"),
+          QStringLiteral("CREATE UNIQUE INDEX idx_research_evidence_code ON research_evidence(question_id, code_id)"
+                         " WHERE code_id IS NOT NULL"),
+          QStringLiteral("CREATE UNIQUE INDEX idx_research_evidence_memo ON research_evidence(question_id, memo_id)"
+                         " WHERE memo_id IS NOT NULL")}},
     };
 }
 
@@ -2443,6 +2468,196 @@ bool Project::deleteMapEdge(qint64 id)
     if (!exec(QStringLiteral("DELETE FROM map_edges WHERE id = ?"), {id}))
         return false;
     notify(&Project::mapsChanged);
+    return true;
+}
+
+
+// ---------------------------------------------------------------- research questions
+
+QString Project::questionStatusToString(QuestionStatus status)
+{
+    switch (status) {
+    case QuestionStatus::Open: return QStringLiteral("open");
+    case QuestionStatus::InProgress: return QStringLiteral("working");
+    case QuestionStatus::Answered: return QStringLiteral("answered");
+    }
+    return QStringLiteral("open");
+}
+
+QuestionStatus Project::questionStatusFromString(const QString &s)
+{
+    if (s == QLatin1String("working"))
+        return QuestionStatus::InProgress;
+    if (s == QLatin1String("answered"))
+        return QuestionStatus::Answered;
+    return QuestionStatus::Open;
+}
+
+namespace {
+const QString kQuestionColumns =
+    QStringLiteral("id, title, description, status, themes, conclusions, notes, position, uuid");
+
+ResearchQuestion questionFromRow(const QSqlQuery &q)
+{
+    ResearchQuestion r;
+    r.id = q.value(0).toLongLong();
+    r.title = q.value(1).toString();
+    r.description = q.value(2).toString();
+    r.status = Project::questionStatusFromString(q.value(3).toString());
+    for (const QString &line : q.value(4).toString().split(QLatin1Char('\n')))
+        if (!line.trimmed().isEmpty())
+            r.themes << line.trimmed();
+    r.conclusions = q.value(5).toString();
+    r.notes = q.value(6).toString();
+    r.position = q.value(7).toInt();
+    r.uuid = q.value(8).toString();
+    return r;
+}
+} // namespace
+
+QList<ResearchQuestion> Project::researchQuestions() const
+{
+    QList<ResearchQuestion> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT ") + kQuestionColumns + QStringLiteral(" FROM research_questions ORDER BY position, id"));
+    while (q.next())
+        out.append(questionFromRow(q));
+    return out;
+}
+
+ResearchQuestion Project::researchQuestion(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT ") + kQuestionColumns + QStringLiteral(" FROM research_questions WHERE id = ?"));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return questionFromRow(q);
+    return {};
+}
+
+qint64 Project::addResearchQuestion(const QString &title, const QString &uuid)
+{
+    setUndoLabel(tr("Nuova domanda di ricerca"));
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO research_questions(title, position, uuid) VALUES (?, ?, ?)"),
+        {title, nextPosition(QStringLiteral("research_questions")), uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notify(&Project::researchQuestionsChanged);
+    return id;
+}
+
+bool Project::updateResearchQuestion(const ResearchQuestion &question)
+{
+    setUndoLabel(tr("Modifica domanda di ricerca"));
+    QStringList themes;
+    for (const QString &t : question.themes)
+        if (!t.trimmed().isEmpty())
+            themes << t.trimmed();
+    if (!exec(QStringLiteral("UPDATE research_questions SET title = ?, description = ?, status = ?, themes = ?,"
+                             " conclusions = ?, notes = ? WHERE id = ?"),
+              {question.title, question.description, questionStatusToString(question.status),
+               themes.join(QLatin1Char('\n')), question.conclusions, question.notes, question.id}))
+        return false;
+    notify(&Project::researchQuestionsChanged);
+    return true;
+}
+
+bool Project::deleteResearchQuestion(qint64 id)
+{
+    setUndoLabel(tr("Elimina domanda di ricerca"));
+    if (!exec(QStringLiteral("DELETE FROM research_questions WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::researchQuestionsChanged);
+    return true;
+}
+
+bool Project::moveResearchQuestion(qint64 id, int delta)
+{
+    const QList<ResearchQuestion> all = researchQuestions();
+    int index = -1;
+    for (int i = 0; i < all.size(); ++i)
+        if (all[i].id == id)
+            index = i;
+    const int target = index + (delta < 0 ? -1 : 1);
+    if (index < 0 || target < 0 || target >= all.size())
+        return false;
+    setUndoLabel(tr("Sposta domanda di ricerca"));
+    beginBatch();
+    // Positions are renumbered so that ties (equal positions) never leave the order ambiguous.
+    QList<qint64> order;
+    for (const ResearchQuestion &r : all)
+        order << r.id;
+    order.swapItemsAt(index, target);
+    bool ok = true;
+    for (int i = 0; i < order.size() && ok; ++i)
+        ok = exec(QStringLiteral("UPDATE research_questions SET position = ? WHERE id = ?"), {i, order[i]});
+    if (!ok) {
+        rollbackBatch();
+        return false;
+    }
+    notify(&Project::researchQuestionsChanged);
+    return commitBatch();
+}
+
+QList<QuestionEvidence> Project::questionEvidence(qint64 questionId) const
+{
+    QList<QuestionEvidence> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, segment_id, code_id, memo_id, position FROM research_evidence"
+                             " WHERE question_id = ? ORDER BY position, id"));
+    q.addBindValue(questionId);
+    if (!q.exec())
+        return out;
+    while (q.next()) {
+        QuestionEvidence e;
+        e.id = q.value(0).toLongLong();
+        e.questionId = questionId;
+        if (!q.value(1).isNull()) {
+            e.kind = EvidenceKind::Segment;
+            e.refId = q.value(1).toLongLong();
+        } else if (!q.value(2).isNull()) {
+            e.kind = EvidenceKind::Code;
+            e.refId = q.value(2).toLongLong();
+        } else {
+            e.kind = EvidenceKind::Memo;
+            e.refId = q.value(3).toLongLong();
+        }
+        e.position = q.value(4).toInt();
+        out.append(e);
+    }
+    return out;
+}
+
+bool Project::addQuestionEvidence(qint64 questionId, EvidenceKind kind, qint64 refId)
+{
+    const char *column = kind == EvidenceKind::Segment ? "segment_id" : kind == EvidenceKind::Code ? "code_id" : "memo_id";
+    const char *table = kind == EvidenceKind::Segment ? "segments" : kind == EvidenceKind::Code ? "codes" : "memos";
+    if (!scalar(QStringLiteral("SELECT 1 FROM research_questions WHERE id = ?"), {questionId}).isValid() ||
+        !scalar(QStringLiteral("SELECT 1 FROM %1 WHERE id = ?").arg(QLatin1String(table)), {refId}).isValid())
+        return false;
+    if (scalar(QStringLiteral("SELECT 1 FROM research_evidence WHERE question_id = ? AND %1 = ?")
+                   .arg(QLatin1String(column)),
+               {questionId, refId})
+            .isValid())
+        return true;
+    setUndoLabel(tr("Aggiungi evidenza alla domanda di ricerca"));
+    const qint64 id = insert(QStringLiteral("INSERT INTO research_evidence(question_id, %1, position) VALUES (?, ?, ?)")
+                                 .arg(QLatin1String(column)),
+                             {questionId, refId,
+                              nextPosition(QStringLiteral("research_evidence"), QStringLiteral("question_id = ?"),
+                                           {questionId})});
+    if (!id)
+        return false;
+    notify(&Project::researchQuestionsChanged);
+    return true;
+}
+
+bool Project::removeQuestionEvidence(qint64 evidenceId)
+{
+    setUndoLabel(tr("Rimuovi evidenza dalla domanda di ricerca"));
+    if (!exec(QStringLiteral("DELETE FROM research_evidence WHERE id = ?"), {evidenceId}))
+        return false;
+    notify(&Project::researchQuestionsChanged);
     return true;
 }
 

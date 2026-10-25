@@ -41,13 +41,14 @@ struct Report {
     int setsNew = 0, setsExtended = 0;
     int dictionariesNew = 0, summaryTablesNew = 0;
     int conceptMapsNew = 0;
+    int questionsNew = 0, questionsExtended = 0; // research questions: new, and present ones that gained evidence
     QStringList conflictDocuments; // names of the documents whose content differs
 
     int changes() const
     {
         return documentsNew + documentsCopied + groupsNew + codesNew + segmentsNew + segmentsConflict + memosNew +
                memosMerged + linksNew + summariesNew + summariesMerged + variablesNew + variableValuesSet +
-               setsNew + setsExtended + dictionariesNew + summaryTablesNew + conceptMapsNew;
+               setsNew + setsExtended + dictionariesNew + summaryTablesNew + conceptMapsNew + questionsNew + questionsExtended;
     }
 };
 

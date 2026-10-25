@@ -260,6 +260,19 @@ public:
     qint64 addMapEdge(const MapEdge &edge);
     bool updateMapEdge(const MapEdge &edge);
     bool deleteMapEdge(qint64 id);
+    // Research questions worksheet (issue #17). Evidence refers to segments, codes and memos and disappears
+    // with the element it refers to (or with the question). An element is attached to a question only once.
+    QList<ResearchQuestion> researchQuestions() const;
+    ResearchQuestion researchQuestion(qint64 id) const; // id == 0 if missing
+    qint64 addResearchQuestion(const QString &title, const QString &uuid = {});
+    bool updateResearchQuestion(const ResearchQuestion &question); // everything but id, position and uuid
+    bool deleteResearchQuestion(qint64 id);
+    bool moveResearchQuestion(qint64 id, int delta);              // -1 up, +1 down
+    QList<QuestionEvidence> questionEvidence(qint64 questionId) const;
+    bool addQuestionEvidence(qint64 questionId, EvidenceKind kind, qint64 refId); // false if missing; true if already there
+    bool removeQuestionEvidence(qint64 evidenceId);
+    static QString questionStatusToString(QuestionStatus status);
+    static QuestionStatus questionStatusFromString(const QString &s);
 
     // Log of the requests made to language models (issue #39). Optional, off by default (meta "ai_log"):
     // addAiLog does nothing and returns 0 while it is off. Not undoable, not merged, not exported. Never holds keys.
@@ -274,6 +287,7 @@ signals:
     void opened();
     void summariesChanged();
     void mapsChanged();
+    void researchQuestionsChanged();
     void aiLogChanged();
     void closed();
     void groupsChanged();

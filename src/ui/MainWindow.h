@@ -70,6 +70,7 @@ private:
     void showSummaryGrid();
     void showSummaryTables();
     void showConceptMaps();
+    void showResearchQuestions();
     void showDictionaries();
     void showWordFrequencies();
     void showVariableFilter();
@@ -150,6 +151,7 @@ private:
     QAction *m_summaryGrid = nullptr;
     QAction *m_summaryTables = nullptr;
     QAction *m_conceptMaps = nullptr;
+    QAction *m_researchQuestions = nullptr;
     QAction *m_dictionaries = nullptr;
     QAction *m_wordFrequencies = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;

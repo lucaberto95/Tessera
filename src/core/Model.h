@@ -202,6 +202,31 @@ struct MapEdge {
     QString uuid;
 };
 
+// Research questions worksheet (issue #17): a question with its status, notes, themes (one per line),
+// conclusions and evidence. Evidence only refers to segments, codes and memos (never copies them).
+enum class QuestionStatus { Open, InProgress, Answered };
+
+struct ResearchQuestion {
+    qint64 id = 0;
+    QString title;
+    QString description;
+    QuestionStatus status = QuestionStatus::Open;
+    QStringList themes;
+    QString conclusions;
+    QString notes;
+    int position = 0;
+    QString uuid;
+};
+
+enum class EvidenceKind { Segment, Code, Memo };
+
+struct QuestionEvidence {
+    qint64 id = 0;
+    qint64 questionId = 0;
+    EvidenceKind kind = EvidenceKind::Segment;
+    qint64 refId = 0;
+    int position = 0;
+};
 // One request made to a language model (issue #39), kept for transparency and reproducibility. Not part of undo.
 struct AiLogEntry {
     qint64 id = 0;

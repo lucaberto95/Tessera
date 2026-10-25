@@ -24,6 +24,7 @@
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
 #include "ui/SummaryGridDialog.h"
+#include "ui/ResearchQuestionsDialog.h"
 #include "ui/SummaryTablesDialog.h"
 #include "ui/ConceptMapDialog.h"
 #include "ui/MatrixDialog.h"
@@ -217,6 +218,7 @@ void MainWindow::createActions()
     m_summaryGrid = make(tr("&Griglia delle sintesi…"), &MainWindow::showSummaryGrid);
     m_summaryTables = make(tr("Tabelle &riassuntive…"), &MainWindow::showSummaryTables);
     m_conceptMaps = make(tr("Mappe conce&ttuali…"), &MainWindow::showConceptMaps);
+    m_researchQuestions = make(tr("Domande di &ricerca…"), &MainWindow::showResearchQuestions);
     m_wordFrequencies = make(tr("&Frequenze di parole, nuvola e parole in contesto…"), &MainWindow::showWordFrequencies);
     m_dictionaries = make(tr("&Dizionari e analisi del contenuto…"), &MainWindow::showDictionaries);
     m_exportSegmentsHtml = make(tr("Esporta segmenti recuperati (&HTML)…"), [this] { m_segments->exportHtml(); });
@@ -324,6 +326,7 @@ void MainWindow::createMenus()
     analysis->addAction(m_summaryGrid);
     analysis->addAction(m_summaryTables);
     analysis->addAction(m_conceptMaps);
+    analysis->addAction(m_researchQuestions);
     analysis->addAction(m_wordFrequencies);
     analysis->addAction(m_dictionaries);
     analysis->addAction(m_activateByVariables);
@@ -1076,6 +1079,13 @@ void MainWindow::showConceptMaps()
             break;
         }
         case MapNodeKind::Segment: {
+void MainWindow::showResearchQuestions()
+{
+    auto *dlg = new ResearchQuestionsDialog(m_project, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &ResearchQuestionsDialog::evidenceActivated, this, [this](int kind, qint64 id) {
+        switch (EvidenceKind(kind)) {
+        case EvidenceKind::Segment: {
             const Segment s = m_project->segment(id);
             if (s.id)
                 openSegment(s.documentId, s.start, s.end, s.id);
@@ -1083,6 +1093,15 @@ void MainWindow::showConceptMaps()
         }
         default:
             break;
+        case EvidenceKind::Code:
+            m_codes->setCurrentCode(id);
+            break;
+        case EvidenceKind::Memo: {
+            const Memo m = m_project->memo(id);
+            if (m.id)
+                Ui::openMemo(this, m_project, m);
+            break;
+        }
         }
     });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
