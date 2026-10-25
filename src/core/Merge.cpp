@@ -810,6 +810,9 @@ void Merger::mergeConceptMaps()
                 return;
             }
         }
+    }
+}
+
 // Research questions are matched by uuid, else by title. A new one is copied with its evidence, mapped to the
 // target's segments, codes and memos (evidence whose element did not come across is dropped); a question already
 // there only gains the evidence it lacks, its own texts are never overwritten.
@@ -922,9 +925,6 @@ Report Merger::run()
         mergeDictionaries();
         mergeSummaryTables();
         mergeConceptMaps();
-    }
-}
-
         if (!m_failed)
             mergeResearchQuestions();
     }

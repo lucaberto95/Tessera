@@ -1140,6 +1140,19 @@ void MainWindow::showConceptMaps()
             break;
         }
         case MapNodeKind::Segment: {
+            const Segment s = m_project->segment(id);
+            if (s.id)
+                openSegment(s.documentId, s.start, s.end, s.id);
+            break;
+        }
+        default:
+            break;
+        }
+    });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
 void MainWindow::showResearchQuestions()
 {
     auto *dlg = new ResearchQuestionsDialog(m_project, this);
@@ -1152,8 +1165,6 @@ void MainWindow::showResearchQuestions()
                 openSegment(s.documentId, s.start, s.end, s.id);
             break;
         }
-        default:
-            break;
         case EvidenceKind::Code:
             m_codes->setCurrentCode(id);
             break;

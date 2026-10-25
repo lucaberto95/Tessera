@@ -168,6 +168,8 @@ private slots:
         dlg.selectRow(dlg.currentStateRow());
         QVERIFY(!dlg.applySelected());
         QCOMPARE(p.documents().size(), 2);
+    }
+
     void teamDialogRoundAndImport()
     {
         const QString file = m_dir.filePath("team-ui.tsra");

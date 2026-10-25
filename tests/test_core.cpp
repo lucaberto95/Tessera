@@ -1,4 +1,4 @@
-#include "FakeHttp.h"
+﻿#include "FakeHttp.h"
 #include "core/Agreement.h"
 #include "core/ai/AiAssist.h"
 #include "core/ai/AiCodes.h"
@@ -3972,8 +3972,8 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 12);
-        QCOMPARE(fileVersion(file), 12);
+        QCOMPARE(p.schemaVersion(), 15);
+        QCOMPARE(fileVersion(file), 15);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
@@ -4125,7 +4125,7 @@ private slots:
         QCOMPARE(fileVersion(file), 7);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 12);
+        QCOMPARE(fileVersion(file), 15);
         const qint64 doc = p.documents().first().id;
         const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
         QVERIFY(a > 0);
@@ -4310,7 +4310,7 @@ private slots:
         QCOMPARE(fileVersion(file), 8);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 12);
+        QCOMPARE(fileVersion(file), 15);
         const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
         QVERIFY(p.setSummary(doc, p.codes().first().id, "ok"));
         QVERIFY(p.addSummaryTable("T", "{}") > 0);
@@ -4410,7 +4410,7 @@ private slots:
         QCOMPARE(fileVersion(file), 11);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 12);
+        QCOMPARE(fileVersion(file), 15);
         QVERIFY(p.addResearchQuestion("Domanda") > 0);
     }
 
@@ -4799,7 +4799,7 @@ private slots:
             doc = m.addDocument(m.groups().first().id, "Intervista", "Mi piace lavorare da casa, ma il traffico pesa.");
             tema = m.addCode(0, "Tema", Qt::red);
             m.addSegment(doc, tema, 0, 14);
-            QCOMPARE(m.schemaVersion(), 12);
+            QCOMPARE(m.schemaVersion(), 15);
             QVERIFY(m.teamCycles().isEmpty());
             QCOMPARE(m.nextTeamCycleNumber(), 1);
 
@@ -6057,7 +6057,7 @@ private slots:
     {
         Project p;
         QVERIFY(p.create(path("ailog.tsra")));
-        QCOMPARE(p.schemaVersion(), 12);
+        QCOMPARE(p.schemaVersion(), 15);
         QVERIFY(!p.aiLogEnabled());
         QCOMPARE(p.addAiLog("f", "local", "m", "in", "out"), qint64(0)); // off by default
         p.setAiLogEnabled(true);
@@ -6465,7 +6465,7 @@ private slots:
     {
         Project p;
         QVERIFY(p.create(path("ts.tsra")));
-        QCOMPARE(p.schemaVersion(), 12);
+        QCOMPARE(p.schemaVersion(), 15);
         const qint64 g = p.groups().first().id;
         const qint64 d = p.addDocument(g, "Intervista", "Uno due tre quattro");
         QSignalSpy spy(&p, &Project::timestampsChanged);
@@ -6569,6 +6569,7 @@ private slots:
         QCOMPARE(b.timestamps(copied).size(), 2);
         QCOMPARE(b.timestamps(copied)[1].timeMs, qint64(3000));
         QCOMPARE(b.documentMediaPath(copied), QString("C:/rec/x.wav"));
+    }
 
     // ---------------------------------------------------------------- topic modeling (#38)
 
@@ -6775,6 +6776,7 @@ private slots:
         QCOMPARE(p.allSegments().size(), 0);
         QCOMPARE(p.codes().size(), codesBefore);
     }
+
     void mediaKindsAndPaths()
     {
         QCOMPARE(Media::kindForFile("a/Intervista.MP3"), DocumentKind::Audio);
