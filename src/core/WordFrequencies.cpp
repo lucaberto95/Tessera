@@ -12,11 +12,6 @@ namespace Words {
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("Words", text);
-}
-
 const QString kStopListKey = QStringLiteral("word_stoplist");
 // Prefix of the stored list: tells an empty list apart from one that was never set.
 const QString kStoredMarker = QStringLiteral("#");
@@ -228,7 +223,7 @@ QStringList stopWordLanguages()
 
 QString stopWordLanguageName(const QString &language)
 {
-    return language == QLatin1String("en") ? tr("Inglese") : tr("Italiano");
+    return language == QLatin1String("en") ? QCoreApplication::translate("Words", "Inglese") : QCoreApplication::translate("Words", "Italiano");
 }
 
 QString stopWord(const QString &line)
@@ -288,7 +283,7 @@ void setStopList(Project &project, const QStringList &words)
 int addToDictionary(Project &project, qint64 categoryId, const QStringList &words)
 {
     int added = 0;
-    project.setUndoLabel(tr("Aggiungi parole al dizionario"));
+    project.setUndoLabel(QCoreApplication::translate("Words", "Aggiungi parole al dizionario"));
     project.beginBatch();
     for (const QString &w : words) {
         const qsizetype before = project.dictEntries(categoryId).size();

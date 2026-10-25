@@ -18,7 +18,6 @@ namespace Merge {
 
 namespace {
 
-QString trm(const char *text) { return QCoreApplication::translate("Merge", text); }
 
 QByteArray fingerprint(const Project &p, const Document &d)
 {
@@ -40,7 +39,7 @@ QString joinText(const QString &existing, const QString &incoming, const QString
     if (when.isValid())
         who += (who.isEmpty() ? QString() : QStringLiteral(", ")) + when.toLocalTime().toString(QStringLiteral("yyyy-MM-dd"));
     if (who.isEmpty())
-        who = trm("altra copia");
+        who = QCoreApplication::translate("Merge", "altra copia");
     return existing + QStringLiteral("\n\n— ") + who + QStringLiteral(" —\n") + incoming;
 }
 
@@ -256,7 +255,7 @@ qint64 Merger::ensureDoc(qint64 srcDoc)
                 if (opts.onTextConflict == TextConflict::Skip) {
                     ++report.documentsSkipped;
                 } else {
-                    const QString copyName = trm("%1 (copia di %2)").arg(od.name, m_sourceName);
+                    const QString copyName = QCoreApplication::translate("Merge", "%1 (copia di %2)").arg(od.name, m_sourceName);
                     for (const Document &d : tDocsByName.value(copyName)) {
                         if (targetFingerprint(d.id) == fp) {
                             result = d.id; // copied by an earlier merge
@@ -788,7 +787,7 @@ bool Source::load(const QString &path, QString *error)
         return false;
     };
     if (!m_dir->isValid())
-        return fail(trm("Impossibile creare una cartella temporanea"));
+        return fail(QCoreApplication::translate("Merge", "Impossibile creare una cartella temporanea"));
     m_name = QFileInfo(path).completeBaseName();
     m_project = std::make_unique<Project>();
     const QString local = m_dir->filePath(QStringLiteral("source.tsra"));
@@ -799,7 +798,7 @@ bool Source::load(const QString &path, QString *error)
     } else {
         // Work on a copy: opening may upgrade the schema (and leave a backup next to the file).
         if (!QFile::copy(path, local))
-            return fail(trm("Impossibile leggere %1").arg(path));
+            return fail(QCoreApplication::translate("Merge", "Impossibile leggere %1").arg(path));
         QFile::setPermissions(local, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
         if (!m_project->open(local))
             return fail(m_project->lastError());
@@ -834,7 +833,7 @@ Report analyze(Project &target, const Source &source, const Options &options)
 
 Report apply(Project &target, const Source &source, const Options &options)
 {
-    target.setUndoLabel(trm("Unione di progetti"));
+    target.setUndoLabel(QCoreApplication::translate("Merge", "Unione di progetti"));
     target.beginBatch();
     Merger merger(target, source.project(), source.name(), options, false);
     Report report = merger.run();

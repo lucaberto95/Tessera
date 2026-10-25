@@ -16,11 +16,6 @@ namespace Stats {
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("Stats", text);
-}
-
 bool isNumeric(VariableType type)
 {
     return type == VariableType::Integer || type == VariableType::Decimal;
@@ -113,8 +108,8 @@ QList<Group> groupsByVariable(const Project &project, qint64 variableId, const Q
         QString value; // normalized
     };
     QList<Item> items;
-    Group empty{tr("(vuoto)"), {}};
-    Group invalid{tr("(non valido)"), {}};
+    Group empty{QCoreApplication::translate("Stats", "(vuoto)"), {}};
+    Group invalid{QCoreApplication::translate("Stats", "(non valido)"), {}};
     for (const Document &d : project.documents()) {
         if (!documentIds.isEmpty() && !only.contains(d.id))
             continue;
@@ -163,7 +158,7 @@ QList<Group> groupsByVariable(const Project &project, qint64 variableId, const Q
         for (const QString &v : order) {
             QString label = v;
             if (type == VariableType::Boolean)
-                label = v == QLatin1String("1") ? tr("Vero") : tr("Falso");
+                label = v == QLatin1String("1") ? QCoreApplication::translate("Stats", "Vero") : QCoreApplication::translate("Stats", "Falso");
             out.append({label, byValue.value(v)});
         }
     }
@@ -371,10 +366,10 @@ QList<qint64> codesToVariables(Project &project, const QList<qint64> &codes, Mea
     for (const Variable &v : project.variables())
         names.insert(v.name.toLower());
 
-    project.setUndoLabel(tr("Trasforma codici in variabili"));
+    project.setUndoLabel(QCoreApplication::translate("Stats", "Trasforma codici in variabili"));
     project.beginBatch();
     for (qint64 code : codes) {
-        const QString base = tr("Segmenti: ") + project.codePath(code);
+        const QString base = QCoreApplication::translate("Stats", "Segmenti: ") + project.codePath(code);
         QString name = base;
         for (int n = 2; names.contains(name.toLower()); ++n)
             name = QStringLiteral("%1 (%2)").arg(base, QString::number(n));

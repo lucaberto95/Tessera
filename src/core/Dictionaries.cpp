@@ -17,11 +17,6 @@ namespace Dictionaries {
 
 namespace {
 
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("Dictionaries", text);
-}
-
 const QString PathSeparator = QStringLiteral(" > ");
 
 bool isWordChar(char32_t c, bool wildcard)
@@ -328,7 +323,7 @@ int autocode(Project &project, const Analysis &analysis, const QList<qint64> &ca
                 parentCode = codeFor(c.parentId, guard + 1);
             } else {
                 if (!rootCode)
-                    rootCode = findOrAdd(0, dictionaryName.isEmpty() ? tr("Dizionario") : dictionaryName);
+                    rootCode = findOrAdd(0, dictionaryName.isEmpty() ? QCoreApplication::translate("Dictionaries", "Dizionario") : dictionaryName);
                 parentCode = rootCode;
             }
             code = parentCode ? findOrAdd(parentCode, c.name) : 0;
@@ -340,7 +335,7 @@ int autocode(Project &project, const Analysis &analysis, const QList<qint64> &ca
     QHash<qint64, QString> texts;
     QHash<qint64, bool> textDocs;
     const qsizetype before = project.allSegments().size(); // addSegment merges duplicates
-    project.setUndoLabel(tr("Codifica automatica con il dizionario"));
+    project.setUndoLabel(QCoreApplication::translate("Dictionaries", "Codifica automatica con il dizionario"));
     project.beginBatch();
     for (qint64 category : categories) {
         const QList<Hit> hits = analysis.hits.value(category);
@@ -383,7 +378,7 @@ QList<qint64> countsToVariables(Project &project, const Analysis &analysis, cons
         names.insert(v.name.toLower());
     const QString dictionaryName = project.dictionary(analysis.dictionaryId).name;
 
-    project.setUndoLabel(tr("Salva i conteggi come variabili"));
+    project.setUndoLabel(QCoreApplication::translate("Dictionaries", "Salva i conteggi come variabili"));
     project.beginBatch();
     for (qint64 category : categories) {
         // One arg() with both values: a '%1' typed in a name must stay literal.
@@ -408,7 +403,7 @@ QList<qint64> countsToVariables(Project &project, const Analysis &analysis, cons
 
 QList<QStringList> toTable(const Project &project, qint64 dictionaryId)
 {
-    QList<QStringList> rows{{tr("Categoria"), tr("Voce")}};
+    QList<QStringList> rows{{QCoreApplication::translate("Dictionaries", "Categoria"), QCoreApplication::translate("Dictionaries", "Voce")}};
     QHash<qint64, QList<DictEntry>> entries;
     for (const DictEntry &e : project.dictEntriesOfDictionary(dictionaryId))
         entries[e.categoryId] << e;
@@ -434,7 +429,7 @@ int importTable(Project &project, qint64 dictionaryId, const QList<QStringList> 
 {
     int added = 0;
     QHash<QString, qint64> known; // path -> category
-    project.setUndoLabel(tr("Importa dizionario"));
+    project.setUndoLabel(QCoreApplication::translate("Dictionaries", "Importa dizionario"));
     project.beginBatch();
     for (int r = 0; r < rows.size(); ++r) {
         const QString path = rows[r].value(0).trimmed();
@@ -474,7 +469,7 @@ int importTable(Project &project, qint64 dictionaryId, const QList<QStringList> 
 int importWords(Project &project, qint64 categoryId, const QString &text)
 {
     int added = 0;
-    project.setUndoLabel(tr("Importa voci"));
+    project.setUndoLabel(QCoreApplication::translate("Dictionaries", "Importa voci"));
     project.beginBatch();
     QStringList existing;
     for (const DictEntry &e : project.dictEntries(categoryId))
@@ -511,7 +506,7 @@ int importFile(Project &project, qint64 dictionaryId, qint64 categoryId, const Q
         return -1;
     }
     const QString text = Importers::decodeText(f.readAll());
-    project.setUndoLabel(tr("Importa voci"));
+    project.setUndoLabel(QCoreApplication::translate("Dictionaries", "Importa voci"));
     project.beginBatch();
     if (!categoryId) {
         const QString name = QFileInfo(path).completeBaseName();
@@ -531,7 +526,7 @@ bool exportFile(const Project &project, qint64 dictionaryId, const QString &path
         Xlsx::Sheet sheet;
         sheet.name = project.dictionary(dictionaryId).name;
         if (sheet.name.trimmed().isEmpty())
-            sheet.name = tr("Dizionario");
+            sheet.name = QCoreApplication::translate("Dictionaries", "Dizionario");
         sheet.rows = rows;
         sheet.textColumns = {0, 1};
         return Xlsx::writeWorkbook(path, {sheet}, error);

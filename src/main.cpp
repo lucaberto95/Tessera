@@ -1,3 +1,4 @@
+#include "ui/Language.h"
 #include "ui/MainWindow.h"
 
 #include <QApplication>
@@ -35,22 +36,24 @@ int main(int argc, char *argv[])
         QApplication::setWindowIcon(icon);
     }
 
-    // Standard Qt dialogs (file dialogs, Yes/No buttons) in the user's language.
-    QTranslator qtTranslator;
-    if (qtTranslator.load(QLocale(), QStringLiteral("qtbase"), QStringLiteral("_"),
-                          QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
-        app.installTranslator(&qtTranslator);
+    // Interface language (stored choice or system language, Italian by default) and the standard
+    // Qt dialogs (file dialogs, Yes/No buttons) in the same language.
+    QTranslator appTranslator, qtTranslator;
+    Language::load(Language::resolve(Language::storedChoice()), appTranslator, qtTranslator,
+                   QLibraryInfo::path(QLibraryInfo::TranslationsPath));
+    app.installTranslator(&qtTranslator);
+    app.installTranslator(&appTranslator);
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Tessera - analisi qualitativa dei dati"));
+    parser.setApplicationDescription(QObject::tr("Tessera - analisi qualitativa dei dati"));
     parser.addHelpOption();
     parser.addVersionOption();
-    parser.addPositionalArgument(QStringLiteral("progetto"), QStringLiteral("File di progetto .tsra da aprire"));
+    parser.addPositionalArgument(QStringLiteral("progetto"), QObject::tr("File di progetto .tsra da aprire"));
     QCommandLineOption exampleOption(QStringLiteral("example"),
-                                     QStringLiteral("Crea un progetto di esempio nel percorso indicato e lo apre"),
-                                     QStringLiteral("percorso"));
+                                     QObject::tr("Crea un progetto di esempio nel percorso indicato e lo apre"),
+                                     QObject::tr("percorso"));
     QCommandLineOption screenshotOption(QStringLiteral("screenshot"),
-                                        QStringLiteral("Salva un'immagine della finestra ed esce (per i test)"),
+                                        QObject::tr("Salva un'immagine della finestra ed esce (per i test)"),
                                         QStringLiteral("png"));
     parser.addOption(exampleOption);
     parser.addOption(screenshotOption);
