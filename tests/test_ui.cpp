@@ -40,6 +40,7 @@
 #include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
+#include "ui/SentimentDialog.h"
 #include "ui/SurveyImportDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/VariablesDialog.h"
@@ -1213,6 +1214,44 @@ private slots:
         dlg.selectMap(map);
         QCOMPARE(dlg.nodeItemCount(), 3);
         QVERIFY(second != map);
+    }
+
+    void sentimentDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("sentiment.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "D",
+                                         "Sono molto contento. Il lavoro e' terribile. Oggi piove.");
+        const qint64 a = p.addCode(0, "A", Qt::red);
+        p.addSegment(doc, a, 0, 19);
+
+        SentimentDialog dlg(&p, [doc] { return QList<qint64>{doc}; }, [&p] { return p.allSegments(); });
+        SegmentsPanel panel(&p);
+        connect(&dlg, &SentimentDialog::passagesRequested, &panel, &SegmentsPanel::setPassages);
+        dlg.show();
+
+        dlg.setUnit(Sentiment::Unit::Sentences);
+        dlg.analyze();
+        QCOMPARE(dlg.items().size(), 3);
+        QTableWidget *table = dlg.findChildren<QTableWidget *>().first();
+        QCOMPARE(table->rowCount(), 3);
+        QCOMPARE(dlg.visibleRows(), 3);
+        QCOMPARE(dlg.setPolarityFilter(int(Sentiment::Polarity::Negative)), 1);
+        QCOMPARE(dlg.visibleRows(), 1);
+        QCOMPARE(dlg.setPolarityFilter(-1), 3);
+
+        dlg.setUnit(Sentiment::Unit::Segments);
+        dlg.analyze();
+        QCOMPARE(dlg.items().size(), 1);
+        QCOMPARE(dlg.items().first().score.polarity, Sentiment::Polarity::Positive);
+
+        dlg.setUnit(Sentiment::Unit::Sentences);
+        dlg.analyze();
+        const qsizetype before = p.allSegments().size();
+        QCOMPARE(dlg.codeItems("Sentiment"), 3);
+        QCOMPARE(p.allSegments().size(), before + 3);
+        QVERIFY(p.undo());
+        QCOMPARE(p.allSegments().size(), before);
     }
 
     void cooccurrenceDialog()

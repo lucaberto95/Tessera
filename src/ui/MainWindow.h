@@ -72,6 +72,7 @@ private:
     void showConceptMaps();
     void showResearchQuestions();
     void showDictionaries();
+    void showSentiment();
     void showWordFrequencies();
     void showVariableFilter();
     void showVariables();
@@ -153,6 +154,7 @@ private:
     QAction *m_conceptMaps = nullptr;
     QAction *m_researchQuestions = nullptr;
     QAction *m_dictionaries = nullptr;
+    QAction *m_sentiment = nullptr;
     QAction *m_wordFrequencies = nullptr;
     QAction *m_exportSegmentsHtml = nullptr;
     QAction *m_exportSegmentsXlsx = nullptr;
