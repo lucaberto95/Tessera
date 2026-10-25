@@ -47,6 +47,7 @@
 #include "ui/SurveyImportDialog.h"
 #include "ui/VariableFilterDialog.h"
 #include "ui/VariablesDialog.h"
+#include "ui/TopicsDialog.h"
 #include "ui/WordFrequencyDialog.h"
 
 #include <QBuffer>
@@ -1636,6 +1637,58 @@ private slots:
 
         QVERIFY(m_project->undo());
         QVERIFY(!m_project->memo(id).id);
+    }
+
+    void topicsDialog()
+    {
+        Project p(this);
+        QVERIFY(p.create(m_dir.filePath("topics_ui.tsra")));
+        const qint64 g = p.groups().first().id;
+        const QStringList themeA = QString("lavoro stipendio ufficio colleghi turno contratto").split(' ');
+        const QStringList themeB = QString("famiglia figli casa genitori nonni cena").split(' ');
+        for (int d = 0; d < 8; ++d) {
+            const QStringList &words = d % 2 ? themeB : themeA;
+            QStringList text;
+            for (int i = 0; i < 30; ++i)
+                text << words[(i * 5 + d) % words.size()];
+            p.addDocument(g, QString("Doc %1").arg(d), text.join(' ') + ".\n" + text.mid(3).join(' ') + ".");
+        }
+        TopicsDialog dlg(&p, [] { return QList<qint64>{}; }, [] { return QList<Segment>{}; });
+        dlg.resize(900, 600);
+        dlg.setTopicCount(2);
+        dlg.setSeed(3);
+        dlg.run();
+        QVERIFY(dlg.isBusy());
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(dlg.result().topics.size(), 2);
+        auto *topics = dlg.findChild<QTableWidget *>("topicTable");
+        auto *units = dlg.findChild<QTableWidget *>("unitTable");
+        auto *passages = dlg.findChild<QTableWidget *>("passageTable");
+        QVERIFY(topics && units && passages);
+        QCOMPARE(topics->rowCount(), 2);
+        QCOMPARE(units->rowCount(), 8);
+        QVERIFY(passages->rowCount() > 0); // the first topic is selected
+        QSignalSpy opened(&dlg, &TopicsDialog::passageActivated);
+        emit passages->cellDoubleClicked(0, 0);
+        QCOMPARE(opened.count(), 1);
+
+        // Paragraph units: two per document.
+        dlg.setParagraphs(true);
+        dlg.run();
+        QTRY_VERIFY(!dlg.isBusy());
+        QCOMPARE(units->rowCount(), 16);
+
+        // Codes from the topics, one undo step.
+        const int before = p.codes().size();
+        Topics::CodeOptions options;
+        options.codeUnits = true;
+        const Topics::CodeResult made = dlg.createCodes(options);
+        QCOMPARE(made.codes.size(), 2);
+        QCOMPARE(p.codes().size(), before + 3);
+        QVERIFY(made.segments > 0);
+        QVERIFY(p.undo());
+        QCOMPARE(p.codes().size(), before);
+        QCOMPARE(p.allSegments().size(), 0);
     }
 
     void wordFrequencies()

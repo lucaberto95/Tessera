@@ -41,6 +41,7 @@ qt_add_library(tessera_core STATIC
     src/core/Survey.h src/core/Survey.cpp
     src/core/Dictionaries.h src/core/Dictionaries.cpp
     src/core/WordFrequencies.h src/core/WordFrequencies.cpp
+    src/core/Topics.h src/core/Topics.cpp
     src/core/DemoProject.h src/core/DemoProject.cpp
     src/core/Updater.h src/core/Updater.cpp
     src/core/ai/AiConfig.h src/core/ai/AiConfig.cpp
@@ -105,6 +106,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/SurveyImportDialog.h src/ui/SurveyImportDialog.cpp
     src/ui/DictionaryDialog.h src/ui/DictionaryDialog.cpp
     src/ui/WordFrequencyDialog.h src/ui/WordFrequencyDialog.cpp
+    src/ui/TopicsDialog.h src/ui/TopicsDialog.cpp
     src/ui/AiSettingsDialog.h src/ui/AiSettingsDialog.cpp
     src/ui/AiAssistDialog.h src/ui/AiAssistDialog.cpp
     src/ui/AiCodesDialog.h src/ui/AiCodesDialog.cpp
