@@ -45,6 +45,8 @@ public:
     bool hasSelection() const;
     std::pair<int, int> selection() const;
     QString selectedText() const;
+    // Position of the text cursor in the stored text; -1 for images, PDFs and when no document is open.
+    int cursorPosition() const;
     // Codes the current selection; returns the segment id or 0.
     qint64 codeSelection(qint64 codeId);
     void selectRange(int start, int end, qint64 segmentId = 0);

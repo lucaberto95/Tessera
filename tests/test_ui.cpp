@@ -30,6 +30,7 @@
 #include "ui/PdfView.h"
 #include "ui/LinksDialog.h"
 #include "ui/UndoHistoryDialog.h"
+#include "ui/TranscriptDialog.h"
 #include "ui/Language.h"
 #include "ui/MainWindow.h"
 #include "ui/MatrixDialog.h"
@@ -612,6 +613,69 @@ private slots:
         QCOMPARE(view.links().size(), 1);
     }
 
+    void transcriptDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("transcript.tsra")));
+        const qint64 d = p.addDocument(p.groups().first().id, "Intervista", "Domanda uno.\nRisposta due.");
+        QList<Timestamp> stamps;
+        Timestamp t1;
+        t1.textPos = 0;
+        t1.timeMs = 1000;
+        Timestamp t2;
+        t2.textPos = 13;
+        t2.timeMs = 65000;
+        stamps << t1 << t2;
+        QVERIFY(p.setTimestamps(d, stamps));
+
+        DocumentView view(&p);
+        view.resize(700, 400);
+        view.show();
+        view.openDocument(d);
+        auto *edit = view.findChild<QTextEdit *>();
+        QCOMPARE(view.cursorPosition(), 0);
+
+        TranscriptDialog dlg(&p, d, [&view] { return view.cursorPosition(); });
+        dlg.show();
+        auto *table = dlg.findChild<QTableWidget *>();
+        QCOMPARE(table->rowCount(), 2);
+        QCOMPARE(table->item(1, 0)->text(), QString("00:01:05.000"));
+        QCOMPARE(table->item(1, 1)->text(), QString("Risposta due."));
+
+        // Editing the text in the view moves the markers; the dialog follows.
+        view.setEditing(true);
+        QTextCursor c(edit->document());
+        c.setPosition(0);
+        c.insertText("Premessa. ");
+        QVERIFY(view.commitEdits());
+        QCOMPARE(p.timestamps(d)[0].textPos, 0);
+        QCOMPARE(p.timestamps(d)[1].textPos, 23);
+        QCOMPARE(table->item(1, 1)->text(), QString("Risposta due."));
+
+        // Inserting at a position, exporting, and the double click that goes to the text.
+        QVERIFY(dlg.insertAt(10, 500));
+        QCOMPARE(dlg.rowCount(), 3);
+        const QString out = m_dir.filePath("t.srt");
+        QVERIFY(dlg.exportTo(out));
+        QFile f(out);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(f.readAll()).contains("00:01:05,000 --> "));
+        QSignalSpy go(&dlg, &TranscriptDialog::positionActivated);
+        table->selectRow(2);
+        emit table->cellDoubleClicked(2, 1);
+        QCOMPARE(go.count(), 1);
+        QCOMPARE(go.last().at(1).toInt(), 23);
+
+        QPushButton *remove = nullptr;
+        for (QPushButton *btn : dlg.findChildren<QPushButton *>())
+            if (btn->text() == QStringLiteral("Elimina"))
+                remove = btn;
+        QVERIFY(remove && remove->isEnabled());
+        remove->click();
+        QCOMPARE(table->rowCount(), 2);
+        QVERIFY(p.undo());
+        QCOMPARE(table->rowCount(), 3);
+    }
     void namesAreNotRichText()
     {
         // Rich text reads the files named by <img src> (a network share would get the user's credentials).

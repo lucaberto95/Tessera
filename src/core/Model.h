@@ -227,6 +227,15 @@ struct QuestionEvidence {
     qint64 refId = 0;
     int position = 0;
 };
+// A time marker of a transcript (issue #29): the text from `textPos` (UTF-16 offset) on was said at
+// `timeMs` of the document's associated recording. It follows edits of the text like a segment does.
+struct Timestamp {
+    qint64 id = 0;
+    qint64 documentId = 0;
+    int textPos = 0;
+    qint64 timeMs = 0;
+};
+
 // One request made to a language model (issue #39), kept for transparency and reproducibility. Not part of undo.
 struct AiLogEntry {
     qint64 id = 0;

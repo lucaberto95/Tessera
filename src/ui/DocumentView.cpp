@@ -465,6 +465,13 @@ std::pair<int, int> DocumentView::selection() const
     return {c.selectionStart(), c.selectionEnd()};
 }
 
+int DocumentView::cursorPosition() const
+{
+    if (!m_docId || m_isImage || m_isPdf)
+        return -1;
+    return m_edit->textCursor().position();
+}
+
 QString DocumentView::selectedText() const
 {
     if (m_isImage)

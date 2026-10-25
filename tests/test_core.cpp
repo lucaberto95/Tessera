@@ -26,6 +26,7 @@
 #include "core/Summaries.h"
 #include "core/Survey.h"
 #include "core/TextUtils.h"
+#include "core/Transcripts.h"
 #include "core/VariableFilter.h"
 #include "core/Updater.h"
 #include "core/WordFrequencies.h"
@@ -6390,6 +6391,182 @@ private slots:
             QTRY_COMPARE(spy.count(), 1);
             QCOMPARE(run.response().kind, Ai::ErrorKind::Cancelled);
         }
+    }
+    // ------------------------------------------------------------ transcripts with time stamps (issue #29)
+
+    void transcriptTimeFormats()
+    {
+        QCOMPARE(Transcripts::formatTime(3723000), QString("01:02:03"));
+        QCOMPARE(Transcripts::formatTime(3723450, true), QString("01:02:03.450"));
+        QCOMPARE(Transcripts::parseTime("01:02:03"), qint64(3723000));
+        QCOMPARE(Transcripts::parseTime("2:03"), qint64(123000));
+        QCOMPARE(Transcripts::parseTime("00:00:01,5"), qint64(1500));
+        QCOMPARE(Transcripts::parseTime("1:02:03.045"), qint64(3723045));
+        QCOMPARE(Transcripts::parseTime("12"), qint64(12000));
+        QCOMPARE(Transcripts::parseTime("abc"), qint64(-1));
+        QCOMPARE(Transcripts::parseTime("1:75"), qint64(-1));
+    }
+
+    void transcriptParseSrtVtt()
+    {
+        const QString srt = "1\r\n00:00:01,000 --> 00:00:03,500\r\nBuongiorno a tutti.\r\n\r\n"
+                            "2\r\n00:00:04,000 --> 00:00:06,000\r\nPrima riga\r\nseconda riga\r\n\r\n"
+                            "3\r\n00:01:00,250 --> 00:01:02,000\r\nUltima.\r\n";
+        const Transcripts::Parsed p = Transcripts::parseSrt(srt);
+        QVERIFY(p.ok);
+        QCOMPARE(p.text, QString("Buongiorno a tutti.\nPrima riga seconda riga\nUltima."));
+        QCOMPARE(p.stamps.size(), 3);
+        QCOMPARE(p.stamps[0].textPos, 0);
+        QCOMPARE(p.stamps[0].timeMs, qint64(1000));
+        QCOMPARE(p.text.mid(p.stamps[1].textPos, 5), QString("Prima"));
+        QCOMPARE(p.stamps[2].timeMs, qint64(60250));
+        QCOMPARE(p.text.mid(p.stamps[2].textPos), QString("Ultima."));
+
+        const QString vtt = "WEBVTT\n\nNOTE un commento\n\nintro\n00:01.000 --> 00:03.000 align:start\n<v Anna>Ciao</v> <c.x>mondo</c>\n\n"
+                            "01:00:00.000 --> 01:00:02.000\nDopo un'ora\n";
+        const Transcripts::Parsed v = Transcripts::parseVtt(vtt);
+        QVERIFY(v.ok);
+        QCOMPARE(v.text, QString("Ciao mondo\nDopo un'ora"));
+        QCOMPARE(v.stamps[0].timeMs, qint64(1000));
+        QCOMPARE(v.stamps[1].timeMs, qint64(3600000));
+        QVERIFY(!Transcripts::parseSrt("niente di tutto questo").ok);
+    }
+
+    void transcriptParseBracketedAndExport()
+    {
+        const QString src = "[00:00:05] Domanda: come stai?\n[00:00:12.500] Risposta: bene.\nSenza marcatore.";
+        const Transcripts::Parsed p = Transcripts::parseBracketed(src);
+        QVERIFY(p.ok);
+        QCOMPARE(p.text, QString("Domanda: come stai?\nRisposta: bene.\nSenza marcatore."));
+        QCOMPARE(p.stamps.size(), 2);
+        QCOMPARE(p.stamps[1].timeMs, qint64(12500));
+        QCOMPARE(p.text.mid(p.stamps[1].textPos, 8), QString("Risposta"));
+        QVERIFY(!Transcripts::parseBracketed("solo [01:00] uno").ok); // a single marker is not a transcript
+
+        const QString back = Transcripts::exportTranscript(p.text, p.stamps, Transcripts::Format::Text);
+        const Transcripts::Parsed again = Transcripts::parseBracketed(back);
+        QCOMPARE(again.text, p.text);
+        QCOMPARE(again.stamps.size(), 2);
+        QCOMPARE(again.stamps[0].timeMs, qint64(5000));
+        QCOMPARE(again.stamps[1].textPos, p.stamps[1].textPos);
+
+        const QString srt = Transcripts::exportTranscript(p.text, p.stamps, Transcripts::Format::Srt);
+        QVERIFY(srt.startsWith("1\n00:00:05,000 --> 00:00:12,500\nDomanda: come stai?\n\n2\n00:00:12,500 --> 00:00:15,500\n"));
+        const Transcripts::Parsed fromSrt = Transcripts::parseSrt(srt);
+        QCOMPARE(fromSrt.stamps.size(), 2);
+        QCOMPARE(fromSrt.stamps[1].timeMs, qint64(12500));
+        const QString vtt = Transcripts::exportTranscript(p.text, p.stamps, Transcripts::Format::Vtt);
+        QVERIFY(vtt.startsWith("WEBVTT\n\n00:00:05.000 --> 00:00:12.500\n"));
+    }
+
+    void transcriptTimestampsInProject()
+    {
+        Project p;
+        QVERIFY(p.create(path("ts.tsra")));
+        QCOMPARE(p.schemaVersion(), 12);
+        const qint64 g = p.groups().first().id;
+        const qint64 d = p.addDocument(g, "Intervista", "Uno due tre quattro");
+        QSignalSpy spy(&p, &Project::timestampsChanged);
+        const qint64 t1 = p.addTimestamp(d, 0, 1000);
+        const qint64 t2 = p.addTimestamp(d, 8, 5000); // "tre"
+        QVERIFY(t1 > 0 && t2 > 0);
+        QVERIFY(spy.count() >= 2);
+        QCOMPARE(p.addTimestamp(d, 999, 0), qint64(0));  // outside the text
+        QCOMPARE(p.addTimestamp(d, 3, -1), qint64(0));   // negative time
+        QCOMPARE(p.timestamps(d).size(), 2);
+
+        // Editing the text before the second stamp moves it; editing after leaves it.
+        QVERIFY(p.updateDocumentText(d, "Zero Uno due tre quattro", {}, {}));
+        QCOMPARE(p.timestamps(d)[0].textPos, 0);
+        QCOMPARE(p.timestamps(d)[1].textPos, 13);
+        QCOMPARE(p.documentText(d).mid(13, 3), QString("tre"));
+        QVERIFY(p.updateDocumentText(d, "Zero Uno due tre", {}, {}));
+        QCOMPARE(p.timestamps(d)[1].textPos, 13);
+        // The text around a stamp is removed: the stamp stays at the edit.
+        QVERIFY(p.updateDocumentText(d, "Zero tre", {}, {}));
+        QVERIFY(p.timestamps(d)[1].textPos >= 5 && p.timestamps(d)[1].textPos <= 8);
+
+        QVERIFY(p.setTimestampTime(t2, 7000));
+        QCOMPARE(p.timestamps(d)[1].timeMs, qint64(7000));
+        QVERIFY(p.shiftTimestamps(d, -2000));
+        QCOMPARE(p.timestamps(d)[0].timeMs, qint64(0)); // clamped
+        QCOMPARE(p.timestamps(d)[1].timeMs, qint64(5000));
+
+        QVERIFY(p.setDocumentMediaPath(d, "C:/rec/intervista.mp3"));
+        QCOMPARE(p.documentMediaPath(d), QString("C:/rec/intervista.mp3"));
+        QVERIFY(p.undo());
+        QVERIFY(p.documentMediaPath(d).isEmpty());
+        QVERIFY(p.undo()); // shift
+        QCOMPARE(p.timestamps(d)[1].timeMs, qint64(7000));
+        QVERIFY(p.deleteTimestamp(t1));
+        QCOMPARE(p.timestamps(d).size(), 1);
+        QVERIFY(p.undo());
+        QCOMPARE(p.timestamps(d).size(), 2);
+
+        QList<Timestamp> repl;
+        Timestamp a;
+        a.textPos = 2;
+        a.timeMs = 10;
+        Timestamp bad;
+        bad.textPos = 500;
+        bad.timeMs = 10;
+        repl << a << bad;
+        QVERIFY(p.setTimestamps(d, repl));
+        QCOMPARE(p.timestamps(d).size(), 1);
+
+        QVERIFY(p.deleteDocument(d));
+        QCOMPARE(p.timestamps(d).size(), 0);
+    }
+
+    void transcriptImportAndMerge()
+    {
+        const QString srtPath = path("sub.srt");
+        {
+            QFile f(srtPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("1\n00:00:01,000 --> 00:00:02,000\nCiao\n\n2\n00:00:03,000 --> 00:00:04,000\nMondo\n");
+        }
+        const Importers::Result r = Importers::importFile(srtPath);
+        QVERIFY(r.ok);
+        QCOMPARE(r.text, QString("Ciao\nMondo"));
+        QCOMPARE(r.stamps.size(), 2);
+        QVERIFY(Importers::supportedSuffixes().contains("srt"));
+        const QString badPath = path("bad.vtt");
+        {
+            QFile f(badPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("WEBVTT\n\nnessun tempo\n");
+        }
+        QVERIFY(!Importers::importFile(badPath).ok);
+        const QString txtPath = path("marked.txt");
+        {
+            QFile f(txtPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("[00:00:01] a\n[00:00:02] b\n");
+        }
+        QCOMPARE(Importers::importFile(txtPath).stamps.size(), 2);
+
+        {
+            Project a;
+            QVERIFY(a.create(path("ts-a.tsra")));
+            const qint64 d = a.addDocument(a.groups().first().id, "Trascrizione", r.text);
+            QVERIFY(a.setTimestamps(d, r.stamps));
+            QVERIFY(a.setDocumentMediaPath(d, "C:/rec/x.wav"));
+        }
+        Project b;
+        QVERIFY(b.create(path("ts-b.tsra")));
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(path("ts-a.tsra"), &error), qPrintable(error));
+        QVERIFY(Merge::apply(b, src, {}).ok);
+        qint64 copied = 0;
+        for (const Document &doc : b.documents())
+            if (doc.name == "Trascrizione")
+                copied = doc.id;
+        QVERIFY(copied > 0);
+        QCOMPARE(b.timestamps(copied).size(), 2);
+        QCOMPARE(b.timestamps(copied)[1].timeMs, qint64(3000));
+        QCOMPARE(b.documentMediaPath(copied), QString("C:/rec/x.wav"));
     }
 };
 

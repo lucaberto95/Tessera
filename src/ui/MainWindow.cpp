@@ -36,6 +36,7 @@
 #include "ui/VariableFilterDialog.h"
 #include "ui/LinksDialog.h"
 #include "ui/UndoHistoryDialog.h"
+#include "ui/TranscriptDialog.h"
 #include "ui/MemoManager.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
@@ -208,6 +209,7 @@ void MainWindow::createActions()
     m_completeLink = make(tr("Completa co&llegamento"), [this] { m_view->completeLink(); },
                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
     m_links = make(tr("C&ollegamenti…"), &MainWindow::showLinks);
+    m_transcript = make(tr("&Time stamp della trascrizione…"), &MainWindow::showTranscript);
     m_exportCodebook = make(tr("Esporta &codebook…"), &MainWindow::exportCodebook);
     m_createReport = make(tr("Crea &report (Word, PDF, HTML)…"), &MainWindow::createReport);
 
@@ -300,6 +302,7 @@ void MainWindow::createMenus()
     docs->addAction(m_startLink);
     docs->addAction(m_completeLink);
     docs->addAction(m_links);
+    docs->addAction(m_transcript);
     docs->addSeparator();
     docs->addAction(m_variables);
     docs->addSeparator();
@@ -537,6 +540,7 @@ void MainWindow::updateActions()
     m_completeLink->setEnabled(canCode && m_view->hasPendingLink());
     m_newSubcode->setEnabled(open && m_codes->currentCodeId());
     m_editText->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf());
+    m_transcript->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf());
 
     // While editing a document's text, Ctrl+Z belongs to the text editor.
     const bool editing = m_view->isEditing();
@@ -866,6 +870,8 @@ void MainWindow::importDocuments(qint64 groupId)
         lastId = m_project->addDocument(groupId, QFileInfo(files[i]).completeBaseName(), r.text, files[i]);
         if (lastId && !r.richContent.isEmpty())
             m_project->setDocumentRichContent(lastId, r.richContent);
+        if (lastId && !r.stamps.isEmpty())
+            m_project->setTimestamps(lastId, r.stamps);
     }
     progress.setValue(int(files.size()));
     m_project->commitBatch();
@@ -1236,6 +1242,19 @@ void MainWindow::showLinks()
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     connect(dlg, &LinksDialog::endActivated, this,
             [this](qint64 doc, int start, int end) { openSegment(doc, start, end, 0); });
+    connect(m_project, &Project::closed, dlg, &QDialog::close);
+    dlg->show();
+}
+
+void MainWindow::showTranscript()
+{
+    const qint64 doc = m_view->documentId();
+    if (!doc || m_view->isImage() || m_view->isPdf())
+        return;
+    auto *dlg = new TranscriptDialog(m_project, doc, [this] { return m_view->cursorPosition(); }, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &TranscriptDialog::positionActivated, this,
+            [this](qint64 id, int pos) { openSegment(id, pos, pos, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);
     dlg->show();
 }

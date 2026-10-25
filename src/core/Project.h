@@ -273,6 +273,20 @@ public:
     bool removeQuestionEvidence(qint64 evidenceId);
     static QString questionStatusToString(QuestionStatus status);
     static QuestionStatus questionStatusFromString(const QString &s);
+    // Transcript time stamps of a text document (issue #29, v12), ordered by position then time. They
+    // follow edits of the text (updateDocumentText); deleting the document deletes them.
+    QList<Timestamp> timestamps(qint64 documentId) const;
+    qint64 addTimestamp(qint64 documentId, int textPos, qint64 timeMs);
+    bool setTimestampTime(qint64 id, qint64 timeMs);
+    bool deleteTimestamp(qint64 id);
+    // Replaces every time stamp of the document (one undo step); invalid ones (position outside the text,
+    // negative time) are skipped.
+    bool setTimestamps(qint64 documentId, const QList<Timestamp> &stamps);
+    // Moves every time stamp of the document by `deltaMs` (not below zero).
+    bool shiftTimestamps(qint64 documentId, qint64 deltaMs);
+    // Recording associated with a text document (a path: media can be large, so it is not embedded).
+    QString documentMediaPath(qint64 documentId) const;
+    bool setDocumentMediaPath(qint64 documentId, const QString &path);
 
     // Log of the requests made to language models (issue #39). Optional, off by default (meta "ai_log"):
     // addAiLog does nothing and returns 0 while it is off. Not undoable, not merged, not exported. Never holds keys.
@@ -309,6 +323,7 @@ signals:
     void variablesChanged();
     void linksChanged();
     void dictionariesChanged();
+    void timestampsChanged();
     void undoStateChanged();
 
 private:

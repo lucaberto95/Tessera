@@ -429,6 +429,7 @@ void Project::emitAllChanged()
     emit summariesChanged();
     emit mapsChanged();
     emit researchQuestionsChanged();
+    emit timestampsChanged();
 }
 
 // ---------------------------------------------------------------- undo / redo
@@ -449,7 +450,7 @@ bool Project::installUndoTriggers()
                                          "document_sets", "document_set_members", "links", "memo_links",
                                          "dictionaries", "dict_categories", "dict_entries", "document_data",
                                          "summaries", "summary_tables", "maps", "map_nodes", "map_edges",
-                                         "research_questions", "research_evidence"};
+                                         "research_questions", "research_evidence", "timestamps"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -792,7 +793,16 @@ QList<Project::Migration> Project::builtInMigrations()
           QStringLiteral("CREATE TABLE team_cycles ("
                          " id INTEGER PRIMARY KEY, number INTEGER NOT NULL, member TEXT NOT NULL,"
                          " file_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'sent',"
-                         " sent_at TEXT NOT NULL, returned_at TEXT, merged_at TEXT, report TEXT NOT NULL DEFAULT '')")}},    };
+                         " sent_at TEXT NOT NULL, returned_at TEXT, merged_at TEXT, report TEXT NOT NULL DEFAULT '')")}},
+        {15,
+         {// Transcript time stamps (issue #29) and the recording a text document is the transcript of.
+          QStringLiteral("CREATE TABLE timestamps ("
+                         " id INTEGER PRIMARY KEY,"
+                         " document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,"
+                         " text_pos INTEGER NOT NULL, time_ms INTEGER NOT NULL)"),
+          QStringLiteral("CREATE INDEX idx_timestamps_document ON timestamps(document_id)"),
+          QStringLiteral("ALTER TABLE documents ADD COLUMN media_path TEXT NOT NULL DEFAULT ''")}},
+    };
 }
 
 int Project::schemaVersion() const
@@ -1224,6 +1234,7 @@ bool Project::deleteDocument(qint64 id)
     notify(&Project::memosChanged);
     notify(&Project::variablesChanged);
     notify(&Project::linksChanged);
+    notify(&Project::timestampsChanged);
     notifySegments(id);
     return commitBatch();
 }
@@ -1234,17 +1245,36 @@ bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Seg
     setUndoLabel(tr("Modifica testo"));
     // The formatting follows the edit like segments do (it is only read when the document has any).
     const QString oldRich = documentRichContent(id);
-    const QString oldText = oldRich.isEmpty() ? QString() : documentText(id);
-    beginBatch();
-    bool ok = exec(QStringLiteral("UPDATE documents SET content = ? WHERE id = ?"), {text, id});
-    if (ok && !oldRich.isEmpty() && oldText != text) {
-        int prefix = 0;
+    const bool hasStamps = scalar(QStringLiteral("SELECT COUNT(*) FROM timestamps WHERE document_id = ?"), {id}).toInt() > 0;
+    const QString oldText = (oldRich.isEmpty() && !hasStamps) ? QString() : documentText(id);
+    // The edit, as the common prefix and suffix of the old and new text (formatting and time stamps follow it).
+    int prefix = 0, suffix = 0;
+    if (oldText != text) {
         const int limit = int(qMin(oldText.size(), text.size()));
         while (prefix < limit && oldText.at(prefix) == text.at(prefix))
             ++prefix;
-        int suffix = 0;
         while (suffix < limit - prefix && oldText.at(oldText.size() - 1 - suffix) == text.at(text.size() - 1 - suffix))
             ++suffix;
+    }
+    beginBatch();
+    bool ok = exec(QStringLiteral("UPDATE documents SET content = ? WHERE id = ?"), {text, id});
+    if (ok && hasStamps && oldText != text) {
+        const int removed = int(oldText.size()) - prefix - suffix, added = int(text.size()) - prefix - suffix;
+        for (const Timestamp &ts : timestamps(id)) {
+            // A marker at or before the edit stays; after it, it moves; inside the removed text, it goes to the edit.
+            int pos = ts.textPos;
+            if (pos <= prefix)
+                ; // before the edit, or exactly at its start (text typed there follows the marker)
+            else if (pos >= prefix + removed)
+                pos += added - removed;
+            else
+                pos = prefix;
+            pos = qBound(0, pos, int(text.size()));
+            if (ok && pos != ts.textPos)
+                ok = exec(QStringLiteral("UPDATE timestamps SET text_pos = ? WHERE id = ?"), {pos, ts.id});
+        }
+    }
+    if (ok && !oldRich.isEmpty() && oldText != text) {
         RichText::Formatting f = RichText::fromJson(oldRich);
         RichText::adjustForEdit(f, prefix, int(oldText.size()) - prefix - suffix, int(text.size()) - prefix - suffix);
         RichText::clamp(f, int(text.size()));
@@ -1299,8 +1329,115 @@ bool Project::updateDocumentText(qint64 id, const QString &text, const QList<Seg
     notify(&Project::documentsChanged);
     notify(&Project::memosChanged);
     notify(&Project::linksChanged);
+    if (hasStamps)
+        notify(&Project::timestampsChanged);
     notifySegments(id);
     return commitBatch();
+}
+
+// ---------------------------------------------------------------- transcript time stamps
+
+QList<Timestamp> Project::timestamps(qint64 documentId) const
+{
+    QList<Timestamp> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, document_id, text_pos, time_ms FROM timestamps WHERE document_id = ?"
+                             " ORDER BY text_pos, time_ms, id"));
+    q.addBindValue(documentId);
+    q.exec();
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toLongLong(), q.value(2).toInt(), q.value(3).toLongLong()});
+    return out;
+}
+
+qint64 Project::addTimestamp(qint64 documentId, int textPos, qint64 timeMs)
+{
+    setUndoLabel(tr("Nuovo time stamp"));
+    const Document d = document(documentId);
+    if (!d.id || d.kind != DocumentKind::Text) {
+        fail(tr("I time stamp si inseriscono solo nei documenti di testo"));
+        return 0;
+    }
+    if (textPos < 0 || textPos > documentText(documentId).size() || timeMs < 0) {
+        fail(tr("Time stamp non valido"));
+        return 0;
+    }
+    const qint64 id = insert(QStringLiteral("INSERT INTO timestamps(document_id, text_pos, time_ms) VALUES (?, ?, ?)"),
+                             {documentId, textPos, timeMs});
+    if (id)
+        notify(&Project::timestampsChanged);
+    return id;
+}
+
+bool Project::setTimestampTime(qint64 id, qint64 timeMs)
+{
+    setUndoLabel(tr("Modifica time stamp"));
+    if (timeMs < 0)
+        return fail(tr("Time stamp non valido"));
+    if (!exec(QStringLiteral("UPDATE timestamps SET time_ms = ? WHERE id = ?"), {timeMs, id}))
+        return false;
+    notify(&Project::timestampsChanged);
+    return true;
+}
+
+bool Project::deleteTimestamp(qint64 id)
+{
+    setUndoLabel(tr("Elimina time stamp"));
+    if (!exec(QStringLiteral("DELETE FROM timestamps WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::timestampsChanged);
+    return true;
+}
+
+bool Project::setTimestamps(qint64 documentId, const QList<Timestamp> &stamps)
+{
+    setUndoLabel(tr("Sostituisci time stamp"));
+    const Document d = document(documentId);
+    if (!d.id || d.kind != DocumentKind::Text)
+        return fail(tr("I time stamp si inseriscono solo nei documenti di testo"));
+    const int length = int(documentText(documentId).size());
+    beginBatch();
+    bool ok = exec(QStringLiteral("DELETE FROM timestamps WHERE document_id = ?"), {documentId});
+    for (const Timestamp &ts : stamps) {
+        if (!ok)
+            break;
+        if (ts.textPos < 0 || ts.textPos > length || ts.timeMs < 0)
+            continue;
+        ok = insert(QStringLiteral("INSERT INTO timestamps(document_id, text_pos, time_ms) VALUES (?, ?, ?)"),
+                    {documentId, ts.textPos, ts.timeMs}) != 0;
+    }
+    if (!ok) {
+        rollbackBatch();
+        return false;
+    }
+    notify(&Project::timestampsChanged);
+    return commitBatch();
+}
+
+bool Project::shiftTimestamps(qint64 documentId, qint64 deltaMs)
+{
+    setUndoLabel(tr("Sposta time stamp"));
+    if (!exec(QStringLiteral("UPDATE timestamps SET time_ms = MAX(0, time_ms + ?) WHERE document_id = ?"),
+              {deltaMs, documentId}))
+        return false;
+    notify(&Project::timestampsChanged);
+    return true;
+}
+
+QString Project::documentMediaPath(qint64 documentId) const
+{
+    return scalar(QStringLiteral("SELECT media_path FROM documents WHERE id = ?"), {documentId}).toString();
+}
+
+bool Project::setDocumentMediaPath(qint64 documentId, const QString &path)
+{
+    setUndoLabel(tr("Registrazione associata"));
+    if (!document(documentId).id)
+        return fail(tr("Documento inesistente"));
+    if (!exec(QStringLiteral("UPDATE documents SET media_path = ? WHERE id = ?"), {path, documentId}))
+        return false;
+    notify(&Project::documentsChanged);
+    return true;
 }
 
 // ---------------------------------------------------------------- document sets

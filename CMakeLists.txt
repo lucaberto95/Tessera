@@ -22,6 +22,7 @@ qt_add_library(tessera_core STATIC
     src/core/Qdpx.h src/core/Qdpx.cpp
     src/core/ForeignImport.h src/core/ForeignImport.cpp
     src/core/TextUtils.h src/core/TextUtils.cpp
+    src/core/Transcripts.h src/core/Transcripts.cpp
     src/core/RichText.h src/core/RichText.cpp
     src/core/Retrieval.h src/core/Retrieval.cpp
     src/core/Agreement.h src/core/Agreement.cpp
@@ -83,6 +84,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/MemoManager.h src/ui/MemoManager.cpp
     src/ui/LinksDialog.h src/ui/LinksDialog.cpp
     src/ui/UndoHistoryDialog.h src/ui/UndoHistoryDialog.cpp
+    src/ui/TranscriptDialog.h src/ui/TranscriptDialog.cpp
     src/ui/VariablesDialog.h src/ui/VariablesDialog.cpp
     src/ui/SearchDialog.h src/ui/SearchDialog.cpp
     src/ui/MatrixDialog.h src/ui/MatrixDialog.cpp

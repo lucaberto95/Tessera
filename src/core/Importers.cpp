@@ -2,6 +2,7 @@
 #include "core/Images.h"
 #include "core/RichText.h"
 #include "core/TextUtils.h"
+#include "core/Transcripts.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -77,7 +78,8 @@ QByteArray zipEntry(const QString &path, const QString &entry, QString *error)
 QStringList supportedSuffixes()
 {
     return {QStringLiteral("txt"), QStringLiteral("md"), QStringLiteral("docx"), QStringLiteral("odt"),
-            QStringLiteral("rtf"), QStringLiteral("pdf"), QStringLiteral("html"), QStringLiteral("htm")};
+            QStringLiteral("rtf"), QStringLiteral("pdf"), QStringLiteral("html"), QStringLiteral("htm"),
+            QStringLiteral("srt"), QStringLiteral("vtt")};
 }
 
 QString fileDialogFilter()
@@ -91,7 +93,7 @@ QString fileDialogFilter()
         imagePatterns << QStringLiteral("*.") + s;
     }
     return QObject::tr("Documenti supportati (%1);;Testo (*.txt *.md);;Word (*.docx);;OpenDocument (*.odt);;"
-                       "RTF (*.rtf);;PDF (*.pdf);;HTML (*.html *.htm);;Immagini (%2);;Tutti i file (*)")
+                       "RTF (*.rtf);;PDF (*.pdf);;HTML (*.html *.htm);;Trascrizioni con tempi (*.srt *.vtt);;Immagini (%2);;Tutti i file (*)")
         .arg(patterns.join(QLatin1Char(' ')), imagePatterns.join(QLatin1Char(' ')));
 }
 
@@ -130,7 +132,18 @@ Result importFile(const QString &path)
     QString error;
     if (!readFile(path, &data, &error))
         return failure(error);
-    return success(decodeText(data));
+    const QString decoded = decodeText(data);
+    if (suffix == QLatin1String("srt") || suffix == QLatin1String("vtt") || suffix == QLatin1String("txt")) {
+        const Transcripts::Parsed parsed = Transcripts::parseByName(path, decoded);
+        if (parsed.ok) {
+            Result r = success(parsed.text);
+            r.stamps = parsed.stamps;
+            return r;
+        }
+        if (suffix != QLatin1String("txt"))
+            return failure(QObject::tr("%1 non contiene sottotitoli con tempi").arg(QFileInfo(path).fileName()));
+    }
+    return success(decoded);
 }
 
 const QString kWordNamespace = QStringLiteral("http://schemas.openxmlformats.org/wordprocessingml/2006/main");
