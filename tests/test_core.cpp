@@ -4,6 +4,7 @@
 #include "core/ai/AiCodes.h"
 #include "core/ai/AiClient.h"
 #include "core/ai/AiConfig.h"
+#include "core/ConceptMaps.h"
 #include "core/Cooccurrence.h"
 #include "core/Dictionaries.h"
 #include "core/Exporters.h"
@@ -3088,7 +3089,7 @@ private slots:
         QVERIFY2(report.contains("2 video"), qPrintable(report));
         QVERIFY2(report.contains("1 immagini"), qPrintable(report));
         QVERIFY2(report.contains("1 casi"), qPrintable(report));
-        QVERIFY2(report.contains("1 mappe"), qPrintable(report));
+        QVERIFY2(report.contains("Mappe concettuali: 1"), qPrintable(report)); // the empty graph became a map
         QVERIFY2(report.contains("1 selezioni"), qPrintable(report));
         QVERIFY2(report.contains("1 PDF senza file"), qPrintable(report));
     }
@@ -3885,8 +3886,8 @@ private slots:
         QCOMPARE(fileVersion(file), 6);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(p.schemaVersion(), 11);
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(p.schemaVersion(), 12);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.documents().first().id;
         QVERIFY(p.setDocumentData(doc, encodeImage(twoColorImage(10, 10), "PNG")));
         QCOMPARE(p.documentImage(doc).size(), QSize(10, 10));
@@ -4038,7 +4039,7 @@ private slots:
         QCOMPARE(fileVersion(file), 7);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.documents().first().id;
         const qint64 a = p.addAreaSegment(doc, p.addCode(0, "T", Qt::red), 1, 1, 1, 50, 50, 0, {}, {}, "testo");
         QVERIFY(a > 0);
@@ -4223,7 +4224,7 @@ private slots:
         QCOMPARE(fileVersion(file), 8);
         Project p;
         QVERIFY(p.open(file));
-        QCOMPARE(fileVersion(file), 11);
+        QCOMPARE(fileVersion(file), 12);
         const qint64 doc = p.addDocument(p.groups().first().id, "D", "testo");
         QVERIFY(p.setSummary(doc, p.codes().first().id, "ok"));
         QVERIFY(p.addSummaryTable("T", "{}") > 0);
@@ -5195,11 +5196,240 @@ private slots:
         QCOMPARE(Ai::describeInput(1, 1), QString("1 documento, ~1 parola"));
     }
 
+    void conceptMapsPersistAndUndo()
+    {
+        const QString file = path("maps.tsra");
+        qint64 mapId = 0, code = 0, doc = 0, memo = 0;
+        {
+            Project p;
+            QVERIFY(p.create(file));
+            doc = p.addDocument(p.groups().first().id, "Intervista", "testo di prova");
+            code = p.addCode(0, "Tema", Qt::red);
+            Memo m;
+            m.targetType = MemoTarget::Free;
+            m.title = "Idea";
+            memo = p.saveMemo(m);
+            mapId = p.addConceptMap("Modello");
+            QVERIFY(mapId > 0);
+            MapNode a;
+            a.mapId = mapId;
+            a.kind = MapNodeKind::Code;
+            a.refId = code;
+            a.x = 10.5;
+            a.y = -20;
+            MapNode b;
+            b.mapId = mapId;
+            b.kind = MapNodeKind::Document;
+            b.refId = doc;
+            b.x = 200;
+            MapNode c;
+            c.mapId = mapId;
+            c.label = "Ipotesi libera";
+            c.y = 100;
+            c.w = 120;
+            c.h = 40;
+            ConceptMaps::Style st;
+            st.color = QColor("#336699");
+            st.width = 4;
+            st.line = "dash";
+            c.styleJson = ConceptMaps::styleToJson(st);
+            const qint64 na = p.addMapNode(a), nb = p.addMapNode(b), nc = p.addMapNode(c);
+            QVERIFY(na > 0 && nb > 0 && nc > 0);
+            MapEdge e1{0, mapId, na, nb, "compare in", {}, {}};
+            MapEdge e2{0, mapId, nb, nc, "suggerisce", st.color.isValid() ? ConceptMaps::styleToJson(st) : QString(), {}};
+            QVERIFY(p.addMapEdge(e1) > 0);
+            QVERIFY(p.addMapEdge(e2) > 0);
+        }
+        Project p;
+        QVERIFY(p.open(file));
+        QCOMPARE(p.conceptMaps().size(), 1);
+        QCOMPARE(p.conceptMaps().first().name, QString("Modello"));
+        QList<MapNode> nodes = p.mapNodes(mapId);
+        QCOMPARE(nodes.size(), 3);
+        QCOMPARE(nodes[0].x, 10.5);
+        QCOMPARE(nodes[0].y, -20.0);
+        QCOMPARE(nodes[1].kind, MapNodeKind::Document);
+        QCOMPARE(nodes[2].label, QString("Ipotesi libera"));
+        QCOMPARE(nodes[2].w, 120.0);
+        const ConceptMaps::Style st = ConceptMaps::styleFromJson(nodes[2].styleJson);
+        QCOMPARE(st.color, QColor("#336699"));
+        QCOMPARE(st.width, 4);
+        QCOMPARE(st.line, QString("dash"));
+        QCOMPARE(p.mapEdges(mapId).size(), 2);
+        QCOMPARE(p.mapEdges(mapId)[1].label, QString("suggerisce"));
+
+        // What a node shows follows its target; a deleted target leaves a marked node.
+        QCOMPARE(ConceptMaps::resolve(p, nodes[0]).caption, QString("Tema"));
+        QVERIFY(ConceptMaps::resolve(p, nodes[0]).color == QColor(Qt::red));
+        QVERIFY(p.deleteCode(code));
+        const ConceptMaps::Target gone = ConceptMaps::resolve(p, p.mapNodes(mapId)[0]);
+        QVERIFY(!gone.exists);
+        QVERIFY(gone.caption.contains("eliminato"));
+        QCOMPARE(p.mapNodes(mapId).size(), 3);
+
+        // Moving a node is one undo step; deleting a node removes its arrows, and undo brings them back.
+        nodes = p.mapNodes(mapId);
+        nodes[1].x = 999;
+        QVERIFY(p.updateMapNode(nodes[1]));
+        QCOMPARE(p.mapNode(nodes[1].id).x, 999.0);
+        QVERIFY(p.undo());
+        QCOMPARE(p.mapNode(nodes[1].id).x, 200.0);
+        QVERIFY(p.deleteMapNode(nodes[1].id));
+        QCOMPARE(p.mapNodes(mapId).size(), 2);
+        QCOMPARE(p.mapEdges(mapId).size(), 0);
+        QVERIFY(p.undo());
+        QCOMPARE(p.mapNodes(mapId).size(), 3);
+        QCOMPARE(p.mapEdges(mapId).size(), 2);
+
+        // Deleting the map removes everything; undo restores it.
+        QVERIFY(p.deleteConceptMap(mapId));
+        QVERIFY(p.conceptMaps().isEmpty());
+        QVERIFY(p.mapNodes(mapId).isEmpty());
+        QVERIFY(p.undo());
+        QCOMPARE(p.mapNodes(mapId).size(), 3);
+        QCOMPARE(p.mapEdges(mapId).size(), 2);
+    }
+
+    void conceptMapTemplates()
+    {
+        Project p;
+        QVERIFY(p.create(path("map-templates.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "Uno", "aaaa bbbb cccc");
+        const qint64 d2 = p.addDocument(g, "Due", "dddd eeee");
+        const qint64 root = p.addCode(0, "Radice", Qt::red);
+        const qint64 k1 = p.addCode(root, "Figlio 1", Qt::blue);
+        const qint64 k2 = p.addCode(root, "Figlio 2", Qt::green);
+        p.addCode(k1, "Nipote", Qt::yellow);
+        p.addSegment(d1, root, 0, 4);
+        p.addSegment(d1, root, 5, 9);
+        p.addSegment(d2, root, 0, 4);
+        p.addSegment(d1, k1, 0, 4);
+        p.addSegment(d1, k2, 10, 14);
+        const qint64 map = p.addConceptMap("T");
+
+        QCOMPARE(ConceptMaps::addCodeWithSubcodes(p, map, root), 4);
+        QCOMPARE(p.mapNodes(map).size(), 4);
+        QCOMPARE(p.mapEdges(map).size(), 3);
+        QVERIFY(p.undo()); // one step for the whole template
+        QVERIFY(p.mapNodes(map).isEmpty());
+
+        QCOMPARE(ConceptMaps::addCodeWithDocuments(p, map, root), 3);
+        const QList<MapEdge> edges = p.mapEdges(map);
+        QCOMPARE(edges.size(), 2);
+        QCOMPARE(edges[0].label, QString("2")); // two segments in "Uno"
+        QCOMPARE(edges[1].label, QString("1"));
+        QVERIFY(p.undo());
+
+        // Overlapping codings of root and k1 on [0,4): one co-occurrence; k2 stays apart.
+        QCOMPARE(ConceptMaps::addCooccurrences(p, map, {root, k1, k2}), 3);
+        QCOMPARE(p.mapEdges(map).size(), 1);
+        QCOMPARE(p.mapEdges(map).first().label, QString("1"));
+        QCOMPARE(ConceptMaps::addCodeWithSubcodes(p, 9999, root), 0);
+    }
+
+    void conceptMapsQdpxRoundTripAndMerge()
+    {
+        Project p;
+        QVERIFY(p.create(path("map-src.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "testo di prova");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        const qint64 seg = p.addSegment(doc, code, 0, 5);
+        Memo m;
+        m.targetType = MemoTarget::Free;
+        m.title = "Idea";
+        const qint64 memo = p.saveMemo(m);
+        const qint64 map = p.addConceptMap("Modello");
+        auto node = [&](MapNodeKind k, qint64 ref, const QString &label, double x, double y) {
+            MapNode n;
+            n.mapId = map;
+            n.kind = k;
+            n.refId = ref;
+            n.label = label;
+            n.x = x;
+            n.y = y;
+            n.w = 100;
+            n.h = 40;
+            return p.addMapNode(n);
+        };
+        const qint64 n1 = node(MapNodeKind::Code, code, "", 10, 20);
+        const qint64 n2 = node(MapNodeKind::Document, doc, "", 300, 20);
+        const qint64 n3 = node(MapNodeKind::Memo, memo, "", 10, 200);
+        const qint64 n4 = node(MapNodeKind::Segment, seg, "", 300, 200);
+        const qint64 n5 = node(MapNodeKind::Text, 0, "Libero", 150, 100);
+        MapEdge e;
+        e.mapId = map;
+        e.fromNode = n1;
+        e.toNode = n2;
+        e.label = "in";
+        ConceptMaps::Style st;
+        st.color = QColor("#aa0000");
+        e.styleJson = ConceptMaps::styleToJson(st);
+        QVERIFY(p.addMapEdge(e) > 0);
+        e.fromNode = n3;
+        e.toNode = n4;
+        e.label = "su";
+        e.styleJson.clear();
+        QVERIFY(p.addMapEdge(e) > 0);
+        e.fromNode = n5;
+        e.toNode = n1;
+        e.label = "causa";
+        QVERIFY(p.addMapEdge(e) > 0);
+
+        QString err, report;
+        QVERIFY2(Qdpx::exportProject(p, path("map.qdpx"), &err), qPrintable(err));
+        Project q;
+        QVERIFY(q.create(path("map-dst.tsra")));
+        QVERIFY2(Qdpx::importProject(q, path("map.qdpx"), &report, &err), qPrintable(err));
+        QCOMPARE(q.conceptMaps().size(), 1);
+        const qint64 qm = q.conceptMaps().first().id;
+        QCOMPARE(q.conceptMaps().first().name, QString("Modello"));
+        const QList<MapNode> nodes = q.mapNodes(qm);
+        QCOMPARE(nodes.size(), 5);
+        QCOMPARE(nodes[0].kind, MapNodeKind::Code);
+        QCOMPARE(q.code(nodes[0].refId).name, QString("Tema"));
+        QCOMPARE(nodes[0].x, 10.0);
+        QCOMPARE(nodes[0].w, 100.0);
+        QCOMPARE(nodes[1].kind, MapNodeKind::Document);
+        QCOMPARE(q.document(nodes[1].refId).name, QString("Intervista"));
+        QCOMPARE(nodes[2].kind, MapNodeKind::Memo);
+        QCOMPARE(nodes[3].kind, MapNodeKind::Segment);
+        QCOMPARE(nodes[4].kind, MapNodeKind::Text);
+        QCOMPARE(nodes[4].label, QString("Libero"));
+        const QList<MapEdge> edges = q.mapEdges(qm);
+        QCOMPARE(edges.size(), 3);
+        QCOMPARE(edges[0].label, QString("in"));
+        QCOMPARE(edges[0].fromNode, nodes[0].id);
+        QCOMPARE(edges[0].toNode, nodes[1].id);
+        QCOMPARE(ConceptMaps::styleFromJson(edges[0].styleJson).color, QColor("#aa0000"));
+        QCOMPARE(edges[2].fromNode, nodes[4].id);
+
+        // Merge into a project that has the same code and document: the map comes along, linked to them.
+        p.close();
+        Project t;
+        QVERIFY(t.create(path("map-target.tsra")));
+        Merge::Source src;
+        QVERIFY2(src.load(path("map-src.tsra"), &err), qPrintable(err));
+        const Merge::Report rep = Merge::apply(t, src, {});
+        QVERIFY2(rep.ok, qPrintable(rep.error));
+        QCOMPARE(rep.conceptMapsNew, 1);
+        QCOMPARE(t.conceptMaps().size(), 1);
+        const QList<MapNode> mn = t.mapNodes(t.conceptMaps().first().id);
+        QCOMPARE(mn.size(), 5);
+        QCOMPARE(t.code(mn[0].refId).name, QString("Tema"));
+        QCOMPARE(t.document(mn[1].refId).name, QString("Intervista"));
+        QCOMPARE(mn[2].kind, MapNodeKind::Text); // memo nodes become text with their caption
+        QCOMPARE(mn[2].label, QString("Idea"));
+        QCOMPARE(t.mapEdges(t.conceptMaps().first().id).size(), 3);
+        // A second merge adds nothing.
+        QCOMPARE(Merge::apply(t, src, {}).conceptMapsNew, 0);
+    }
+
     void aiLogInProject()
     {
         Project p;
         QVERIFY(p.create(path("ailog.tsra")));
-        QCOMPARE(p.schemaVersion(), 11);
+        QCOMPARE(p.schemaVersion(), 12);
         QVERIFY(!p.aiLogEnabled());
         QCOMPARE(p.addAiLog("f", "local", "m", "in", "out"), qint64(0)); // off by default
         p.setAiLogEnabled(true);

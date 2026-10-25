@@ -10,6 +10,8 @@
 #include "ui/CodeTree.h"
 #include "ui/AgreementDialog.h"
 #include "ui/ReportDialog.h"
+#include "core/ConceptMaps.h"
+#include "ui/ConceptMapDialog.h"
 #include "ui/CooccurrenceDialog.h"
 #include "ui/DictionaryDialog.h"
 #include "ui/StatsDialog.h"
@@ -1087,6 +1089,63 @@ private slots:
         QCOMPARE(spy.count(), 1);
         QCOMPARE(spy.last()[1].toInt(), 10);
         QCOMPARE(spy.last()[3].toLongLong(), qint64(0)); // the segment belongs to the other project
+    }
+
+    void conceptMapDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("conceptmap.tsra")));
+        const qint64 doc = p.addDocument(p.groups().first().id, "Intervista", "testo di prova");
+        const qint64 code = p.addCode(0, "Tema", Qt::red);
+        p.addSegment(doc, code, 0, 5);
+
+        ConceptMapDialog dlg(&p);
+        dlg.show();
+        QCOMPARE(dlg.currentMapId(), qint64(0));
+        QCOMPARE(dlg.addElement(MapNodeKind::Text, 0, "x"), qint64(0)); // no map yet
+
+        const qint64 map = dlg.createMap("Modello");
+        QCOMPARE(dlg.currentMapId(), map);
+        const qint64 n1 = dlg.addElement(MapNodeKind::Code, code, {}, QPointF(0, 0));
+        const qint64 n2 = dlg.addElement(MapNodeKind::Document, doc, {}, QPointF(300, 0));
+        const qint64 n3 = dlg.addElement(MapNodeKind::Text, 0, "Ipotesi", QPointF(150, 150));
+        QVERIFY(n1 > 0 && n2 > 0 && n3 > 0);
+        QCOMPARE(dlg.addElement(MapNodeKind::Code, code), n1); // the same element is not added twice
+        QTRY_COMPARE(dlg.nodeItemCount(), 3);
+
+        MapEdge e;
+        e.mapId = map;
+        e.fromNode = n1;
+        e.toNode = n2;
+        e.label = "compare in";
+        QVERIFY(p.addMapEdge(e) > 0);
+        QTRY_COMPARE(dlg.edgeItemCount(), 1);
+
+        // Export in the three formats.
+        for (const QString &name : {"mappa.png", "mappa.svg", "mappa.pdf"}) {
+            const QString file = m_dir.filePath(name);
+            QVERIFY2(dlg.exportTo(file), qPrintable(name));
+            QVERIFY(QFileInfo(file).size() > 100);
+        }
+        QVERIFY(QImage(m_dir.filePath("mappa.png")).width() > 100);
+
+        // Undo and redo of the project are reflected by the canvas.
+        QVERIFY(p.undo());
+        QTRY_COMPARE(dlg.edgeItemCount(), 0);
+        QVERIFY(p.redo());
+        QTRY_COMPARE(dlg.edgeItemCount(), 1);
+
+        // A deleted code leaves its node, marked as deleted.
+        QVERIFY(p.deleteCode(code));
+        QTRY_COMPARE(dlg.nodeItemCount(), 3);
+        QVERIFY(!ConceptMaps::resolve(p, p.mapNode(n1)).exists);
+
+        // Another map is empty; switching back restores the first.
+        const qint64 second = dlg.createMap("Altra");
+        QTRY_COMPARE(dlg.nodeItemCount(), 0);
+        dlg.selectMap(map);
+        QCOMPARE(dlg.nodeItemCount(), 3);
+        QVERIFY(second != map);
     }
 
     void cooccurrenceDialog()

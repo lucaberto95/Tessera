@@ -26,6 +26,7 @@ qt_add_library(tessera_core STATIC
     src/core/Retrieval.h src/core/Retrieval.cpp
     src/core/Agreement.h src/core/Agreement.cpp
     src/core/Cooccurrence.h src/core/Cooccurrence.cpp
+    src/core/ConceptMaps.h src/core/ConceptMaps.cpp
     src/core/Stats.h src/core/Stats.cpp
     src/core/Summaries.h src/core/Summaries.cpp
     src/core/Report.h src/core/Report.cpp
@@ -84,6 +85,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/RetrievalDialog.h src/ui/RetrievalDialog.cpp
     src/ui/AgreementDialog.h src/ui/AgreementDialog.cpp
     src/ui/CooccurrenceDialog.h src/ui/CooccurrenceDialog.cpp
+    src/ui/ConceptMapDialog.h src/ui/ConceptMapDialog.cpp
     src/ui/StatsDialog.h src/ui/StatsDialog.cpp
     src/ui/SummaryGridDialog.h src/ui/SummaryGridDialog.cpp
     src/ui/SummaryTablesDialog.h src/ui/SummaryTablesDialog.cpp

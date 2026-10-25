@@ -1,5 +1,6 @@
 #include "core/Merge.h"
 
+#include "core/ConceptMaps.h"
 #include "core/Project.h"
 #include "core/Qdpx.h"
 #include "core/Summaries.h"
@@ -111,6 +112,7 @@ private:
     void mergeSummaries();
     void mergeDictionaries();
     void mergeSummaryTables();
+    void mergeConceptMaps();
 
     Project &t;
     const Project &s;
@@ -729,6 +731,69 @@ void Merger::mergeSummaryTables()
     }
 }
 
+// Maps of the other project that are not here (same uuid or name). Nodes of codes and documents follow the
+// merged codes and documents; memo and segment nodes become free text nodes with the caption they had, as
+// those elements are not matched one to one across projects.
+void Merger::mergeConceptMaps()
+{
+    const QList<ConceptMap> current = t.conceptMaps();
+    for (const ConceptMap &cm : s.conceptMaps()) {
+        if (m_failed)
+            return;
+        bool present = false;
+        for (const ConceptMap &c : current)
+            if ((!cm.uuid.isEmpty() && c.uuid == cm.uuid) || c.name == cm.name)
+                present = true;
+        if (present)
+            continue;
+        ++report.conceptMapsNew;
+        if (m_dry)
+            continue;
+        const qint64 mapId = t.addConceptMap(cm.name, cm.uuid);
+        if (!mapId) {
+            fail();
+            return;
+        }
+        QHash<qint64, qint64> nodeMap;
+        for (MapNode n : s.mapNodes(cm.id)) {
+            const qint64 old = n.id;
+            n.mapId = mapId;
+            if (n.kind == MapNodeKind::Code || n.kind == MapNodeKind::Document) {
+                const qint64 mapped = n.kind == MapNodeKind::Code ? ensureCode(n.refId) : ensureDoc(n.refId);
+                if (mapped) {
+                    n.refId = mapped;
+                } else {
+                    n.kind = MapNodeKind::Text;
+                    n.refId = 0;
+                }
+            } else if (n.kind != MapNodeKind::Text) {
+                n.label = ConceptMaps::resolve(s, n).caption;
+                n.kind = MapNodeKind::Text;
+                n.refId = 0;
+            }
+            n.uuid.clear();
+            const qint64 id = t.addMapNode(n);
+            if (m_failed || !id) {
+                fail();
+                return;
+            }
+            nodeMap.insert(old, id);
+        }
+        for (MapEdge e : s.mapEdges(cm.id)) {
+            if (!nodeMap.contains(e.fromNode) || !nodeMap.contains(e.toNode))
+                continue;
+            e.mapId = mapId;
+            e.fromNode = nodeMap.value(e.fromNode);
+            e.toNode = nodeMap.value(e.toNode);
+            e.uuid.clear();
+            if (!t.addMapEdge(e)) {
+                fail();
+                return;
+            }
+        }
+    }
+}
+
 Report Merger::run()
 {
     buildIndexes();
@@ -767,6 +832,7 @@ Report Merger::run()
     if (!m_failed && !filtering()) {
         mergeDictionaries();
         mergeSummaryTables();
+        mergeConceptMaps();
     }
     return report;
 }

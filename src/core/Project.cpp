@@ -427,6 +427,7 @@ void Project::emitAllChanged()
     emit linksChanged();
     emit dictionariesChanged();
     emit summariesChanged();
+    emit mapsChanged();
 }
 
 // ---------------------------------------------------------------- undo / redo
@@ -446,7 +447,7 @@ bool Project::installUndoTriggers()
                                          "memos", "variables", "variable_values",
                                          "document_sets", "document_set_members", "links", "memo_links",
                                          "dictionaries", "dict_categories", "dict_entries", "document_data",
-                                         "summaries", "summary_tables"};
+                                         "summaries", "summary_tables", "maps", "map_nodes", "map_edges"};
     for (const char *table : tables) {
         const QString t = QString::fromLatin1(table);
         QStringList columns;
@@ -743,6 +744,23 @@ QList<Project::Migration> Project::builtInMigrations()
                          " id INTEGER PRIMARY KEY, function TEXT NOT NULL, provider TEXT NOT NULL,"
                          " model TEXT NOT NULL, created_at TEXT NOT NULL, input_summary TEXT NOT NULL DEFAULT '',"
                          " output TEXT NOT NULL DEFAULT '')")}},
+        {12,
+         {// Concept maps (issue #15).
+          QStringLiteral("CREATE TABLE maps ("
+                         " id INTEGER PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0,"
+                         " uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE TABLE map_nodes ("
+                         " id INTEGER PRIMARY KEY, map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,"
+                         " kind TEXT NOT NULL, ref_id INTEGER NOT NULL DEFAULT 0, label TEXT NOT NULL DEFAULT '',"
+                         " x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0, w REAL NOT NULL DEFAULT 0,"
+                         " h REAL NOT NULL DEFAULT 0, style_json TEXT NOT NULL DEFAULT '', uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE INDEX idx_map_nodes_map ON map_nodes(map_id)"),
+          QStringLiteral("CREATE TABLE map_edges ("
+                         " id INTEGER PRIMARY KEY, map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,"
+                         " from_node INTEGER NOT NULL REFERENCES map_nodes(id) ON DELETE CASCADE,"
+                         " to_node INTEGER NOT NULL REFERENCES map_nodes(id) ON DELETE CASCADE,"
+                         " label TEXT NOT NULL DEFAULT '', style_json TEXT NOT NULL DEFAULT '', uuid TEXT NOT NULL)"),
+          QStringLiteral("CREATE INDEX idx_map_edges_map ON map_edges(map_id)")}},
     };
 }
 
@@ -2246,6 +2264,188 @@ bool Project::deleteSummaryTable(qint64 id)
     notify(&Project::summariesChanged);
     return true;
 }
+// ---------------------------------------------------------------- concept maps
+
+namespace {
+QString kindToString(MapNodeKind k)
+{
+    switch (k) {
+    case MapNodeKind::Code: return QStringLiteral("code");
+    case MapNodeKind::Document: return QStringLiteral("document");
+    case MapNodeKind::Memo: return QStringLiteral("memo");
+    case MapNodeKind::Segment: return QStringLiteral("segment");
+    default: return QStringLiteral("text");
+    }
+}
+
+MapNodeKind kindFromString(const QString &s)
+{
+    if (s == QLatin1String("code")) return MapNodeKind::Code;
+    if (s == QLatin1String("document")) return MapNodeKind::Document;
+    if (s == QLatin1String("memo")) return MapNodeKind::Memo;
+    if (s == QLatin1String("segment")) return MapNodeKind::Segment;
+    return MapNodeKind::Text;
+}
+
+const char *const kNodeColumns = "id, map_id, kind, ref_id, label, x, y, w, h, style_json, uuid";
+
+MapNode nodeFrom(const QSqlQuery &q)
+{
+    return {q.value(0).toLongLong(), q.value(1).toLongLong(), kindFromString(q.value(2).toString()),
+            q.value(3).toLongLong(), q.value(4).toString(), q.value(5).toDouble(), q.value(6).toDouble(),
+            q.value(7).toDouble(), q.value(8).toDouble(), q.value(9).toString(), q.value(10).toString()};
+}
+} // namespace
+
+QList<ConceptMap> Project::conceptMaps() const
+{
+    QList<ConceptMap> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id, name, position, uuid FROM maps ORDER BY position, id"));
+    while (q.next())
+        out.append({q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toInt(), q.value(3).toString()});
+    return out;
+}
+
+ConceptMap Project::conceptMap(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, name, position, uuid FROM maps WHERE id = ?"));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return {q.value(0).toLongLong(), q.value(1).toString(), q.value(2).toInt(), q.value(3).toString()};
+    return {};
+}
+
+qint64 Project::addConceptMap(const QString &name, const QString &uuid)
+{
+    setUndoLabel(tr("Nuova mappa concettuale"));
+    const qint64 id = insert(QStringLiteral("INSERT INTO maps(name, position, uuid) VALUES (?, ?, ?)"),
+                             {name, nextPosition(QStringLiteral("maps")), uuid.isEmpty() ? newUuid() : uuid});
+    if (id)
+        notify(&Project::mapsChanged);
+    return id;
+}
+
+bool Project::renameConceptMap(qint64 id, const QString &name)
+{
+    setUndoLabel(tr("Rinomina mappa concettuale"));
+    if (!exec(QStringLiteral("UPDATE maps SET name = ? WHERE id = ?"), {name, id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+bool Project::deleteConceptMap(qint64 id)
+{
+    setUndoLabel(tr("Elimina mappa concettuale"));
+    if (!exec(QStringLiteral("DELETE FROM maps WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+QList<MapNode> Project::mapNodes(qint64 mapId) const
+{
+    QList<MapNode> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT %1 FROM map_nodes WHERE map_id = ? ORDER BY id").arg(QLatin1String(kNodeColumns)));
+    q.addBindValue(mapId);
+    if (q.exec())
+        while (q.next())
+            out.append(nodeFrom(q));
+    return out;
+}
+
+MapNode Project::mapNode(qint64 id) const
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT %1 FROM map_nodes WHERE id = ?").arg(QLatin1String(kNodeColumns)));
+    q.addBindValue(id);
+    if (q.exec() && q.next())
+        return nodeFrom(q);
+    return {};
+}
+
+qint64 Project::addMapNode(const MapNode &n)
+{
+    setUndoLabel(tr("Nuovo nodo della mappa"));
+    const qint64 id = insert(
+        QStringLiteral("INSERT INTO map_nodes(map_id, kind, ref_id, label, x, y, w, h, style_json, uuid)"
+                       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+        {n.mapId, kindToString(n.kind), n.refId, n.label, n.x, n.y, n.w, n.h, n.styleJson,
+         n.uuid.isEmpty() ? newUuid() : n.uuid});
+    if (id)
+        notify(&Project::mapsChanged);
+    return id;
+}
+
+bool Project::updateMapNode(const MapNode &n)
+{
+    setUndoLabel(tr("Modifica nodo della mappa"));
+    if (!exec(QStringLiteral("UPDATE map_nodes SET kind = ?, ref_id = ?, label = ?, x = ?, y = ?, w = ?, h = ?,"
+                             " style_json = ? WHERE id = ?"),
+              {kindToString(n.kind), n.refId, n.label, n.x, n.y, n.w, n.h, n.styleJson, n.id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+bool Project::deleteMapNode(qint64 id)
+{
+    setUndoLabel(tr("Elimina nodo della mappa"));
+    if (!exec(QStringLiteral("DELETE FROM map_nodes WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+QList<MapEdge> Project::mapEdges(qint64 mapId) const
+{
+    QList<MapEdge> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, map_id, from_node, to_node, label, style_json, uuid FROM map_edges"
+                             " WHERE map_id = ? ORDER BY id"));
+    q.addBindValue(mapId);
+    if (q.exec())
+        while (q.next())
+            out.append({q.value(0).toLongLong(), q.value(1).toLongLong(), q.value(2).toLongLong(),
+                        q.value(3).toLongLong(), q.value(4).toString(), q.value(5).toString(),
+                        q.value(6).toString()});
+    return out;
+}
+
+qint64 Project::addMapEdge(const MapEdge &e)
+{
+    setUndoLabel(tr("Nuova freccia della mappa"));
+    const qint64 id = insert(QStringLiteral("INSERT INTO map_edges(map_id, from_node, to_node, label, style_json, uuid)"
+                                            " VALUES (?, ?, ?, ?, ?, ?)"),
+                             {e.mapId, e.fromNode, e.toNode, e.label, e.styleJson,
+                              e.uuid.isEmpty() ? newUuid() : e.uuid});
+    if (id)
+        notify(&Project::mapsChanged);
+    return id;
+}
+
+bool Project::updateMapEdge(const MapEdge &e)
+{
+    setUndoLabel(tr("Modifica freccia della mappa"));
+    if (!exec(QStringLiteral("UPDATE map_edges SET label = ?, style_json = ? WHERE id = ?"),
+              {e.label, e.styleJson, e.id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
+bool Project::deleteMapEdge(qint64 id)
+{
+    setUndoLabel(tr("Elimina freccia della mappa"));
+    if (!exec(QStringLiteral("DELETE FROM map_edges WHERE id = ?"), {id}))
+        return false;
+    notify(&Project::mapsChanged);
+    return true;
+}
+
 // ---------------------------------------------------------------- AI log
 
 bool Project::aiLogEnabled() const
