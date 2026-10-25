@@ -786,7 +786,13 @@ QList<Project::Migration> Project::builtInMigrations()
                          " WHERE code_id IS NOT NULL"),
           QStringLiteral("CREATE UNIQUE INDEX idx_research_evidence_memo ON research_evidence(question_id, memo_id)"
                          " WHERE memo_id IS NOT NULL")}},
-    };
+        {14,
+         {// Rounds of team work (issue #24). Bookkeeping of the manager's project, deliberately outside the undo
+          // triggers like ai_log.
+          QStringLiteral("CREATE TABLE team_cycles ("
+                         " id INTEGER PRIMARY KEY, number INTEGER NOT NULL, member TEXT NOT NULL,"
+                         " file_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'sent',"
+                         " sent_at TEXT NOT NULL, returned_at TEXT, merged_at TEXT, report TEXT NOT NULL DEFAULT '')")}},    };
 }
 
 int Project::schemaVersion() const
@@ -2661,8 +2667,102 @@ bool Project::removeQuestionEvidence(qint64 evidenceId)
     return true;
 }
 
-// ---------------------------------------------------------------- AI log
+// ---------------------------------------------------------------- team cycles
 
+QString teamCycleStatusToString(TeamCycleStatus s)
+{
+    switch (s) {
+    case TeamCycleStatus::Sent: return QStringLiteral("sent");
+    case TeamCycleStatus::Returned: return QStringLiteral("returned");
+    case TeamCycleStatus::Merged: return QStringLiteral("merged");
+    }
+    return QStringLiteral("sent");
+}
+
+TeamCycleStatus teamCycleStatusFromString(const QString &s)
+{
+    if (s == QLatin1String("returned"))
+        return TeamCycleStatus::Returned;
+    if (s == QLatin1String("merged"))
+        return TeamCycleStatus::Merged;
+    return TeamCycleStatus::Sent;
+}
+
+QList<TeamCycle> Project::teamCycles() const
+{
+    QList<TeamCycle> out;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id, number, member, file_name, status, sent_at, returned_at, merged_at, report "
+                          "FROM team_cycles ORDER BY number, id"));
+    while (q.next()) {
+        TeamCycle c;
+        c.id = q.value(0).toLongLong();
+        c.number = q.value(1).toInt();
+        c.member = q.value(2).toString();
+        c.fileName = q.value(3).toString();
+        c.status = teamCycleStatusFromString(q.value(4).toString());
+        c.sentAt = fromIso(q.value(5)).toLocalTime();
+        c.returnedAt = fromIso(q.value(6)).toLocalTime();
+        c.mergedAt = fromIso(q.value(7)).toLocalTime();
+        c.report = q.value(8).toString();
+        out.append(c);
+    }
+    return out;
+}
+
+int Project::nextTeamCycleNumber() const
+{
+    return scalar(QStringLiteral("SELECT COALESCE(MAX(number), 0) + 1 FROM team_cycles")).toInt();
+}
+
+qint64 Project::addTeamCycleEntry(int number, const QString &member, const QString &fileName)
+{
+    const qint64 id = insert(QStringLiteral("INSERT INTO team_cycles(number, member, file_name, status, sent_at) "
+                                            "VALUES (?, ?, ?, 'sent', ?)"),
+                             {number, member, fileName, isoNow()});
+    if (id)
+        emit teamCyclesChanged();
+    return id;
+}
+
+bool Project::setTeamCycleStatus(qint64 id, TeamCycleStatus status, const QString &report)
+{
+    const QString column = status == TeamCycleStatus::Merged ? QStringLiteral("merged_at")
+                                                             : QStringLiteral("returned_at");
+    bool ok = true;
+    if (status == TeamCycleStatus::Sent) {
+        ok = exec(QStringLiteral("UPDATE team_cycles SET status = 'sent', returned_at = NULL, merged_at = NULL, "
+                                 "report = '' WHERE id = ?"),
+                  {id});
+    } else {
+        // A merged copy has necessarily come back: stamp the return time too if it is still missing.
+        ok = exec(QStringLiteral("UPDATE team_cycles SET status = ?, %1 = ?, report = ?, "
+                                 "returned_at = COALESCE(returned_at, ?) WHERE id = ?")
+                      .arg(column),
+                  {teamCycleStatusToString(status), isoNow(), report, isoNow(), id});
+    }
+    if (ok)
+        emit teamCyclesChanged();
+    return ok;
+}
+
+bool Project::deleteTeamCycle(qint64 id)
+{
+    if (!exec(QStringLiteral("DELETE FROM team_cycles WHERE id = ?"), {id}))
+        return false;
+    emit teamCyclesChanged();
+    return true;
+}
+
+bool Project::clearTeamCycles()
+{
+    if (!exec(QStringLiteral("DELETE FROM team_cycles")))
+        return false;
+    emit teamCyclesChanged();
+    return true;
+}
+
+// ---------------------------------------------------------------- AI log
 bool Project::aiLogEnabled() const
 {
     return meta(QStringLiteral("ai_log")) == QLatin1String("1");

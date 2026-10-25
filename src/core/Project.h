@@ -283,8 +283,18 @@ public:
     QList<AiLogEntry> aiLog() const;
     bool clearAiLog();
 
+    // Rounds of team work (issue #24); see Team.h for the workflow. Bookkeeping only: not undoable, not merged.
+    QList<TeamCycle> teamCycles() const; // by round number, then creation
+    int nextTeamCycleNumber() const;
+    qint64 addTeamCycleEntry(int number, const QString &member, const QString &fileName);
+    // Sent: back to "handed out"; Returned/Merged: stamps the time and keeps `report` (the merge summary).
+    bool setTeamCycleStatus(qint64 id, TeamCycleStatus status, const QString &report = {});
+    bool deleteTeamCycle(qint64 id);
+    bool clearTeamCycles();
+
 signals:
     void opened();
+    void teamCyclesChanged();
     void summariesChanged();
     void mapsChanged();
     void researchQuestionsChanged();

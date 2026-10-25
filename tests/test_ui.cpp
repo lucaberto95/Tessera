@@ -36,6 +36,8 @@
 #include "ui/MemoDialog.h"
 #include "ui/MemoManager.h"
 #include "ui/MergeDialog.h"
+#include "ui/TeamDialog.h"
+#include "ui/TeamSyncDialog.h"
 #include "ui/UiUtils.h"
 #include "ui/RetrievalDialog.h"
 #include "ui/SearchDialog.h"
@@ -160,6 +162,80 @@ private slots:
         dlg.selectRow(dlg.currentStateRow());
         QVERIFY(!dlg.applySelected());
         QCOMPARE(p.documents().size(), 2);
+    void teamDialogRoundAndImport()
+    {
+        const QString file = m_dir.filePath("team-ui.tsra");
+        const QString folder = m_dir.filePath("team-ui-shared");
+        Project m;
+        m.setAuthor("Resp");
+        QVERIFY(m.create(file));
+        const qint64 doc = m.addDocument(m.groups().first().id, "Testo", "Una frase da codificare bene.");
+        const qint64 code = m.addCode(0, "Tema", Qt::red);
+        m.addSegment(doc, code, 0, 3);
+        TeamDialog dialog(&m);
+        auto *table = dialog.findChild<QTableWidget *>();
+        QVERIFY(table);
+        QCOMPARE(table->rowCount(), 0);
+        QVERIFY(dialog.startRound({"Anna", "Bruno"}, folder));
+        QCOMPARE(table->rowCount(), 2);
+        QCOMPARE(table->item(0, 1)->text(), QString("Anna"));
+        QCOMPARE(table->item(1, 0)->text(), QString("1"));
+        const QString annaFile = QDir(folder).filePath(table->item(0, 2)->text());
+        QVERIFY(QFileInfo::exists(annaFile));
+        {
+            Project a;
+            QVERIFY(a.open(annaFile));
+            a.setAuthor("Anna");
+            a.addSegment(doc, a.findCode(0, "Tema"), 4, 9);
+        }
+        const QString result = dialog.importFiles({annaFile}, false);
+        QVERIFY2(result.contains("unita"), qPrintable(result));
+        QCOMPARE(m.allSegments().size(), 2);
+        QCOMPARE(table->item(0, 3)->text(), QString("Unita"));
+        QCOMPARE(table->item(1, 3)->text(), QString("Inviata"));
+        // The same copy again is refused with a reason, and nothing changes.
+        QVERIFY(dialog.importFiles({annaFile}, false).contains("non importata"));
+        QCOMPARE(m.allSegments().size(), 2);
+    }
+
+    void teamSyncDialogPublishesAndReads()
+    {
+        const QString base = m_dir.filePath("tsync-base.tsra");
+        const QString shared = m_dir.filePath("tsync-shared");
+        {
+            Project p;
+            QVERIFY(p.create(base));
+            p.addDocument(p.groups().first().id, "Testo", "Una frase da codificare bene.");
+            p.addCode(0, "Tema", Qt::red);
+        }
+        const QString fileB = m_dir.filePath("tsync-b.tsra");
+        {
+            Project p;
+            QVERIFY(p.open(base));
+            QVERIFY(p.saveCopyAs(fileB));
+        }
+        Project a, b;
+        QVERIFY(a.open(base));
+        QVERIFY(b.open(fileB));
+        a.setAuthor("Anna");
+        b.setAuthor("Bruno");
+        a.addSegment(a.documents().first().id, a.findCode(0, "Tema"), 0, 3);
+
+        TeamSyncDialog da(&a), db(&b);
+        da.setFolder(shared);
+        db.setFolder(shared);
+        QCOMPARE(da.folder(), shared);
+        QVERIFY(da.syncNow().contains("Pubblicato"));
+        const QString preview = db.syncNow(true);
+        QVERIFY2(preview.contains("ANTEPRIMA") && preview.contains("Anna"), qPrintable(preview));
+        QCOMPARE(b.allSegments().size(), 0);
+        const QString text = db.syncNow();
+        QVERIFY2(text.contains("1 codifiche"), qPrintable(text));
+        QCOMPARE(b.allSegments().size(), 1);
+        QVERIFY(db.syncNow().contains("nessuna novità"));
+        // A project file inside the shared folder is refused, with the reason.
+        db.setFolder(m_dir.path());
+        QVERIFY(db.syncNow().contains("non riuscita"));
     }
     void mergeDialogShowsReportAndOptions()
     {
