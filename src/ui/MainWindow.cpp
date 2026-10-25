@@ -2,6 +2,7 @@
 #include "core/DemoProject.h"
 #include "core/Exporters.h"
 #include "core/Images.h"
+#include "core/Media.h"
 #include "core/Merge.h"
 #include "core/Team.h"
 #include "core/Importers.h"
@@ -37,6 +38,7 @@
 #include "ui/LinksDialog.h"
 #include "ui/UndoHistoryDialog.h"
 #include "ui/TranscriptDialog.h"
+#include "ui/MediaPlayerWidget.h"
 #include "ui/MemoManager.h"
 #include "ui/SearchDialog.h"
 #include "ui/SegmentsPanel.h"
@@ -211,6 +213,11 @@ void MainWindow::createActions()
                           QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
     m_links = make(tr("C&ollegamenti…"), &MainWindow::showLinks);
     m_transcript = make(tr("&Time stamp della trascrizione…"), &MainWindow::showTranscript);
+    m_insertStamp = make(tr("Inserisci time stamp al &tempo corrente"), [this] { m_view->insertTimestampAtCursor(); },
+                         QKeySequence(Qt::Key_F8));
+    m_playPause = make(tr("Riproduci / &pausa"), [this] { m_view->player()->togglePlay(); }, QKeySequence(Qt::Key_F9));
+    m_rewindMedia = make(tr("&Riavvolgi la registrazione"), [this] { m_view->player()->rewind(); },
+                         QKeySequence(Qt::Key_F7));
     m_exportCodebook = make(tr("Esporta &codebook…"), &MainWindow::exportCodebook);
     m_createReport = make(tr("Crea &report (Word, PDF, HTML)…"), &MainWindow::createReport);
 
@@ -305,6 +312,9 @@ void MainWindow::createMenus()
     docs->addAction(m_completeLink);
     docs->addAction(m_links);
     docs->addAction(m_transcript);
+    docs->addAction(m_insertStamp);
+    docs->addAction(m_playPause);
+    docs->addAction(m_rewindMedia);
     docs->addSeparator();
     docs->addAction(m_variables);
     docs->addSeparator();
@@ -486,6 +496,7 @@ void MainWindow::connectProject()
         m_documents->rebuild();
         updateRetrieval();
         updateStats();
+        updateActions(); // a recording may have been (re)linked
     });
     connect(m_project, &Project::documentSetsChanged, m_documents, &DocumentTree::rebuild);
     connect(m_project, &Project::codesChanged, this, [this] {
@@ -529,6 +540,7 @@ void MainWindow::connectProject()
         updateActions();
     });
     connect(m_segments, &SegmentsPanel::segmentActivated, this, &MainWindow::openSegment);
+    connect(m_segments, &SegmentsPanel::segmentPlayRequested, this, &MainWindow::playSegment);
 }
 
 void MainWindow::updateActions()
@@ -542,8 +554,12 @@ void MainWindow::updateActions()
     m_startLink->setEnabled(canCode);
     m_completeLink->setEnabled(canCode && m_view->hasPendingLink());
     m_newSubcode->setEnabled(open && m_codes->currentCodeId());
-    m_editText->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf());
-    m_transcript->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf());
+    m_editText->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf() && !m_view->isMedia());
+    m_transcript->setEnabled(open && m_view->documentId() && !m_view->isImage() && !m_view->isPdf() && !m_view->isMedia());
+    const bool playable = open && m_view->documentId() && m_view->player()->hasMedia();
+    m_insertStamp->setEnabled(playable && !m_view->isMedia());
+    m_playPause->setEnabled(playable);
+    m_rewindMedia->setEnabled(playable);
 
     // While editing a document's text, Ctrl+Z belongs to the text editor.
     const bool editing = m_view->isEditing();
@@ -846,6 +862,14 @@ void MainWindow::importDocuments(qint64 groupId)
             else
                 failures << QFileInfo(files[i]).fileName() + QStringLiteral(": ") +
                                 (error.isEmpty() ? m_project->lastError() : error);
+            continue;
+        }
+        if (Media::isMediaFile(files[i])) { // linked, not embedded: recordings can be huge
+            const qint64 id = m_project->addRecordingDocument(groupId, files[i]);
+            if (id)
+                lastId = id;
+            else
+                failures << QFileInfo(files[i]).fileName() + QStringLiteral(": ") + m_project->lastError();
             continue;
         }
         if (pdfAsPages && Pdfs::isPdfFile(files[i])) {
@@ -1227,6 +1251,20 @@ void MainWindow::showMatrix()
     dlg->show();
 }
 
+// Opens the document of a segment and plays it: a time interval, or a transcript passage between time stamps.
+void MainWindow::playSegment(qint64 documentId, qint64 segmentId)
+{
+    for (const Segment &s : m_project->segmentsForDocument(documentId, true)) {
+        if (s.id != segmentId)
+            continue;
+        m_view->openDocument(documentId);
+        m_documents->setCurrentDocument(documentId);
+        if (!m_view->playSegment(s))
+            statusBar()->showMessage(tr("Questo segmento non si può riprodurre: manca la registrazione o i time stamp."), 5000);
+        return;
+    }
+}
+
 void MainWindow::openSegment(qint64 documentId, int start, int end, qint64 segmentId)
 {
     m_view->openDocument(documentId);
@@ -1263,10 +1301,20 @@ void MainWindow::showLinks()
 void MainWindow::showTranscript()
 {
     const qint64 doc = m_view->documentId();
-    if (!doc || m_view->isImage() || m_view->isPdf())
+    if (!doc || m_view->isImage() || m_view->isPdf() || m_view->isMedia())
         return;
     auto *dlg = new TranscriptDialog(m_project, doc, [this] { return m_view->cursorPosition(); }, this);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dlg, &TranscriptDialog::playRequested, this, [this](qint64 id, qint64 timeMs) {
+        m_view->openDocument(id);
+        m_documents->setCurrentDocument(id);
+        if (m_view->player()->hasMedia()) {
+            m_view->player()->seek(timeMs);
+            m_view->player()->play();
+        } else {
+            statusBar()->showMessage(tr("La registrazione non è disponibile: ricollega il file dal lettore."), 5000);
+        }
+    });
     connect(dlg, &TranscriptDialog::positionActivated, this,
             [this](qint64 id, int pos) { openSegment(id, pos, pos, 0); });
     connect(m_project, &Project::closed, dlg, &QDialog::close);

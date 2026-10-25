@@ -82,6 +82,7 @@ private:
     void showMemos();
     void showLinks();
     void showTranscript();
+    void playSegment(qint64 documentId, qint64 segmentId);
     void editProjectMemo();
     void exportCodebook();
     void createReport();
@@ -145,6 +146,9 @@ private:
     QAction *m_completeLink = nullptr;
     QAction *m_links = nullptr;
     QAction *m_transcript = nullptr;
+    QAction *m_insertStamp = nullptr;
+    QAction *m_playPause = nullptr;
+    QAction *m_rewindMedia = nullptr;
     QAction *m_exportCodebook = nullptr;
     QAction *m_createReport = nullptr;
     QAction *m_search = nullptr;

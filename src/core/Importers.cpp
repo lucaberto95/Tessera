@@ -1,5 +1,6 @@
 #include "core/Importers.h"
 #include "core/Images.h"
+#include "core/Media.h"
 #include "core/RichText.h"
 #include "core/TextUtils.h"
 #include "core/Transcripts.h"
@@ -87,14 +88,18 @@ QString fileDialogFilter()
     QStringList patterns;
     for (const QString &s : supportedSuffixes())
         patterns << QStringLiteral("*.") + s;
-    QStringList imagePatterns;
+    QStringList imagePatterns, mediaPatterns;
+    for (const QString &s : Media::audioSuffixes() + Media::videoSuffixes()) {
+        patterns << QStringLiteral("*.") + s;
+        mediaPatterns << QStringLiteral("*.") + s;
+    }
     for (const QString &s : Images::suffixes()) {
         patterns << QStringLiteral("*.") + s;
         imagePatterns << QStringLiteral("*.") + s;
     }
     return QObject::tr("Documenti supportati (%1);;Testo (*.txt *.md);;Word (*.docx);;OpenDocument (*.odt);;"
-                       "RTF (*.rtf);;PDF (*.pdf);;HTML (*.html *.htm);;Trascrizioni con tempi (*.srt *.vtt);;Immagini (%2);;Tutti i file (*)")
-        .arg(patterns.join(QLatin1Char(' ')), imagePatterns.join(QLatin1Char(' ')));
+                       "RTF (*.rtf);;PDF (*.pdf);;HTML (*.html *.htm);;Trascrizioni con tempi (*.srt *.vtt);;Immagini (%2);;Audio e video (%3);;Tutti i file (*)")
+        .arg(patterns.join(QLatin1Char(' ')), imagePatterns.join(QLatin1Char(' ')), mediaPatterns.join(QLatin1Char(' ')));
 }
 
 QString decodeText(const QByteArray &data)

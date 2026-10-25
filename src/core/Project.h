@@ -287,6 +287,14 @@ public:
     // Recording associated with a text document (a path: media can be large, so it is not embedded).
     QString documentMediaPath(qint64 documentId) const;
     bool setDocumentMediaPath(qint64 documentId, const QString &path);
+    // Audio/video documents (issue #28): the recording is linked, not embedded. The stored path (media_path) is
+    // relative to the folder of the project file when the recording is under it (see Media::storedPath).
+    // `name` empty = the file name without suffix. Returns 0 (lastError set) if the file is not audio or video.
+    qint64 addRecordingDocument(qint64 groupId, const QString &mediaFile, const QString &name = {});
+    // Path to keep in the project for a recording file.
+    QString storableMediaPath(const QString &mediaFile) const;
+    // The recording of a document as an existing file; empty when it has none or the file is missing.
+    QString resolvedMediaPath(qint64 documentId) const;
 
     // Log of the requests made to language models (issue #39). Optional, off by default (meta "ai_log"):
     // addAiLog does nothing and returns 0 while it is off. Not undoable, not merged, not exported. Never holds keys.

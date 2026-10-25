@@ -11,6 +11,7 @@
 #include "core/ForeignImport.h"
 #include "core/Images.h"
 #include "core/Importers.h"
+#include "core/Media.h"
 #include "core/Merge.h"
 #include "core/Pdfs.h"
 #include "core/Project.h"
@@ -6774,7 +6775,144 @@ private slots:
         QCOMPARE(p.allSegments().size(), 0);
         QCOMPARE(p.codes().size(), codesBefore);
     }
-};
+    void mediaKindsAndPaths()
+    {
+        QCOMPARE(Media::kindForFile("a/Intervista.MP3"), DocumentKind::Audio);
+        QCOMPARE(Media::kindForFile("clip.mov"), DocumentKind::Video);
+        QCOMPARE(Media::kindForFile("note.txt"), DocumentKind::Text);
+        QVERIFY(Media::isMediaFile("x.m4a") && !Media::isMediaFile("x.pdf"));
+        QVERIFY(Media::fileDialogFilter().contains("*.mp4"));
+        QVERIFY(Importers::fileDialogFilter().contains("*.wav")); // the import dialog offers recordings too
+
+        const QString project = path("proj.tsra");
+        QVERIFY(QDir().mkpath(path("rec")));
+        const QString wav = path("rec/a.wav");
+        {
+            QFile f(wav);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("RIFF");
+        }
+        // Inside the project folder the path is relative (a moved folder keeps working); elsewhere it is absolute.
+        QCOMPARE(Media::storedPath(project, wav), QString("rec/a.wav"));
+        QCOMPARE(Media::storedPath(project, "C:/altrove/x.wav"), QString("C:/altrove/x.wav"));
+        QCOMPARE(Media::resolvePath(project, "rec/a.wav"), QFileInfo(wav).absoluteFilePath());
+        QCOMPARE(Media::resolvePath(project, wav), QFileInfo(wav).absoluteFilePath());
+        QVERIFY(Media::resolvePath(project, "rec/mancante.wav").isEmpty());
+        QVERIFY(Media::resolvePath(project, "").isEmpty());
+        // A recording that was moved next to the project is found by its name.
+        {
+            QFile f(path("vicino.mp3"));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("ID3");
+        }
+        QCOMPARE(Media::resolvePath(project, "D:/vecchia/cartella/vicino.mp3"), QFileInfo(path("vicino.mp3")).absoluteFilePath());
+    }
+
+    void mediaTimeMapping()
+    {
+        QCOMPARE(Media::formatRange(750000, 785000), QString("00:12:30") + QChar(0x2013) + "00:13:05");
+        QCOMPARE(Media::formatRange(1000, -1), QString("00:00:01") + QChar(0x2013));
+
+        QList<Timestamp> stamps(3);
+        stamps[0].textPos = 0;
+        stamps[0].timeMs = 1000;
+        stamps[1].textPos = 10;
+        stamps[1].timeMs = 5000;
+        stamps[2].textPos = 20;
+        stamps[2].timeMs = 9000;
+        QCOMPARE(Media::stampIndexAtTime(stamps, 0), -1);
+        QCOMPARE(Media::stampIndexAtTime(stamps, 1000), 0);
+        QCOMPARE(Media::stampIndexAtTime(stamps, 6000), 1);
+        QCOMPARE(Media::stampIndexAtTime(stamps, 99999), 2);
+        QCOMPARE(Media::stampIndexAtTime({}, 5), -1);
+        QCOMPARE(Media::stampIndexAtPosition(stamps, 5), 0);
+        QCOMPARE(Media::stampIndexAtPosition(stamps, 10), 1);
+        QCOMPARE(Media::stampIndexAtPosition(stamps, 25), 2);
+        QCOMPARE(Media::textSpanOfStamp(stamps, 1, 30), (std::pair<int, int>{10, 20}));
+        QCOMPARE(Media::textSpanOfStamp(stamps, 2, 30), (std::pair<int, int>{20, 30}));
+        QCOMPARE(Media::textSpanOfStamp(stamps, 7, 30), (std::pair<int, int>{0, 0}));
+
+        // A passage plays from the stamp that governs its start to the first stamp after its end.
+        QCOMPARE(Media::timeRangeOfText(stamps, 12, 15), (std::pair<qint64, qint64>{5000, 9000}));
+        QCOMPARE(Media::timeRangeOfText(stamps, 0, 5), (std::pair<qint64, qint64>{1000, 5000}));
+        QCOMPARE(Media::timeRangeOfText(stamps, 22, 25), (std::pair<qint64, qint64>{9000, -1})); // to the end
+        QCOMPARE(Media::timeRangeOfText({}, 0, 5), (std::pair<qint64, qint64>{-1, -1}));
+        QList<Timestamp> late(1);
+        late[0].textPos = 5;
+        late[0].timeMs = 2000;
+        QCOMPARE(Media::timeRangeOfText(late, 0, 3).first, qint64(0)); // before the first stamp: from the start
+    }
+
+    void recordingDocuments()
+    {
+        QVERIFY(QDir().mkpath(path("rec")));
+        const QString mp3 = path("rec/intervista.mp3");
+        {
+            QFile f(mp3);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("ID3");
+        }
+        const QString projectFile = path("recdocs.tsra");
+        qint64 audio = 0;
+        {
+            Project p;
+            QVERIFY(p.create(projectFile));
+            const qint64 group = p.groups().first().id;
+            audio = p.addRecordingDocument(group, mp3);
+            QVERIFY(audio > 0);
+            QCOMPARE(p.document(audio).kind, DocumentKind::Audio);
+            QCOMPARE(p.document(audio).name, QString("intervista"));
+            QCOMPARE(p.documentMediaPath(audio), QString("rec/intervista.mp3")); // relative to the project
+            QCOMPARE(p.resolvedMediaPath(audio), QFileInfo(mp3).absoluteFilePath());
+            QVERIFY(p.documentData(audio).isEmpty()); // linked, not embedded
+
+            QCOMPARE(p.addRecordingDocument(group, path("note.txt")), qint64(0)); // not a recording
+            QVERIFY(!p.lastError().isEmpty());
+            const qint64 video = p.addRecordingDocument(group, "C:/non/esiste/clip.mp4", "Clip");
+            QCOMPARE(p.document(video).kind, DocumentKind::Video);
+            QCOMPARE(p.documentMediaPath(video), QString("C:/non/esiste/clip.mp4"));
+            QVERIFY(p.resolvedMediaPath(video).isEmpty()); // missing: the player offers to relink
+
+            const qint64 code = p.addCode(0, "Tema", Qt::red);
+            const qint64 seg = p.addTimeSegment(audio, code, 12000, 15000);
+            QVERIFY(seg > 0);
+            QCOMPARE(p.segmentsForDocument(audio, true).size(), 1);
+            QVERIFY(p.segmentsForDocument(audio).isEmpty()); // time intervals are not text
+
+            // The table of retrieved segments gives the times.
+            const Exporters::Table table = Exporters::segmentsTable(p, p.segmentsForDocument(audio, true));
+            QCOMPARE(table.size(), 2);
+            QCOMPARE(table[1][3], QString("00:00:12"));
+            QCOMPARE(table[1][4], QString("00:00:15"));
+            QCOMPARE(table[1][9], Media::formatRange(12000, 15000));
+
+            // Importing a recording is one undo step.
+            QVERIFY(p.undo()); // the time segment
+            QVERIFY(p.undo()); // the code
+            QVERIFY(p.undo()); // the video
+            QVERIFY(!p.document(video).id);
+            QVERIFY(p.document(audio).id);
+            QVERIFY(p.redo());
+            QVERIFY(p.redo());
+            QVERIFY(p.redo());
+        }
+
+        // Merge: the recording and its intervals arrive in the other project, still found on disk.
+        Project target;
+        QVERIFY(target.create(path("recdocs-target.tsra")));
+        Merge::Source src;
+        QString error;
+        QVERIFY2(src.load(projectFile, &error), qPrintable(error));
+        QVERIFY(Merge::apply(target, src, {}).ok);
+        qint64 copied = 0;
+        for (const Document &d : target.documents())
+            if (d.kind == DocumentKind::Audio)
+                copied = d.id;
+        QVERIFY(copied > 0);
+        QCOMPARE(target.resolvedMediaPath(copied), QFileInfo(mp3).absoluteFilePath());
+        QCOMPARE(target.segmentsForDocument(copied, true).size(), 1);
+        QCOMPARE(target.segmentsForDocument(copied, true).first().tStartMs, qint64(12000));
+    }};
 
 QTEST_MAIN(TestCore)
 #include "test_core.moc"

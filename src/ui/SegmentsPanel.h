@@ -38,12 +38,15 @@ public:
 
 signals:
     void segmentActivated(qint64 documentId, int start, int end, qint64 segmentId);
+    // "Riproduci": plays a time interval, or a transcript passage between time stamps (issues #28, #29).
+    void segmentPlayRequested(qint64 documentId, qint64 segmentId);
 
 protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
 
 private:
     void applyFilter();
+    bool isPlayable(const Segment &s) const;
     void rebuildSegmentsFromQuery();
     void codeResultsInteractive();
 
@@ -60,6 +63,7 @@ private:
     QList<Retrieval::Result> m_results;
     QToolButton *m_back;
     QToolButton *m_codeResults;
+    QToolButton *m_play;
     QLabel *m_summary;
     QLineEdit *m_filter;
     QTableWidget *m_table;

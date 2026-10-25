@@ -123,6 +123,41 @@ QIcon pdfIcon()
     return icon;
 }
 
+QIcon mediaIcon(bool video)
+{
+    static const QIcon icons[2] = {
+        [] {
+            // Audio: a speaker with a sound wave.
+            QPixmap pm(16, 16);
+            pm.fill(Qt::transparent);
+            QPainter p(&pm);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0x1565c0));
+            p.drawRect(QRectF(2, 6, 3, 4));
+            p.drawPolygon(QPolygonF({QPointF(5, 6), QPointF(9, 3), QPointF(9, 13), QPointF(5, 10)}));
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(QColor(0x1565c0), 1.3));
+            p.drawArc(QRectF(7, 5, 5, 6), -60 * 16, 120 * 16);
+            p.drawArc(QRectF(8, 3, 7, 10), -60 * 16, 120 * 16);
+            return QIcon(pm);
+        }(),
+        [] {
+            // Video: a film frame with a play triangle.
+            QPixmap pm(16, 16);
+            pm.fill(Qt::transparent);
+            QPainter p(&pm);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(0x6a1b9a));
+            p.drawRoundedRect(QRectF(1.5, 3, 13, 10), 1.5, 1.5);
+            p.setBrush(Qt::white);
+            p.drawPolygon(QPolygonF({QPointF(6.5, 5.5), QPointF(11, 8), QPointF(6.5, 10.5)}));
+            return QIcon(pm);
+        }()};
+    return icons[video ? 1 : 0];
+}
+
 bool confirm(QWidget *parent, const QString &title, const QString &text)
 {
     return plainMessage(parent, QMessageBox::Question, title, text, QMessageBox::Yes | QMessageBox::No,
