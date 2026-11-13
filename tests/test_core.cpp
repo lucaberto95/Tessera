@@ -436,6 +436,45 @@ private slots:
         QCOMPARE(p.code(c).parentId, qint64(0));
     }
 
+    void sortCodesAndDocuments()
+    {
+        Project p;
+        QVERIFY(p.create(path("sort.tsra")));
+        const qint64 g = p.groups().first().id;
+        const qint64 dB = p.addDocument(g, "b", "testo testo");
+        const qint64 dA = p.addDocument(g, "A", "testo testo");
+        const qint64 b = p.addCode(0, "b", Qt::red);
+        p.addCode(0, "A", Qt::red);
+        const qint64 c10 = p.addCode(0, "c10", Qt::red);
+        p.addCode(0, "c9", Qt::red);
+        const qint64 k2 = p.addCode(b, "k2", Qt::red);
+        p.addCode(b, "k1", Qt::red);
+        const auto names = [&] {
+            QStringList n;
+            for (const Code &c : p.codesInTreeOrder())
+                n << c.name;
+            return n.join(' ');
+        };
+        const QString before = names();
+        QVERIFY(p.sortCodes(Project::SortKey::Name));
+        QCOMPARE(names(), QString("A b k1 k2 c9 c10"));
+        QVERIFY(p.undo());
+        QCOMPARE(names(), before);
+
+        QVERIFY(p.addSegment(dB, c10, 0, 3) > 0);
+        QVERIFY(p.addSegment(dB, k2, 0, 3) > 0);
+        QVERIFY(p.addSegment(dB, k2, 4, 7) > 0);
+        QVERIFY(p.addSegment(dA, k2, 0, 3) > 0);
+        QVERIFY(p.sortCodes(Project::SortKey::Segments));
+        QCOMPARE(p.codesInTreeOrder().first().name, QString("c10")); // 1 own segment beats 0 (k2 is a child)
+        QCOMPARE(p.codes().first().name, QString("c10"));
+
+        QVERIFY(p.sortDocuments(Project::SortKey::Name));
+        QCOMPARE(p.documentsInGroup(g).first().id, dA);
+        QVERIFY(p.sortDocuments(Project::SortKey::Segments));
+        QCOMPARE(p.documentsInGroup(g).first().id, dB);
+    }
+
     void migrationUpgradesOldProject()
     {
         {

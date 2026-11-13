@@ -1245,6 +1245,18 @@ Every transmission starts only from an explicit action, and before sending it is
         <source>Comprimi tutto</source>
         <translation>Collapse all</translation>
     </message>
+    <message>
+        <source>Ordina i codici</source>
+        <translation>Sort codes</translation>
+    </message>
+    <message>
+        <source>Per nome</source>
+        <translation>By name</translation>
+    </message>
+    <message>
+        <source>Per numero di segmenti</source>
+        <translation>By number of segments</translation>
+    </message>
 </context>
 <context>
     <name>CodingStripe</name>
@@ -2803,6 +2815,22 @@ Anna: I have got into the habit of going out for a walk at six: it is my way of 
         <location filename="../src/ui/DocumentTree.cpp" line="429" />
         <source>Crea set dai documenti attivi…</source>
         <translation>Create set from active documents…</translation>
+    </message>
+    <message>
+        <source>Ordina i documenti</source>
+        <translation>Sort documents</translation>
+    </message>
+    <message>
+        <source>Per nome</source>
+        <translation>By name</translation>
+    </message>
+    <message>
+        <source>Per numero di segmenti</source>
+        <translation>By number of segments</translation>
+    </message>
+    <message>
+        <source>Per data di importazione</source>
+        <translation>By import date</translation>
     </message>
 </context>
 <context>
@@ -5769,6 +5797,14 @@ The file has not been modified.</translation>
         <location filename="../src/core/Project.cpp" line="3200" />
         <source>Elimina voce del dizionario</source>
         <translation>Delete dictionary entry</translation>
+    </message>
+    <message>
+        <source>Ordina codici</source>
+        <translation>Sort codes</translation>
+    </message>
+    <message>
+        <source>Ordina documenti</source>
+        <translation>Sort documents</translation>
     </message>
 </context>
 <context>
