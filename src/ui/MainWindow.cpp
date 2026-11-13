@@ -48,6 +48,7 @@
 #include "ui/UiUtils.h"
 #include "ui/VariablesDialog.h"
 #include "ui/SentimentDialog.h"
+#include "ui/Theme.h"
 #include "ui/TopicsDialog.h"
 #include "ui/WordFrequencyDialog.h"
 
@@ -417,9 +418,19 @@ void MainWindow::createToolBar()
 {
     QToolBar *tb = addToolBar(tr("Strumenti"));
     tb->setObjectName(QStringLiteral("mainToolBar"));
-    tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    tb->setToolButtonStyle(Qt::ToolButtonIconOnly);
     tb->setMovable(false);
     tb->setIconSize(QSize(20, 20));
+    // Material Symbols icons (design); without the bundled font the old icons stay.
+    auto icon = [](QAction *a, const char *name, const QColor &c = QColor(0x1F, 0x23, 0x28)) {
+        const QIcon i = Ui::materialIcon(QLatin1String(name), c);
+        if (!i.isNull())
+            a->setIcon(i);
+    };
+    icon(m_newProject, "note_add");
+    icon(m_openProject, "folder_open");
+    icon(m_importDocs, "upload_file");
+    icon(m_search, "search");
     tb->addAction(m_newProject);
     tb->addAction(m_openProject);
     tb->addSeparator();
@@ -436,6 +447,8 @@ void MainWindow::createToolBar()
         redo->setEnabled(m_redo->isEnabled());
         redo->setToolTip(m_redo->text().remove(QLatin1Char('&')) + QStringLiteral(" (Ctrl+Y)"));
     });
+    icon(undo, "undo");
+    icon(redo, "redo");
     tb->addAction(undo);
     tb->addAction(redo);
     tb->addSeparator();
@@ -444,30 +457,38 @@ void MainWindow::createToolBar()
     QAction *newCode = new QAction(Ui::colorIcon(QColor(0x2ca02c), 16), tr("Nuovo codice"), this);
     connect(newCode, &QAction::triggered, m_newCode, &QAction::trigger);
     m_projectActions << newCode;
+    icon(newCode, "add_circle");
     tb->addAction(newCode);
     QAction *code = new QAction(style()->standardIcon(QStyle::SP_DialogApplyButton), tr("Codifica"), this);
     code->setToolTip(tr("Codifica la selezione (Ctrl+E)"));
     connect(code, &QAction::triggered, m_codeCurrent, &QAction::trigger);
     m_projectActions << code;
+    icon(code, "check_circle");
     tb->addAction(code);
     QAction *codeNewTb = new QAction(Ui::colorIcon(QColor(0x2ca02c), 16), tr("Codifica con nuovo codice"), this);
     codeNewTb->setToolTip(tr("Codifica la selezione con un nuovo codice (Ctrl+Shift+E)"));
     connect(codeNewTb, &QAction::triggered, m_codeNew, &QAction::trigger);
     m_projectActions << codeNewTb;
+    icon(codeNewTb, "new_label", Qt::white);
     tb->addAction(codeNewTb);
+    if (QWidget *w = tb->widgetForAction(codeNewTb))
+        w->setObjectName(QStringLiteral("PrimaryAction"));
     tb->addSeparator();
     tb->addAction(m_search);
     QAction *matrix = new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Matrice"), this);
     connect(matrix, &QAction::triggered, m_matrix, &QAction::trigger);
     m_projectActions << matrix;
+    icon(matrix, "grid_on");
     tb->addAction(matrix);
     QAction *vars = new QAction(style()->standardIcon(QStyle::SP_FileDialogListView), tr("Variabili"), this);
     connect(vars, &QAction::triggered, m_variables, &QAction::trigger);
     m_projectActions << vars;
+    icon(vars, "tune");
     tb->addAction(vars);
     QAction *memos = new QAction(Ui::memoIcon(), tr("Memo"), this);
     connect(memos, &QAction::triggered, m_memos, &QAction::trigger);
     m_projectActions << memos;
+    icon(memos, "sticky_note_2");
     tb->addAction(memos);
 }
 

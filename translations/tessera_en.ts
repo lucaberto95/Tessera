@@ -10396,4 +10396,19 @@ Each merge can be undone with Edit ▸ Undo.</translation>
         <translation>Add words to the dictionary</translation>
     </message>
 </context>
+<context>
+    <name>TitleBar</name>
+    <message>
+        <source>Chiudi</source>
+        <translation>Close</translation>
+    </message>
+    <message>
+        <source>Riduci a icona</source>
+        <translation>Minimize</translation>
+    </message>
+    <message>
+        <source>Ingrandisci</source>
+        <translation>Maximize</translation>
+    </message>
+</context>
 </TS>

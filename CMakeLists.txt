@@ -116,6 +116,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/AiUi.h src/ui/AiUi.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
     src/ui/Language.h src/ui/Language.cpp
+    src/ui/Theme.h src/ui/Theme.cpp
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent Qt6::Multimedia Qt6::MultimediaWidgets)
 
@@ -124,6 +125,9 @@ if(WIN32)
     target_sources(Tessera PRIVATE src/tessera.rc)
 endif()
 qt_add_resources(Tessera icons PREFIX "/" BASE "${CMAKE_SOURCE_DIR}/installer" FILES installer/tessera.svg)
+qt_add_resources(Tessera fonts PREFIX "/fonts" BASE "${CMAKE_SOURCE_DIR}/resources/fonts" FILES
+    resources/fonts/Inter-Regular.ttf resources/fonts/Inter-SemiBold.ttf resources/fonts/Inter-Bold.ttf
+    resources/fonts/MaterialSymbolsOutlined.ttf)
 
 # Regenerates installer/*.ico from the SVG sources (not built by default).
 qt_add_executable(tessera_makeicon EXCLUDE_FROM_ALL tools/makeicon.cpp)
