@@ -4,6 +4,12 @@ Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla re
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-13 — Correzione rinomina codice
+Commit `HASH`
+
+- Rinominando un codice nell'albero il testo digitato ora è visibile (l'editor in linea ereditava il riempimento dei campi di testo e tagliava il testo).
+- Pacchetto macOS (dmg) allegato alla release.
+
 ## [0.31.0] - 2026-11-13 — Nuovo design
 Commit `97ea6b6`
 
