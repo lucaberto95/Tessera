@@ -4660,6 +4660,11 @@ Text only: the extracted text becomes a text document, without layout.</translat
         <translation>Tessera cannot update itself in this folder. Download the new version from the release page: it will open in the browser.</translation>
     </message>
     <message>
+        <location filename="../src/ui/MainWindow.cpp" line="1670" />
+        <source>Scarica la nuova versione dalla pagina della release (si aprirà nel browser): apri il file .dmg e trascina Tessera nella cartella Applicazioni.</source>
+        <translation>Download the new version from the release page (it will open in the browser): open the .dmg file and drag Tessera into the Applications folder.</translation>
+    </message>
+    <message>
         <location filename="../src/ui/MainWindow.cpp" line="1672" />
         <source>Download di Tessera %1…</source>
         <translation>Downloading Tessera %1…</translation>

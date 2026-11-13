@@ -6835,7 +6835,7 @@ private slots:
         }
         // Inside the project folder the path is relative (a moved folder keeps working); elsewhere it is absolute.
         QCOMPARE(Media::storedPath(project, wav), QString("rec/a.wav"));
-        QCOMPARE(Media::storedPath(project, "C:/altrove/x.wav"), QString("C:/altrove/x.wav"));
+        QCOMPARE(Media::storedPath(project, QDir::rootPath() + "altrove/x.wav"), QDir::rootPath() + "altrove/x.wav");
         QCOMPARE(Media::resolvePath(project, "rec/a.wav"), QFileInfo(wav).absoluteFilePath());
         QCOMPARE(Media::resolvePath(project, wav), QFileInfo(wav).absoluteFilePath());
         QVERIFY(Media::resolvePath(project, "rec/mancante.wav").isEmpty());
@@ -6909,9 +6909,9 @@ private slots:
 
             QCOMPARE(p.addRecordingDocument(group, path("note.txt")), qint64(0)); // not a recording
             QVERIFY(!p.lastError().isEmpty());
-            const qint64 video = p.addRecordingDocument(group, "C:/non/esiste/clip.mp4", "Clip");
+            const qint64 video = p.addRecordingDocument(group, QDir::rootPath() + "non/esiste/clip.mp4", "Clip");
             QCOMPARE(p.document(video).kind, DocumentKind::Video);
-            QCOMPARE(p.documentMediaPath(video), QString("C:/non/esiste/clip.mp4"));
+            QCOMPARE(p.documentMediaPath(video), QDir::rootPath() + "non/esiste/clip.mp4");
             QVERIFY(p.resolvedMediaPath(video).isEmpty()); // missing: the player offers to relink
 
             const qint64 code = p.addCode(0, "Tema", Qt::red);

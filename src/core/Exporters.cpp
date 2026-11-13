@@ -115,7 +115,7 @@ Table readCsv(const QString &path, QString *error)
         QStringDecoder utf8(QStringDecoder::Utf8, QStringDecoder::Flag::Stateless);
         text = utf8.decode(data);
         if (utf8.hasError())
-            text = QStringDecoder(QStringDecoder::System).decode(data);
+            text = TextUtils::legacyDecoder().decode(data);
     }
     text = TextUtils::normalizeText(text);
 

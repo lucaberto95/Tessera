@@ -114,7 +114,7 @@ QString decodeText(const QByteArray &data)
     QString text = utf8.decode(data);
     if (!utf8.hasError())
         return text;
-    QStringDecoder legacy(QStringDecoder::System);
+    QStringDecoder legacy = TextUtils::legacyDecoder();
     return legacy.decode(data);
 }
 
@@ -540,7 +540,7 @@ Result importRtf(const QString &path)
     int rowIndex = 0;
     QByteArray pendingBytes; // \'hh sequences decoded together (multi-byte code pages)
     int skipChars = 0;
-    QStringDecoder legacy(QStringDecoder::System);
+    QStringDecoder legacy = TextUtils::legacyDecoder();
 
     auto flushBytes = [&] {
         if (!pendingBytes.isEmpty()) {

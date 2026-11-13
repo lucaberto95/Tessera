@@ -2,6 +2,16 @@
 
 namespace TextUtils {
 
+QStringDecoder legacyDecoder()
+{
+#ifdef Q_OS_WIN
+    return QStringDecoder(QStringDecoder::System);
+#else
+    QStringDecoder d("windows-1252");
+    return d.isValid() ? std::move(d) : QStringDecoder(QStringDecoder::Latin1);
+#endif
+}
+
 QString normalizeText(QString text)
 {
     if (text.startsWith(QChar(0xFEFF)))
