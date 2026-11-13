@@ -428,6 +428,17 @@ void DocumentTree::contextMenuEvent(QContextMenuEvent *event)
     menu.addAction(tr("Disattiva tutti i documenti"), this, [this] { setAllActive(false); });
     QAction *fromActive = menu.addAction(tr("Crea set dai documenti attivi…"), this, [this] { newDocumentSetFromActive(); });
     fromActive->setEnabled(!m_active.isEmpty());
+    menu.addSeparator();
+    QMenu *sortMenu = menu.addMenu(tr("Ordina i documenti"));
+    const auto addSort = [this, sortMenu](const QString &label, Project::SortKey key) {
+        sortMenu->addAction(label, this, [this, key] {
+            if (!m_project->sortDocuments(key))
+                Ui::showError(this, m_project->lastError());
+        });
+    };
+    addSort(tr("Per nome"), Project::SortKey::Name);
+    addSort(tr("Per numero di segmenti"), Project::SortKey::Segments);
+    addSort(tr("Per data di importazione"), Project::SortKey::ImportDate);
     menu.exec(event->globalPos());
 }
 

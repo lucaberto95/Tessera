@@ -287,6 +287,16 @@ void CodeTree::contextMenuEvent(QContextMenuEvent *event)
         menu.addAction(tr("Elimina…"), this, [this, id] { deleteCode(id); });
     }
     menu.addSeparator();
+    QMenu *sortMenu = menu.addMenu(tr("Ordina i codici"));
+    const auto addSort = [this, sortMenu](const QString &label, Project::SortKey key) {
+        sortMenu->addAction(label, this, [this, key] {
+            if (!m_project->sortCodes(key))
+                Ui::showError(this, m_project->lastError());
+        });
+    };
+    addSort(tr("Per nome"), Project::SortKey::Name);
+    addSort(tr("Per numero di segmenti"), Project::SortKey::Segments);
+    menu.addSeparator();
     menu.addAction(tr("Attiva tutti i codici"), this, [this] { setAllActive(true); });
     menu.addAction(tr("Disattiva tutti i codici"), this, [this] { setAllActive(false); });
     menu.addAction(tr("Espandi tutto"), this, [this] {
