@@ -18,6 +18,11 @@ public:
     void setHighlightedSegment(qint64 id);
     QSize sizeHint() const override;
 
+    // Font of the code names along the brackets, shared by every stripe and saved in the settings.
+    static QFont labelFont();
+    static void setLabelFont(const QFont &font);
+    static void chooseLabelFont(QWidget *parent);
+
 signals:
     void segmentClicked(qint64 segmentId);
     void segmentContextMenu(qint64 segmentId, const QPoint &globalPos);
@@ -40,6 +45,7 @@ private:
     void relayout();
     QList<Bar> computeBars() const;
     qint64 segmentAt(const QPoint &pos) const;
+    int columnWidth() const;
 
     QTextEdit *m_edit;
     QList<Segment> m_segments;

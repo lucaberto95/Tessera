@@ -14,6 +14,7 @@
 #include "core/TextUtils.h"
 #include "core/Updater.h"
 #include "ui/CodeTree.h"
+#include "ui/CodingStripe.h"
 #include "ui/DocumentTree.h"
 #include "ui/Language.h"
 #include "ui/DocumentView.h"
@@ -31,6 +32,7 @@
 #include "ui/ConceptMapDialog.h"
 #include "ui/MatrixDialog.h"
 #include "ui/MergeDialog.h"
+#include "ui/NewCodeDialog.h"
 #include "ui/TeamDialog.h"
 #include "ui/TeamSyncDialog.h"
 #include "ui/RetrievalDialog.h"
@@ -379,6 +381,7 @@ void MainWindow::createMenus()
     QMenu *settings = menuBar()->addMenu(tr("&Impostazioni"));
     settings->addAction(m_userName);
     settings->addAction(m_aiSettings);
+    settings->addAction(tr("&Carattere dei codici nel testo…"), this, [this] { CodingStripe::chooseLabelFont(this); });
     createLanguageMenu(settings);
 
     QMenu *help = menuBar()->addMenu(tr("&Aiuto"));
@@ -447,6 +450,11 @@ void MainWindow::createToolBar()
     connect(code, &QAction::triggered, m_codeCurrent, &QAction::trigger);
     m_projectActions << code;
     tb->addAction(code);
+    QAction *codeNewTb = new QAction(Ui::colorIcon(QColor(0x2ca02c), 16), tr("Codifica con nuovo codice"), this);
+    codeNewTb->setToolTip(tr("Codifica la selezione con un nuovo codice (Ctrl+Shift+E)"));
+    connect(codeNewTb, &QAction::triggered, m_codeNew, &QAction::trigger);
+    m_projectActions << codeNewTb;
+    tb->addAction(codeNewTb);
     tb->addSeparator();
     tb->addAction(m_search);
     QAction *matrix = new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Matrice"), this);
@@ -1006,17 +1014,22 @@ void MainWindow::codeWithNewCode()
         statusBar()->showMessage(tr("Seleziona prima del testo o un'area nel documento."), 4000);
         return;
     }
-    const QString suggestion = m_view->selectedText().simplified().left(40);
-    const QString name = Ui::askText(this, tr("Codifica con un nuovo codice"),
-                                     tr("Nome del nuovo codice (creato al primo livello):"), suggestion);
-    if (name.isEmpty())
+    NewCodeDialog dlg(m_project, 0, this);
+    dlg.setWindowTitle(tr("Codifica con un nuovo codice"));
+    dlg.setUseExisting(true);
+    dlg.nameEdit()->setText(m_view->selectedText().simplified().left(40));
+    dlg.nameEdit()->selectAll();
+    if (dlg.exec() != QDialog::Accepted)
         return;
     // Creating the code and coding the selection are undone together.
     m_project->setUndoLabel(tr("Codifica con nuovo codice"));
     m_project->beginBatch();
-    qint64 code = m_project->findCode(0, name);
-    if (!code)
-        code = m_project->addCode(0, name, TextUtils::paletteColor(int(m_project->codes().size())));
+    qint64 code = dlg.existingCodeId();
+    if (!code) {
+        code = m_project->addCode(dlg.parentId(), dlg.name(), dlg.color());
+        if (code && !dlg.description().isEmpty())
+            m_project->setCodeDescription(code, dlg.description());
+    }
     if (code)
         m_view->codeSelection(code);
     m_project->commitBatch();
@@ -1655,10 +1668,18 @@ void MainWindow::checkForUpdates(bool manual)
             return;
 
         const QString appDir = QCoreApplication::applicationDirPath();
-        if (!release.hasAsset() || !Update::canWriteTo(appDir)) {
-            Ui::showInfo(this, tr("Aggiornamento manuale"),
-                         tr("Tessera non può aggiornarsi da sola in questa cartella. "
-                            "Scarica la nuova versione dalla pagina della release: si aprirà nel browser."));
+#ifdef Q_OS_WIN
+        const bool manual = !release.hasAsset() || !Update::canWriteTo(appDir);
+        const QString how = tr("Tessera non può aggiornarsi da sola in questa cartella. "
+                               "Scarica la nuova versione dalla pagina della release: si aprirà nel browser.");
+#else
+        // Self-replacement exists only on Windows.
+        const bool manual = true;
+        const QString how = tr("Scarica la nuova versione dalla pagina della release (si aprirà nel browser): "
+                               "apri il file .dmg e trascina Tessera nella cartella Applicazioni.");
+#endif
+        if (manual) {
+            Ui::showInfo(this, tr("Aggiornamento manuale"), how);
             if (QUrl url(release.pageUrl); url.scheme() == QLatin1String("https"))
                 QDesktopServices::openUrl(url);
             return;

@@ -8,6 +8,8 @@
 #include "ui/AiSettingsDialog.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
+#include "ui/NewCodeDialog.h"
+#include "ui/CodingStripe.h"
 #include "ui/AgreementDialog.h"
 #include "ui/ReportDialog.h"
 #include "core/ConceptMaps.h"
@@ -53,6 +55,9 @@
 #include "ui/WordFrequencyDialog.h"
 
 #include <QBuffer>
+#include <QColorDialog>
+#include <QMessageBox>
+#include <QTimer>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QJsonArray>
@@ -63,6 +68,7 @@
 #include <QTemporaryDir>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDialogButtonBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -86,6 +92,8 @@
 #include <QTranslator>
 #include <QTextDocument>
 #include <QTextEdit>
+#include <QTimer>
+#include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -379,6 +387,23 @@ private slots:
         QCOMPARE(codes.topLevelItemCount(), 3);
         codes.setAllActive(true);
         QCOMPARE(codes.activeCodeIds().size(), 8);
+
+        // Double click renames in place (#65); an empty name is rejected.
+        codes.show();
+        QTreeWidgetItem *first = codes.topLevelItem(0);
+        const qint64 firstId = first->data(0, CodeTree::IdRole).toLongLong();
+        const QString oldName = first->text(0);
+        emit codes.itemDoubleClicked(first, 1);
+        QVERIFY(codes.findChild<QLineEdit *>());
+        first->setText(0, QStringLiteral("  Rinominato "));
+        QTest::qWait(10);
+        QCOMPARE(m_project->code(firstId).name, QStringLiteral("Rinominato"));
+        QCOMPARE(codes.activeCodeIds().size(), 8);
+        first->setText(0, QStringLiteral(" ")); // still valid: nothing rebuilt the tree yet
+        QTest::qWait(10);
+        QCOMPARE(m_project->code(firstId).name, QStringLiteral("Rinominato"));
+        QVERIFY(m_project->undo());
+        QCOMPARE(m_project->code(firstId).name, oldName);
     }
 
     void codingAndEditing()
@@ -804,6 +829,116 @@ private slots:
         QSettings::setDefaultFormat(QSettings::NativeFormat);
     }
 
+    void codeLabelFont()
+    {
+        useTemporarySettings();
+        QTextEdit edit;
+        CodingStripe stripe(&edit);
+        const QFont old = CodingStripe::labelFont();
+        const int oldWidth = stripe.sizeHint().width();
+        QFont big = old;
+        big.setPointSizeF(old.pointSizeF() * 3);
+        CodingStripe::setLabelFont(big);
+        QVERIFY(stripe.sizeHint().width() > oldWidth);
+        // The choice is persisted
+        QFont saved;
+        QVERIFY(saved.fromString(QSettings().value("ui/codeLabelFont").toString()));
+        QCOMPARE(saved.pointSizeF(), big.pointSizeF());
+        CodingStripe::setLabelFont(old);
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void newCodeDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("newcode.tsra")));
+        const qint64 padre = p.addCode(0, "Padre", Qt::red);
+        p.addCode(padre, "Figlio", Qt::red);
+        NewCodeDialog dlg(&p, padre);
+        QCOMPARE(dlg.parentId(), padre);
+        QCOMPARE(dlg.color(), QColor(Qt::red));
+        auto *ok = dlg.findChildren<QDialogButtonBox *>().first()->button(QDialogButtonBox::Ok);
+        QVERIFY(!ok->isEnabled());
+        dlg.nameEdit()->setText("  Nuovo  ");
+        QVERIFY(ok->isEnabled());
+        QCOMPARE(dlg.name(), QString("Nuovo"));
+        QCOMPARE(dlg.parentCombo()->count(), 3);
+        QVERIFY(dlg.parentCombo()->itemText(2).startsWith("    "));
+        dlg.parentCombo()->setCurrentIndex(0);
+        QCOMPARE(dlg.parentId(), qint64(0));
+        QVERIFY(dlg.color() != QColor(Qt::red));
+    }
+
+    void newCodeDialogSuggestsExisting()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("suggest.tsra")));
+        const qint64 emozioni = p.addCode(0, "Emozioni", Qt::red);
+        const qint64 ansia = p.addCode(emozioni, "Ansia", Qt::red);
+        const qint64 lavoro = p.addCode(0, "Lavoro", Qt::blue);
+        NewCodeDialog dlg(&p, 0);
+        QVERIFY(dlg.nameEdit()->completer());
+        dlg.nameEdit()->completer()->setCompletionPrefix("ans");
+        QCOMPARE(dlg.nameEdit()->completer()->completionCount(), 1);
+        QCOMPARE(dlg.nameEdit()->completer()->currentCompletion(), QString("Ansia"));
+        dlg.nameEdit()->setText("ansia");
+        QCOMPARE(dlg.existingCodeId(), ansia);
+        dlg.nameEdit()->setText("Nuovo");
+        QCOMPARE(dlg.existingCodeId(), qint64(0));
+        dlg.setUseExisting(true);
+        auto *description = dlg.findChildren<QPlainTextEdit *>().first();
+        dlg.nameEdit()->setText("Lavoro");
+        QCOMPARE(dlg.existingCodeId(), lavoro);
+        QVERIFY(!description->isEnabled());
+        dlg.nameEdit()->setText("x");
+        QVERIFY(description->isEnabled());
+    }
+
+    void codeWithNewCodeButton()
+    {
+        const QString path = m_dir.filePath("newcodebtn.tsra");
+        qint64 doc = 0;
+        {
+            Project p;
+            QVERIFY(p.create(path));
+            doc = p.addDocument(p.groups().first().id, "Doc", "alfa beta gamma");
+        }
+        useTemporarySettings(); // opening a project updates the recent list
+        MainWindow w;
+        w.resize(1200, 800);
+        w.show();
+        QVERIFY(w.openProject(path));
+        auto *view = w.findChild<DocumentView *>();
+        view->openDocument(doc);
+        view->selectRange(0, 4);
+        QAction *button = nullptr;
+        for (QToolBar *tb : w.findChildren<QToolBar *>())
+            for (QAction *a : tb->actions())
+                if (a->text() == "Codifica con nuovo codice")
+                    button = a;
+        QVERIFY(button && button->isEnabled());
+        bool seen = false;
+        QTimer::singleShot(0, [&] {
+            auto *dlg = qobject_cast<NewCodeDialog *>(qApp->activeModalWidget());
+            if (!dlg)
+                return;
+            seen = true;
+            QCOMPARE(dlg->name(), QString("alfa"));
+            dlg->nameEdit()->setText("Nuovo dal pulsante");
+            dlg->accept();
+        });
+        button->trigger();
+        QVERIFY(seen);
+        Project check;
+        QVERIFY(check.open(path));
+        const qint64 code = check.findCode(0, "Nuovo dal pulsante");
+        QVERIFY(code > 0);
+        const auto segs = check.segmentsForDocument(doc);
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(segs.first().codeId, code);
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
     void mediaPlayerRealFile()
     {
         useTemporarySettings();
@@ -1045,6 +1180,50 @@ private slots:
             QVERIFY2(doc.toPlainText().startsWith(name), qPrintable(doc.toPlainText()));
             QVERIFY(!doc.toPlainText().contains(QChar::ObjectReplacementCharacter));
         }
+    }
+
+    void treeMultiSelection()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("multisel.tsra")));
+        const qint64 a = p.addCode(0, "A", Qt::red), b = p.addCode(0, "B", Qt::green);
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "D1", "x"), d2 = p.addDocument(g, "D2", "y");
+        CodeTree codes(&p);
+        codes.rebuild();
+        DocumentTree docs(&p);
+        docs.rebuild();
+
+        for (int i = 0; i < codes.topLevelItemCount(); ++i)
+            codes.topLevelItem(i)->setSelected(true);
+        const QList<qint64> ids = codes.selectedCodeIds();
+        QCOMPARE(ids.size(), 2);
+        QTimer::singleShot(0, [] {
+            if (auto *d = qobject_cast<QColorDialog *>(QApplication::activeModalWidget())) {
+                d->setCurrentColor(Qt::blue);
+                d->accept();
+            }
+        });
+        codes.changeColors(ids);
+        QCOMPARE(p.code(a).color, QColor(Qt::blue));
+        QCOMPARE(p.code(b).color, QColor(Qt::blue));
+        p.undo();
+        QCOMPARE(p.code(a).color, QColor(Qt::red));
+        QCOMPARE(p.code(b).color, QColor(Qt::green));
+
+        QTreeWidgetItem *group = docs.topLevelItem(0);
+        group->setExpanded(true);
+        for (int i = 0; i < group->childCount(); ++i)
+            group->child(i)->setSelected(true);
+        QCOMPARE(docs.selectedDocumentIds().size(), 2);
+        QTimer::singleShot(0, [] {
+            if (auto *m = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                m->button(QMessageBox::Yes)->click();
+        });
+        docs.deleteDocuments({d1, d2});
+        QVERIFY(!p.document(d1).id && !p.document(d2).id);
+        p.undo();
+        QVERIFY(p.document(d1).id && p.document(d2).id);
     }
 
     void findInDocument()

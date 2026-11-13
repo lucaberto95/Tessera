@@ -77,6 +77,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/MainWindow.h src/ui/MainWindow.cpp
     src/ui/DocumentTree.h src/ui/DocumentTree.cpp
     src/ui/CodeTree.h src/ui/CodeTree.cpp
+    src/ui/NewCodeDialog.h src/ui/NewCodeDialog.cpp
     src/ui/DocumentView.h src/ui/DocumentView.cpp
     src/ui/CodingStripe.h src/ui/CodingStripe.cpp
     src/ui/ImageView.h src/ui/ImageView.cpp
@@ -118,14 +119,22 @@ qt_add_library(tessera_ui STATIC
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent Qt6::Multimedia Qt6::MultimediaWidgets)
 
-qt_add_executable(Tessera WIN32 src/main.cpp src/tessera.rc)
+qt_add_executable(Tessera WIN32 MACOSX_BUNDLE src/main.cpp)
+if(WIN32)
+    target_sources(Tessera PRIVATE src/tessera.rc)
+endif()
 qt_add_resources(Tessera icons PREFIX "/" BASE "${CMAKE_SOURCE_DIR}/installer" FILES installer/tessera.svg)
 
 # Regenerates installer/*.ico from the SVG sources (not built by default).
 qt_add_executable(tessera_makeicon EXCLUDE_FROM_ALL tools/makeicon.cpp)
 target_link_libraries(tessera_makeicon PRIVATE Qt6::Gui Qt6::Svg)
 target_link_libraries(Tessera PRIVATE tessera_ui)
-set_target_properties(Tessera PROPERTIES OUTPUT_NAME "Tessera")
+set_target_properties(Tessera PROPERTIES OUTPUT_NAME "Tessera"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.lucaberto95.tessera"
+    MACOSX_BUNDLE_BUNDLE_NAME "Tessera"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_ICON_FILE "tessera.icns")
 
 # Translations: the source language of tr() is Italian; English is translations/tessera_en.ts.
 # The .qm files are compiled by lrelease at build time and embedded in tessera_core (":/i18n").

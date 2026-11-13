@@ -1,18 +1,62 @@
 #include "ui/CodingStripe.h"
 
 #include <QAbstractTextDocumentLayout>
+#include <QApplication>
 #include <QContextMenuEvent>
+#include <QFontDialog>
 #include <QHelpEvent>
+#include <QMenu>
 #include <QPainter>
 #include <QScrollBar>
+#include <QSettings>
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QToolTip>
 
+#include <optional>
+
 namespace {
-constexpr int ColumnWidth = 18;
+constexpr int MinColumnWidth = 18;
 constexpr int Margin = 4;
+const QString kLabelFontKey = QStringLiteral("ui/codeLabelFont");
+std::optional<QFont> s_labelFont; // loaded from the settings on first use
 } // namespace
+
+QFont CodingStripe::labelFont()
+{
+    if (!s_labelFont) {
+        QFont f = QApplication::font();
+        f.setPointSizeF(f.pointSizeF() * 0.85);
+        const QString saved = QSettings().value(kLabelFontKey).toString();
+        if (!saved.isEmpty())
+            f.fromString(saved);
+        s_labelFont = f;
+    }
+    return *s_labelFont;
+}
+
+void CodingStripe::setLabelFont(const QFont &font)
+{
+    s_labelFont = font;
+    QSettings().setValue(kLabelFontKey, font.toString());
+    for (QWidget *w : QApplication::allWidgets())
+        if (auto *stripe = qobject_cast<CodingStripe *>(w))
+            stripe->relayout();
+}
+
+void CodingStripe::chooseLabelFont(QWidget *parent)
+{
+    bool ok = false;
+    const QFont f = QFontDialog::getFont(&ok, labelFont(), parent, tr("Carattere dei codici nel testo"));
+    if (ok)
+        setLabelFont(f);
+}
+
+int CodingStripe::columnWidth() const
+{
+    // Wide enough for the rotated name plus the bracket ticks.
+    return qMax(MinColumnWidth, QFontMetrics(labelFont()).height() + 5);
+}
 
 CodingStripe::CodingStripe(QTextEdit *edit, QWidget *parent)
     : QWidget(parent)
@@ -51,7 +95,7 @@ void CodingStripe::setHighlightedSegment(qint64 id)
 
 QSize CodingStripe::sizeHint() const
 {
-    return {Margin * 2 + qMax(1, m_columnCount) * ColumnWidth, 100};
+    return {Margin * 2 + qMax(1, m_columnCount) * columnWidth(), 100};
 }
 
 void CodingStripe::relayout()
@@ -105,14 +149,15 @@ QList<CodingStripe::Bar> CodingStripe::computeBars() const
     // Offset between the text edit's viewport and this widget, and the current scroll position.
     const int dy = m_edit->viewport()->mapTo(window(), QPoint(0, 0)).y() - mapTo(window(), QPoint(0, 0)).y() -
                    m_edit->verticalScrollBar()->value();
+    const int cw = columnWidth();
     for (const Segment &s : m_segments) {
         if (!m_extents.contains(s.id))
             continue;
         const auto [top, bottom] = m_extents.value(s.id);
         const int col = m_columns.value(s.id);
         // Columns grow leftwards from the text so nested codes sit closest to it.
-        const int x = width() - Margin - (col + 1) * ColumnWidth;
-        bars.append({s.id, col, QRect(x, top + dy, ColumnWidth - 3, bottom - top)});
+        const int x = width() - Margin - (col + 1) * cw;
+        bars.append({s.id, col, QRect(x, top + dy, cw - 3, bottom - top)});
     }
     return bars;
 }
@@ -124,8 +169,7 @@ void CodingStripe::paintEvent(QPaintEvent *)
     p.setPen(palette().color(QPalette::Mid));
     p.drawLine(width() - 1, 0, width() - 1, height());
 
-    QFont f = font();
-    f.setPointSizeF(f.pointSizeF() * 0.85);
+    const QFont f = labelFont();
     p.setFont(f);
     const QFontMetrics fm(f);
 
@@ -185,8 +229,13 @@ void CodingStripe::mousePressEvent(QMouseEvent *event)
 
 void CodingStripe::contextMenuEvent(QContextMenuEvent *event)
 {
-    if (const qint64 id = segmentAt(event->pos()))
+    if (const qint64 id = segmentAt(event->pos())) {
         emit segmentContextMenu(id, event->globalPos());
+        return;
+    }
+    QMenu menu(this);
+    menu.addAction(tr("Carattere dei codici…"), this, [this] { chooseLabelFont(this); });
+    menu.exec(event->globalPos());
 }
 
 bool CodingStripe::event(QEvent *event)

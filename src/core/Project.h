@@ -110,6 +110,10 @@ public:
     QImage documentImage(qint64 id) const;
     bool renameDocument(qint64 id, const QString &name);
     bool moveDocument(qint64 id, qint64 groupId);
+    enum class SortKey { Name, Segments, ImportDate }; // ImportDate applies to documents; codes fall back to Name
+    // Rewrite the sibling positions of every code (all levels) / of the documents in every group. One undo step.
+    bool sortCodes(SortKey key);
+    bool sortDocuments(SortKey key);
     bool deleteDocument(qint64 id);
     // Replaces the text, the document's segments and the ends of its links atomically (used by the
     // text editing mode). Segments and links of the document missing from the lists are deleted.

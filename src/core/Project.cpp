@@ -3,6 +3,7 @@
 #include "core/RichText.h"
 
 #include <QBuffer>
+#include <QCollator>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -1699,6 +1700,69 @@ bool Project::moveCode(qint64 id, qint64 newParentId, int position)
         return false;
     }
     notify(&Project::codesChanged);
+    return commitBatch();
+}
+
+// Sorts items in place by key; `count` is the item's own segment count, `date` its import date.
+template<typename T, typename CountFn, typename DateFn>
+static void sortItems(QList<T> &items, Project::SortKey key, CountFn count, DateFn date)
+{
+    QCollator collator;
+    collator.setNumericMode(true);
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    std::stable_sort(items.begin(), items.end(), [&](const T &a, const T &b) {
+        if (key == Project::SortKey::Segments && count(a) != count(b))
+            return count(a) > count(b);
+        if (key == Project::SortKey::ImportDate && date(a) != date(b))
+            return date(a) < date(b);
+        return collator.compare(a.name, b.name) < 0;
+    });
+}
+
+bool Project::sortCodes(SortKey key)
+{
+    setUndoLabel(tr("Ordina codici"));
+    const QHash<qint64, int> counts = segmentCountByCode();
+    QHash<qint64, QList<Code>> byParent;
+    for (const Code &c : codes())
+        byParent[c.parentId] << c;
+
+    beginBatch();
+    bool ok = true;
+    for (auto it = byParent.begin(); ok && it != byParent.end(); ++it) {
+        sortItems(it.value(), key, [&](const Code &c) { return counts.value(c.id); },
+                  [](const Code &) { return 0; });
+        for (int i = 0; ok && i < it.value().size(); ++i)
+            ok = exec(QStringLiteral("UPDATE codes SET position = ? WHERE id = ?"), {i, it.value()[i].id});
+    }
+    if (!ok) {
+        rollbackBatch();
+        return false;
+    }
+    notify(&Project::codesChanged);
+    return commitBatch();
+}
+
+bool Project::sortDocuments(SortKey key)
+{
+    setUndoLabel(tr("Ordina documenti"));
+    const QHash<qint64, int> counts = segmentCountByDocument();
+
+    beginBatch();
+    bool ok = true;
+    const QList<DocumentGroup> groupList = groups();
+    for (int gi = 0; ok && gi < groupList.size(); ++gi) {
+        QList<Document> docs = documentsInGroup(groupList[gi].id);
+        sortItems(docs, key, [&](const Document &d) { return counts.value(d.id); },
+                  [](const Document &d) { return d.importedAt; });
+        for (int i = 0; ok && i < docs.size(); ++i)
+            ok = exec(QStringLiteral("UPDATE documents SET position = ? WHERE id = ?"), {i, docs[i].id});
+    }
+    if (!ok) {
+        rollbackBatch();
+        return false;
+    }
+    notify(&Project::documentsChanged);
     return commitBatch();
 }
 

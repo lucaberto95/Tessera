@@ -1,6 +1,6 @@
 #include "ui/CodeTree.h"
 #include "core/Project.h"
-#include "core/TextUtils.h"
+#include "ui/NewCodeDialog.h"
 #include "ui/UiUtils.h"
 
 #include <QColorDialog>
@@ -25,13 +25,16 @@ CodeTree::CodeTree(Project *project, QWidget *parent)
     header()->setStretchLastSection(false);
     header()->setSectionResizeMode(0, QHeaderView::Stretch);
     header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    setSelectionMode(QAbstractItemView::SingleSelection);
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
     setDragEnabled(true);
     setAcceptDrops(true);
     setDropIndicatorShown(true);
     setDragDropMode(QAbstractItemView::DragDrop);
     setDefaultDropAction(Qt::MoveAction);
     setUniformRowHeights(true);
+    // In-place rename on double click, always on the name column (#65), never on the count column.
+    setEditTriggers(QAbstractItemView::NoEditTriggers);
+    connect(this, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) { editItem(item, 0); });
 
     connect(this, &QTreeWidget::itemChanged, this, &CodeTree::onItemChanged);
     connect(this, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *cur) {
@@ -76,7 +79,8 @@ void CodeTree::rebuild()
             item->setText(0, c.name);
             item->setIcon(0, Ui::colorIcon(c.color));
             item->setData(0, IdRole, c.id);
-            item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled
+                           | Qt::ItemIsEditable);
             item->setCheckState(0, m_active.contains(c.id) ? Qt::Checked : Qt::Unchecked);
             const int own = counts.value(c.id);
             const int sub = build(item, c.id);
@@ -151,6 +155,16 @@ void CodeTree::onItemChanged(QTreeWidgetItem *item, int column)
     if (m_rebuilding || column != 0)
         return;
     const qint64 id = item->data(0, IdRole).toLongLong();
+    const QString name = item->text(0).trimmed();
+    const QString oldName = m_project->code(id).name;
+    if (name != oldName) {
+        // Queued: the rename rebuilds the tree, which must not happen inside the editor's commit.
+        QMetaObject::invokeMethod(this, [this, id, name] {
+            if (name.isEmpty() || !m_project->renameCode(id, name))
+                rebuild();
+        }, Qt::QueuedConnection);
+        return;
+    }
     const bool now = item->checkState(0) == Qt::Checked;
     if (now == m_active.contains(id))
         return;
@@ -163,16 +177,16 @@ void CodeTree::onItemChanged(QTreeWidgetItem *item, int column)
 
 qint64 CodeTree::newCode(qint64 parentId)
 {
-    const QString name = Ui::askText(this, parentId ? tr("Nuovo sottocodice") : tr("Nuovo codice"),
-                                     parentId ? tr("Nome del sottocodice di \"%1\":").arg(m_project->code(parentId).name)
-                                              : tr("Nome del codice:"));
-    if (name.isEmpty())
+    NewCodeDialog dlg(m_project, parentId, this);
+    if (dlg.exec() != QDialog::Accepted)
         return 0;
-    const QColor color = parentId ? m_project->code(parentId).color
-                                  : TextUtils::paletteColor(int(m_project->codes().size()));
-    const qint64 id = m_project->addCode(parentId, name, color);
+    m_project->beginBatch();
+    const qint64 id = m_project->addCode(dlg.parentId(), dlg.name(), dlg.color());
+    if (id && !dlg.description().isEmpty())
+        m_project->setCodeDescription(id, dlg.description());
+    m_project->commitBatch();
     if (id) {
-        if (QTreeWidgetItem *parent = findItem(parentId))
+        if (QTreeWidgetItem *parent = findItem(dlg.parentId()))
             parent->setExpanded(true);
         setCurrentCode(id);
     }
@@ -231,20 +245,73 @@ void CodeTree::deleteCode(qint64 id)
         m_project->deleteCode(id);
 }
 
+QList<qint64> CodeTree::selectedCodeIds() const
+{
+    QList<qint64> ids;
+    for (const QTreeWidgetItem *it : selectedItems())
+        ids.append(it->data(0, IdRole).toLongLong());
+    return ids;
+}
+
+void CodeTree::changeColors(const QList<qint64> &ids)
+{
+    if (ids.isEmpty())
+        return;
+    const QColor color = QColorDialog::getColor(m_project->code(ids.first()).color, this, tr("Colore dei codici"));
+    if (!color.isValid())
+        return;
+    m_project->setUndoLabel(tr("Colore dei codici"));
+    m_project->beginBatch();
+    for (qint64 id : ids)
+        m_project->setCodeColor(id, color);
+    m_project->commitBatch();
+}
+
+void CodeTree::deleteCodes(const QList<qint64> &ids)
+{
+    QString text = tr("Eliminare %n codici e tutte le loro codifiche?", nullptr, int(ids.size()));
+    for (qint64 id : ids) {
+        if (!m_project->codeDescendants(id).isEmpty()) {
+            text += QLatin1Char('\n') + tr("Verranno eliminati anche i loro sottocodici.");
+            break;
+        }
+    }
+    if (!Ui::confirm(this, tr("Elimina codici"), text))
+        return;
+    m_project->setUndoLabel(tr("Elimina codici"));
+    m_project->beginBatch();
+    for (qint64 id : ids) {
+        if (m_project->code(id).id) // may already be gone as a subcode of an earlier one
+            m_project->deleteCode(id);
+    }
+    m_project->commitBatch();
+}
+
 void CodeTree::contextMenuEvent(QContextMenuEvent *event)
 {
     if (!m_project->isOpen())
         return;
     QTreeWidgetItem *item = itemAt(viewport()->mapFromGlobal(event->globalPos()));
-    if (item)
-        setCurrentItem(item);
+    if (item) // keep a multi-selection when right-clicking one of its items
+        setCurrentItem(item, 0, item->isSelected() ? QItemSelectionModel::NoUpdate : QItemSelectionModel::ClearAndSelect);
     const qint64 id = item ? item->data(0, IdRole).toLongLong() : 0;
+    const QList<qint64> ids = selectedCodeIds();
 
     QMenu menu(this);
     menu.addAction(tr("Nuovo codice…"), this, [this] { newCode(0); });
     if (!id)
         menu.addAction(tr("Raggruppa i codici di primo livello con l'AI…"), this, [this] { emit aiGroupRequested(0); });
-    if (id) {
+    if (id && ids.size() > 1) {
+        menu.addSeparator();
+        menu.addAction(tr("Colore…"), this, [this, ids] { changeColors(ids); });
+        menu.addAction(tr("Attiva solo i codici selezionati"), this, [this, ids] {
+            m_active = QSet<qint64>(ids.begin(), ids.end());
+            rebuild();
+            emit activationChanged();
+        });
+        menu.addSeparator();
+        menu.addAction(tr("Elimina i codici selezionati…"), this, [this, ids] { deleteCodes(ids); });
+    } else if (id) {
         menu.addAction(tr("Nuovo sottocodice…"), this, [this, id] { newCode(id); });
         menu.addSeparator();
         menu.addAction(tr("Rinomina…"), this, [this, id] { renameCode(id); });
@@ -273,6 +340,16 @@ void CodeTree::contextMenuEvent(QContextMenuEvent *event)
         menu.addAction(tr("Elimina…"), this, [this, id] { deleteCode(id); });
     }
     menu.addSeparator();
+    QMenu *sortMenu = menu.addMenu(tr("Ordina i codici"));
+    const auto addSort = [this, sortMenu](const QString &label, Project::SortKey key) {
+        sortMenu->addAction(label, this, [this, key] {
+            if (!m_project->sortCodes(key))
+                Ui::showError(this, m_project->lastError());
+        });
+    };
+    addSort(tr("Per nome"), Project::SortKey::Name);
+    addSort(tr("Per numero di segmenti"), Project::SortKey::Segments);
+    menu.addSeparator();
     menu.addAction(tr("Attiva tutti i codici"), this, [this] { setAllActive(true); });
     menu.addAction(tr("Disattiva tutti i codici"), this, [this] { setAllActive(false); });
     menu.addAction(tr("Espandi tutto"), this, [this] {
@@ -290,8 +367,10 @@ QMimeData *CodeTree::mimeData(const QList<QTreeWidgetItem *> &items) const
     if (items.isEmpty())
         return nullptr;
     auto *mime = new QMimeData;
-    mime->setData(QString::fromLatin1(Ui::CodeMimeType), QByteArray::number(items.first()->data(0, IdRole).toLongLong()));
-    mime->setText(items.first()->text(0));
+    // With several selected, drag the one the user pressed.
+    const QTreeWidgetItem *dragged = items.contains(currentItem()) ? currentItem() : items.first();
+    mime->setData(QString::fromLatin1(Ui::CodeMimeType), QByteArray::number(dragged->data(0, IdRole).toLongLong()));
+    mime->setText(dragged->text(0));
     return mime;
 }
 

@@ -27,6 +27,9 @@ public:
     void editDescription(qint64 id);
     void editMemo(qint64 id);
     void deleteCode(qint64 id);
+    QList<qint64> selectedCodeIds() const;
+    void changeColors(const QList<qint64> &ids);
+    void deleteCodes(const QList<qint64> &ids);
 
 signals:
     void activationChanged();

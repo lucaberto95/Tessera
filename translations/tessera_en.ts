@@ -1245,9 +1245,58 @@ Every transmission starts only from an explicit action, and before sending it is
         <source>Comprimi tutto</source>
         <translation>Collapse all</translation>
     </message>
+    <message>
+        <source>Ordina i codici</source>
+        <translation>Sort codes</translation>
+    </message>
+    <message>
+        <source>Per nome</source>
+        <translation>By name</translation>
+    </message>
+    <message>
+        <source>Per numero di segmenti</source>
+        <translation>By number of segments</translation>
+    </message>
+    <message>
+        <source>Colore dei codici</source>
+        <translation>Color of the codes</translation>
+    </message>
+    <message>
+        <source>Attiva solo i codici selezionati</source>
+        <translation>Activate only the selected codes</translation>
+    </message>
+    <message>
+        <source>Elimina i codici selezionati…</source>
+        <translation>Delete selected codes…</translation>
+    </message>
+    <message numerus="yes">
+        <source>Eliminare %n codici e tutte le loro codifiche?</source>
+        <translation>
+            <numerusform>Delete %n code and all its codings?</numerusform>
+            <numerusform>Delete %n codes and all their codings?</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Verranno eliminati anche i loro sottocodici.</source>
+        <translation>Their subcodes will also be deleted.</translation>
+    </message>
+    <message>
+        <source>Elimina codici</source>
+        <translation>Delete codes</translation>
+    </message>
 </context>
 <context>
     <name>CodingStripe</name>
+    <message>
+        <location filename="../src/ui/CodingStripe.cpp" line="50" />
+        <source>Carattere dei codici nel testo</source>
+        <translation>Code label font</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/CodingStripe.cpp" line="237" />
+        <source>Carattere dei codici…</source>
+        <translation>Code label font…</translation>
+    </message>
     <message>
         <location filename="../src/ui/CodingStripe.cpp" line="202" />
         <source>Peso: %1</source>
@@ -2804,6 +2853,45 @@ Anna: I have got into the habit of going out for a walk at six: it is my way of 
         <source>Crea set dai documenti attivi…</source>
         <translation>Create set from active documents…</translation>
     </message>
+    <message>
+        <source>Ordina i documenti</source>
+        <translation>Sort documents</translation>
+    </message>
+    <message>
+        <source>Per nome</source>
+        <translation>By name</translation>
+    </message>
+    <message>
+        <source>Per numero di segmenti</source>
+        <translation>By number of segments</translation>
+    </message>
+    <message>
+        <source>Per data di importazione</source>
+        <translation>By import date</translation>
+    </message>
+    <message>
+        <source>Sposta documenti</source>
+        <translation>Move documents</translation>
+    </message>
+    <message>
+        <source>Attiva solo i documenti selezionati</source>
+        <translation>Activate only the selected documents</translation>
+    </message>
+    <message>
+        <source>Elimina i documenti selezionati…</source>
+        <translation>Delete selected documents…</translation>
+    </message>
+    <message numerus="yes">
+        <source>Eliminare %n documenti e tutte le loro codifiche?</source>
+        <translation>
+            <numerusform>Delete %n document and all its codings?</numerusform>
+            <numerusform>Delete %n documents and all their codings?</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Elimina documenti</source>
+        <translation>Delete documents</translation>
+    </message>
 </context>
 <context>
     <name>DocumentView</name>
@@ -3496,6 +3584,11 @@ In NVivo choose File &gt; Export &gt; Export Project (REFI-QDA format, .qdpx) or
 </context>
 <context>
     <name>MainWindow</name>
+    <message>
+        <location filename="../src/ui/MainWindow.cpp" line="383" />
+        <source>&amp;Carattere dei codici nel testo…</source>
+        <translation>Code &amp;label font…</translation>
+    </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="159" />
         <source>&amp;Nuovo progetto…</source>
@@ -4345,6 +4438,11 @@ Text only: the extracted text becomes a text document, without layout.</translat
         <translation>Code with new code</translation>
     </message>
     <message>
+        <location filename="../src/ui/MainWindow.cpp" line="452" />
+        <source>Codifica la selezione con un nuovo codice (Ctrl+Shift+E)</source>
+        <translation>Code the selection with a new code (Ctrl+Shift+E)</translation>
+    </message>
+    <message>
         <location filename="../src/ui/MainWindow.cpp" line="1029" />
         <source>Esporta codebook</source>
         <translation>Export codebook</translation>
@@ -4560,6 +4658,11 @@ Text only: the extracted text becomes a text document, without layout.</translat
         <location filename="../src/ui/MainWindow.cpp" line="1660" />
         <source>Tessera non può aggiornarsi da sola in questa cartella. Scarica la nuova versione dalla pagina della release: si aprirà nel browser.</source>
         <translation>Tessera cannot update itself in this folder. Download the new version from the release page: it will open in the browser.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/MainWindow.cpp" line="1670" />
+        <source>Scarica la nuova versione dalla pagina della release (si aprirà nel browser): apri il file .dmg e trascina Tessera nella cartella Applicazioni.</source>
+        <translation>Download the new version from the release page (it will open in the browser): open the .dmg file and drag Tessera into the Applications folder.</translation>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="1672" />
@@ -5255,6 +5358,69 @@ Text only: the extracted text becomes a text document, without layout.</translat
     </message>
 </context>
 <context>
+    <name>NewCodeDialog</name>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="19" />
+        <source>Nuovo sottocodice</source>
+        <translation>New subcode</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="19" />
+        <source>Nuovo codice</source>
+        <translation>New code</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="26" />
+        <source>(livello superiore)</source>
+        <translation>(top level)</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="43" />
+        <source>Scegli…</source>
+        <translation>Choose…</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="45" />
+        <source>Colore del codice</source>
+        <translation>Code color</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="59" />
+        <source>Definizione del codice, criteri di applicazione, esempi…</source>
+        <translation>Code definition, criteria for applying it, examples…</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="70" />
+        <source>Nome:</source>
+        <translation>Name:</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="71" />
+        <source>Posizione:</source>
+        <translation>Position:</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="72" />
+        <source>Colore:</source>
+        <translation>Color:</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="73" />
+        <source>Descrizione:</source>
+        <translation>Description:</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="146" />
+        <source>Esiste già: la selezione sarà codificata con il codice esistente.</source>
+        <translation>Already exists: the selection will be coded with the existing code.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="147" />
+        <source>Esiste già un codice con questo nome.</source>
+        <translation>A code with this name already exists.</translation>
+    </message>
+</context>
+<context>
     <name>Project</name>
     <message>
         <location filename="../src/core/Project.cpp" line="526" />
@@ -5769,6 +5935,14 @@ The file has not been modified.</translation>
         <location filename="../src/core/Project.cpp" line="3200" />
         <source>Elimina voce del dizionario</source>
         <translation>Delete dictionary entry</translation>
+    </message>
+    <message>
+        <source>Ordina codici</source>
+        <translation>Sort codes</translation>
+    </message>
+    <message>
+        <source>Ordina documenti</source>
+        <translation>Sort documents</translation>
     </message>
 </context>
 <context>
