@@ -77,6 +77,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/MainWindow.h src/ui/MainWindow.cpp
     src/ui/DocumentTree.h src/ui/DocumentTree.cpp
     src/ui/CodeTree.h src/ui/CodeTree.cpp
+    src/ui/NewCodeDialog.h src/ui/NewCodeDialog.cpp
     src/ui/DocumentView.h src/ui/DocumentView.cpp
     src/ui/CodingStripe.h src/ui/CodingStripe.cpp
     src/ui/ImageView.h src/ui/ImageView.cpp

@@ -8,6 +8,7 @@
 #include "ui/AiSettingsDialog.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
+#include "ui/NewCodeDialog.h"
 #include "ui/CodingStripe.h"
 #include "ui/AgreementDialog.h"
 #include "ui/ReportDialog.h"
@@ -839,6 +840,27 @@ private slots:
         QCOMPARE(saved.pointSizeF(), big.pointSizeF());
         CodingStripe::setLabelFont(old);
         QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void newCodeDialog()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("newcode.tsra")));
+        const qint64 padre = p.addCode(0, "Padre", Qt::red);
+        p.addCode(padre, "Figlio", Qt::red);
+        NewCodeDialog dlg(&p, padre);
+        QCOMPARE(dlg.parentId(), padre);
+        QCOMPARE(dlg.color(), QColor(Qt::red));
+        auto *ok = dlg.findChildren<QDialogButtonBox *>().first()->button(QDialogButtonBox::Ok);
+        QVERIFY(!ok->isEnabled());
+        dlg.nameEdit()->setText("  Nuovo  ");
+        QVERIFY(ok->isEnabled());
+        QCOMPARE(dlg.name(), QString("Nuovo"));
+        QCOMPARE(dlg.parentCombo()->count(), 3);
+        QVERIFY(dlg.parentCombo()->itemText(2).startsWith("    "));
+        dlg.parentCombo()->setCurrentIndex(0);
+        QCOMPARE(dlg.parentId(), qint64(0));
+        QVERIFY(dlg.color() != QColor(Qt::red));
     }
 
     void mediaPlayerRealFile()

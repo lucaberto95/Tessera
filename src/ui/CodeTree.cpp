@@ -1,6 +1,6 @@
 #include "ui/CodeTree.h"
 #include "core/Project.h"
-#include "core/TextUtils.h"
+#include "ui/NewCodeDialog.h"
 #include "ui/UiUtils.h"
 
 #include <QColorDialog>
@@ -177,16 +177,16 @@ void CodeTree::onItemChanged(QTreeWidgetItem *item, int column)
 
 qint64 CodeTree::newCode(qint64 parentId)
 {
-    const QString name = Ui::askText(this, parentId ? tr("Nuovo sottocodice") : tr("Nuovo codice"),
-                                     parentId ? tr("Nome del sottocodice di \"%1\":").arg(m_project->code(parentId).name)
-                                              : tr("Nome del codice:"));
-    if (name.isEmpty())
+    NewCodeDialog dlg(m_project, parentId, this);
+    if (dlg.exec() != QDialog::Accepted)
         return 0;
-    const QColor color = parentId ? m_project->code(parentId).color
-                                  : TextUtils::paletteColor(int(m_project->codes().size()));
-    const qint64 id = m_project->addCode(parentId, name, color);
+    m_project->beginBatch();
+    const qint64 id = m_project->addCode(dlg.parentId(), dlg.name(), dlg.color());
+    if (id && !dlg.description().isEmpty())
+        m_project->setCodeDescription(id, dlg.description());
+    m_project->commitBatch();
     if (id) {
-        if (QTreeWidgetItem *parent = findItem(parentId))
+        if (QTreeWidgetItem *parent = findItem(dlg.parentId()))
             parent->setExpanded(true);
         setCurrentCode(id);
     }
