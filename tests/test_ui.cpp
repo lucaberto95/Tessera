@@ -8,6 +8,7 @@
 #include "ui/AiSettingsDialog.h"
 #include "core/Project.h"
 #include "ui/CodeTree.h"
+#include "ui/CodingStripe.h"
 #include "ui/AgreementDialog.h"
 #include "ui/ReportDialog.h"
 #include "core/ConceptMaps.h"
@@ -801,6 +802,25 @@ private slots:
         QCOMPARE(seekSpy.count(), 1); // a drag is not a click
         QVERIFY(qAbs(w.selectionStart() - 2000) < 40 && qAbs(w.selectionEnd() - 4500) < 40);
         w.pause();
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void codeLabelFont()
+    {
+        useTemporarySettings();
+        QTextEdit edit;
+        CodingStripe stripe(&edit);
+        const QFont old = CodingStripe::labelFont();
+        const int oldWidth = stripe.sizeHint().width();
+        QFont big = old;
+        big.setPointSizeF(old.pointSizeF() * 3);
+        CodingStripe::setLabelFont(big);
+        QVERIFY(stripe.sizeHint().width() > oldWidth);
+        // The choice is persisted
+        QFont saved;
+        QVERIFY(saved.fromString(QSettings().value("ui/codeLabelFont").toString()));
+        QCOMPARE(saved.pointSizeF(), big.pointSizeF());
+        CodingStripe::setLabelFont(old);
         QSettings::setDefaultFormat(QSettings::NativeFormat);
     }
 
