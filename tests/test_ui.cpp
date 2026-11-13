@@ -379,6 +379,23 @@ private slots:
         QCOMPARE(codes.topLevelItemCount(), 3);
         codes.setAllActive(true);
         QCOMPARE(codes.activeCodeIds().size(), 8);
+
+        // Double click renames in place (#65); an empty name is rejected.
+        codes.show();
+        QTreeWidgetItem *first = codes.topLevelItem(0);
+        const qint64 firstId = first->data(0, CodeTree::IdRole).toLongLong();
+        const QString oldName = first->text(0);
+        emit codes.itemDoubleClicked(first, 1);
+        QVERIFY(codes.findChild<QLineEdit *>());
+        first->setText(0, QStringLiteral("  Rinominato "));
+        QTest::qWait(10);
+        QCOMPARE(m_project->code(firstId).name, QStringLiteral("Rinominato"));
+        QCOMPARE(codes.activeCodeIds().size(), 8);
+        first->setText(0, QStringLiteral(" ")); // still valid: nothing rebuilt the tree yet
+        QTest::qWait(10);
+        QCOMPARE(m_project->code(firstId).name, QStringLiteral("Rinominato"));
+        QVERIFY(m_project->undo());
+        QCOMPARE(m_project->code(firstId).name, oldName);
     }
 
     void codingAndEditing()
