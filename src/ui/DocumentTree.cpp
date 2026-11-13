@@ -19,7 +19,7 @@ DocumentTree::DocumentTree(Project *project, QWidget *parent)
     header()->setStretchLastSection(false);
     header()->setSectionResizeMode(0, QHeaderView::Stretch);
     header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    setSelectionMode(QAbstractItemView::SingleSelection);
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
     setUniformRowHeights(true);
     // Documents can be dragged onto a set (to add them) or onto a group (to move them).
     setDragEnabled(true);
@@ -351,18 +351,53 @@ QMimeData *DocumentTree::mimeData(const QList<QTreeWidgetItem *> &items) const
     return mime;
 }
 
-void DocumentTree::addSetMenu(QMenu *menu, qint64 documentId)
+void DocumentTree::addSetMenu(QMenu *menu, const QList<qint64> &documentIds)
 {
     QMenu *sets = menu->addMenu(tr("Aggiungi al set"));
     const QList<DocumentSet> all = m_project->documentSets();
     for (const DocumentSet &s : all) {
         QAction *a = sets->addAction(s.name, this,
-                                     [this, sid = s.id, documentId] { m_project->addToDocumentSet(sid, {documentId}); });
-        a->setEnabled(!m_project->documentSetMembers(s.id).contains(documentId));
+                                     [this, sid = s.id, documentIds] { m_project->addToDocumentSet(sid, documentIds); });
+        const QList<qint64> members = m_project->documentSetMembers(s.id);
+        a->setEnabled(std::any_of(documentIds.begin(), documentIds.end(), [&](qint64 d) { return !members.contains(d); }));
     }
     if (!all.isEmpty())
         sets->addSeparator();
-    sets->addAction(tr("Nuovo set…"), this, [this, documentId] { newDocumentSet({documentId}); });
+    sets->addAction(tr("Nuovo set…"), this, [this, documentIds] { newDocumentSet(documentIds); });
+}
+
+QList<qint64> DocumentTree::selectedDocumentIds() const
+{
+    QList<qint64> ids;
+    for (const QTreeWidgetItem *it : selectedItems()) {
+        const qint64 id = it->data(0, IdRole).toLongLong();
+        if (isDocument(it) && !ids.contains(id))
+            ids.append(id);
+    }
+    return ids;
+}
+
+void DocumentTree::deleteDocuments(const QList<qint64> &ids)
+{
+    if (!Ui::confirm(this, tr("Elimina documenti"),
+                     tr("Eliminare %n documenti e tutte le loro codifiche?", nullptr, int(ids.size()))))
+        return;
+    m_project->setUndoLabel(tr("Elimina documenti"));
+    m_project->beginBatch();
+    for (qint64 id : ids)
+        m_project->deleteDocument(id);
+    m_project->commitBatch();
+}
+
+void DocumentTree::moveDocuments(const QList<qint64> &ids, qint64 groupId)
+{
+    m_project->setUndoLabel(tr("Sposta documenti"));
+    m_project->beginBatch();
+    for (qint64 id : ids) {
+        if (m_project->document(id).groupId != groupId)
+            m_project->moveDocument(id, groupId);
+    }
+    m_project->commitBatch();
 }
 
 void DocumentTree::contextMenuEvent(QContextMenuEvent *event)
@@ -370,12 +405,23 @@ void DocumentTree::contextMenuEvent(QContextMenuEvent *event)
     if (!m_project->isOpen())
         return;
     QTreeWidgetItem *item = itemAt(viewport()->mapFromGlobal(event->globalPos()));
-    if (item)
-        setCurrentItem(item);
+    if (item) // keep a multi-selection when right-clicking one of its items
+        setCurrentItem(item, 0, item->isSelected() ? QItemSelectionModel::NoUpdate : QItemSelectionModel::ClearAndSelect);
     const int kind = item ? item->data(0, KindRole).toInt() : 0;
+    const QList<qint64> ids = selectedDocumentIds();
+    const bool groupMode = isDocument(item) && ids.size() > 1;
     QMenu menu(this);
 
-    if (isDocument(item)) {
+    if (groupMode) {
+        QMenu *move = menu.addMenu(tr("Sposta nel gruppo"));
+        for (const DocumentGroup &g : m_project->groups())
+            move->addAction(g.name, this, [this, ids, gid = g.id] { moveDocuments(ids, gid); });
+        addSetMenu(&menu, ids);
+        menu.addAction(tr("Attiva solo i documenti selezionati"), this, [this, ids] { setActiveDocuments(ids); });
+        menu.addSeparator();
+        menu.addAction(tr("Elimina i documenti selezionati…"), this, [this, ids] { deleteDocuments(ids); });
+        menu.addSeparator();
+    } else if (isDocument(item)) {
         const qint64 id = item->data(0, IdRole).toLongLong();
         menu.addAction(tr("Apri documento"), this, [this, id] { emit documentOpened(id); });
         menu.addAction(tr("Riassumi con l'AI…"), this, [this, id] { emit aiSummaryRequested(id); });
@@ -388,7 +434,7 @@ void DocumentTree::contextMenuEvent(QContextMenuEvent *event)
                 a->setEnabled(g.id != item->parent()->data(0, IdRole).toLongLong());
             }
         }
-        addSetMenu(&menu, id);
+        addSetMenu(&menu, {id});
         if (kind == SetMemberItem) {
             const qint64 setId = item->parent()->data(0, IdRole).toLongLong();
             menu.addAction(tr("Rimuovi dal set"), this,
@@ -404,7 +450,7 @@ void DocumentTree::contextMenuEvent(QContextMenuEvent *event)
             menu.addAction(tr("Attiva solo i documenti del set"), this,
                            [this, id] { setActiveDocuments(m_project->documentSetMembers(id)); });
         }
-    } else {
+    } else if (!groupMode) {
         const qint64 groupId = currentGroupId();
         menu.addAction(tr("Importa documenti…"), this, [this, groupId] { emit importRequested(groupId); });
         menu.addAction(tr("Nuovo documento di testo…"), this, [this, groupId] { emit newTextDocumentRequested(groupId); });
@@ -415,7 +461,7 @@ void DocumentTree::contextMenuEvent(QContextMenuEvent *event)
         });
     }
 
-    if (kind == GroupItem || kind == DocumentItem || kind == SetItem || kind == SetMemberItem) {
+    if (!groupMode && (kind == GroupItem || kind == DocumentItem || kind == SetItem || kind == SetMemberItem)) {
         menu.addSeparator();
         menu.addAction(Ui::memoIcon(), tr("Memo…"), this, [this, item] { editMemo(item); });
         if (kind != SetMemberItem) {

@@ -24,6 +24,8 @@ public:
     void setCurrentDocument(qint64 id);
     void setAllActive(bool active);
     void setActiveDocuments(const QList<qint64> &ids);
+    QList<qint64> selectedDocumentIds() const;
+    void deleteDocuments(const QList<qint64> &ids);
 
     qint64 newDocumentSet(const QList<qint64> &documentIds = {}); // asks for the name
     qint64 newDocumentSetFromActive();
@@ -51,7 +53,8 @@ private:
     void renameItem(QTreeWidgetItem *item);
     void deleteItem(QTreeWidgetItem *item);
     void editMemo(QTreeWidgetItem *item);
-    void addSetMenu(QMenu *menu, qint64 documentId);
+    void addSetMenu(QMenu *menu, const QList<qint64> &documentIds);
+    void moveDocuments(const QList<qint64> &ids, qint64 groupId);
 
     Project *m_project;
     QSet<qint64> m_active;

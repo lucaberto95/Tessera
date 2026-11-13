@@ -1257,6 +1257,33 @@ Every transmission starts only from an explicit action, and before sending it is
         <source>Per numero di segmenti</source>
         <translation>By number of segments</translation>
     </message>
+    <message>
+        <source>Colore dei codici</source>
+        <translation>Color of the codes</translation>
+    </message>
+    <message>
+        <source>Attiva solo i codici selezionati</source>
+        <translation>Activate only the selected codes</translation>
+    </message>
+    <message>
+        <source>Elimina i codici selezionati…</source>
+        <translation>Delete selected codes…</translation>
+    </message>
+    <message numerus="yes">
+        <source>Eliminare %n codici e tutte le loro codifiche?</source>
+        <translation>
+            <numerusform>Delete %n code and all its codings?</numerusform>
+            <numerusform>Delete %n codes and all their codings?</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Verranno eliminati anche i loro sottocodici.</source>
+        <translation>Their subcodes will also be deleted.</translation>
+    </message>
+    <message>
+        <source>Elimina codici</source>
+        <translation>Delete codes</translation>
+    </message>
 </context>
 <context>
     <name>CodingStripe</name>
@@ -2841,6 +2868,29 @@ Anna: I have got into the habit of going out for a walk at six: it is my way of 
     <message>
         <source>Per data di importazione</source>
         <translation>By import date</translation>
+    </message>
+    <message>
+        <source>Sposta documenti</source>
+        <translation>Move documents</translation>
+    </message>
+    <message>
+        <source>Attiva solo i documenti selezionati</source>
+        <translation>Activate only the selected documents</translation>
+    </message>
+    <message>
+        <source>Elimina i documenti selezionati…</source>
+        <translation>Delete selected documents…</translation>
+    </message>
+    <message numerus="yes">
+        <source>Eliminare %n documenti e tutte le loro codifiche?</source>
+        <translation>
+            <numerusform>Delete %n document and all its codings?</numerusform>
+            <numerusform>Delete %n documents and all their codings?</numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Elimina documenti</source>
+        <translation>Delete documents</translation>
     </message>
 </context>
 <context>

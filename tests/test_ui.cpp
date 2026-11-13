@@ -55,6 +55,9 @@
 #include "ui/WordFrequencyDialog.h"
 
 #include <QBuffer>
+#include <QColorDialog>
+#include <QMessageBox>
+#include <QTimer>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QJsonArray>
@@ -1104,6 +1107,50 @@ private slots:
             QVERIFY2(doc.toPlainText().startsWith(name), qPrintable(doc.toPlainText()));
             QVERIFY(!doc.toPlainText().contains(QChar::ObjectReplacementCharacter));
         }
+    }
+
+    void treeMultiSelection()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("multisel.tsra")));
+        const qint64 a = p.addCode(0, "A", Qt::red), b = p.addCode(0, "B", Qt::green);
+        const qint64 g = p.groups().first().id;
+        const qint64 d1 = p.addDocument(g, "D1", "x"), d2 = p.addDocument(g, "D2", "y");
+        CodeTree codes(&p);
+        codes.rebuild();
+        DocumentTree docs(&p);
+        docs.rebuild();
+
+        for (int i = 0; i < codes.topLevelItemCount(); ++i)
+            codes.topLevelItem(i)->setSelected(true);
+        const QList<qint64> ids = codes.selectedCodeIds();
+        QCOMPARE(ids.size(), 2);
+        QTimer::singleShot(0, [] {
+            if (auto *d = qobject_cast<QColorDialog *>(QApplication::activeModalWidget())) {
+                d->setCurrentColor(Qt::blue);
+                d->accept();
+            }
+        });
+        codes.changeColors(ids);
+        QCOMPARE(p.code(a).color, QColor(Qt::blue));
+        QCOMPARE(p.code(b).color, QColor(Qt::blue));
+        p.undo();
+        QCOMPARE(p.code(a).color, QColor(Qt::red));
+        QCOMPARE(p.code(b).color, QColor(Qt::green));
+
+        QTreeWidgetItem *group = docs.topLevelItem(0);
+        group->setExpanded(true);
+        for (int i = 0; i < group->childCount(); ++i)
+            group->child(i)->setSelected(true);
+        QCOMPARE(docs.selectedDocumentIds().size(), 2);
+        QTimer::singleShot(0, [] {
+            if (auto *m = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+                m->button(QMessageBox::Yes)->click();
+        });
+        docs.deleteDocuments({d1, d2});
+        QVERIFY(!p.document(d1).id && !p.document(d2).id);
+        p.undo();
+        QVERIFY(p.document(d1).id && p.document(d2).id);
     }
 
     void findInDocument()

@@ -25,7 +25,7 @@ CodeTree::CodeTree(Project *project, QWidget *parent)
     header()->setStretchLastSection(false);
     header()->setSectionResizeMode(0, QHeaderView::Stretch);
     header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    setSelectionMode(QAbstractItemView::SingleSelection);
+    setSelectionMode(QAbstractItemView::ExtendedSelection);
     setDragEnabled(true);
     setAcceptDrops(true);
     setDropIndicatorShown(true);
@@ -245,20 +245,73 @@ void CodeTree::deleteCode(qint64 id)
         m_project->deleteCode(id);
 }
 
+QList<qint64> CodeTree::selectedCodeIds() const
+{
+    QList<qint64> ids;
+    for (const QTreeWidgetItem *it : selectedItems())
+        ids.append(it->data(0, IdRole).toLongLong());
+    return ids;
+}
+
+void CodeTree::changeColors(const QList<qint64> &ids)
+{
+    if (ids.isEmpty())
+        return;
+    const QColor color = QColorDialog::getColor(m_project->code(ids.first()).color, this, tr("Colore dei codici"));
+    if (!color.isValid())
+        return;
+    m_project->setUndoLabel(tr("Colore dei codici"));
+    m_project->beginBatch();
+    for (qint64 id : ids)
+        m_project->setCodeColor(id, color);
+    m_project->commitBatch();
+}
+
+void CodeTree::deleteCodes(const QList<qint64> &ids)
+{
+    QString text = tr("Eliminare %n codici e tutte le loro codifiche?", nullptr, int(ids.size()));
+    for (qint64 id : ids) {
+        if (!m_project->codeDescendants(id).isEmpty()) {
+            text += QLatin1Char('\n') + tr("Verranno eliminati anche i loro sottocodici.");
+            break;
+        }
+    }
+    if (!Ui::confirm(this, tr("Elimina codici"), text))
+        return;
+    m_project->setUndoLabel(tr("Elimina codici"));
+    m_project->beginBatch();
+    for (qint64 id : ids) {
+        if (m_project->code(id).id) // may already be gone as a subcode of an earlier one
+            m_project->deleteCode(id);
+    }
+    m_project->commitBatch();
+}
+
 void CodeTree::contextMenuEvent(QContextMenuEvent *event)
 {
     if (!m_project->isOpen())
         return;
     QTreeWidgetItem *item = itemAt(viewport()->mapFromGlobal(event->globalPos()));
-    if (item)
-        setCurrentItem(item);
+    if (item) // keep a multi-selection when right-clicking one of its items
+        setCurrentItem(item, 0, item->isSelected() ? QItemSelectionModel::NoUpdate : QItemSelectionModel::ClearAndSelect);
     const qint64 id = item ? item->data(0, IdRole).toLongLong() : 0;
+    const QList<qint64> ids = selectedCodeIds();
 
     QMenu menu(this);
     menu.addAction(tr("Nuovo codice…"), this, [this] { newCode(0); });
     if (!id)
         menu.addAction(tr("Raggruppa i codici di primo livello con l'AI…"), this, [this] { emit aiGroupRequested(0); });
-    if (id) {
+    if (id && ids.size() > 1) {
+        menu.addSeparator();
+        menu.addAction(tr("Colore…"), this, [this, ids] { changeColors(ids); });
+        menu.addAction(tr("Attiva solo i codici selezionati"), this, [this, ids] {
+            m_active = QSet<qint64>(ids.begin(), ids.end());
+            rebuild();
+            emit activationChanged();
+        });
+        menu.addSeparator();
+        menu.addAction(tr("Elimina i codici selezionati…"), this, [this, ids] { deleteCodes(ids); });
+    } else if (id) {
         menu.addAction(tr("Nuovo sottocodice…"), this, [this, id] { newCode(id); });
         menu.addSeparator();
         menu.addAction(tr("Rinomina…"), this, [this, id] { renameCode(id); });
@@ -314,8 +367,10 @@ QMimeData *CodeTree::mimeData(const QList<QTreeWidgetItem *> &items) const
     if (items.isEmpty())
         return nullptr;
     auto *mime = new QMimeData;
-    mime->setData(QString::fromLatin1(Ui::CodeMimeType), QByteArray::number(items.first()->data(0, IdRole).toLongLong()));
-    mime->setText(items.first()->text(0));
+    // With several selected, drag the one the user pressed.
+    const QTreeWidgetItem *dragged = items.contains(currentItem()) ? currentItem() : items.first();
+    mime->setData(QString::fromLatin1(Ui::CodeMimeType), QByteArray::number(dragged->data(0, IdRole).toLongLong()));
+    mime->setText(dragged->text(0));
     return mime;
 }
 
