@@ -88,6 +88,8 @@
 #include <QTranslator>
 #include <QTextDocument>
 #include <QTextEdit>
+#include <QTimer>
+#include <QToolBar>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -861,6 +863,51 @@ private slots:
         dlg.parentCombo()->setCurrentIndex(0);
         QCOMPARE(dlg.parentId(), qint64(0));
         QVERIFY(dlg.color() != QColor(Qt::red));
+    }
+
+    void codeWithNewCodeButton()
+    {
+        const QString path = m_dir.filePath("newcodebtn.tsra");
+        qint64 doc = 0;
+        {
+            Project p;
+            QVERIFY(p.create(path));
+            doc = p.addDocument(p.groups().first().id, "Doc", "alfa beta gamma");
+        }
+        useTemporarySettings(); // opening a project updates the recent list
+        MainWindow w;
+        w.resize(1200, 800);
+        w.show();
+        QVERIFY(w.openProject(path));
+        auto *view = w.findChild<DocumentView *>();
+        view->openDocument(doc);
+        view->selectRange(0, 4);
+        QAction *button = nullptr;
+        for (QToolBar *tb : w.findChildren<QToolBar *>())
+            for (QAction *a : tb->actions())
+                if (a->text() == "Codifica con nuovo codice")
+                    button = a;
+        QVERIFY(button && button->isEnabled());
+        bool seen = false;
+        QTimer::singleShot(0, [&] {
+            auto *dlg = qobject_cast<NewCodeDialog *>(qApp->activeModalWidget());
+            if (!dlg)
+                return;
+            seen = true;
+            QCOMPARE(dlg->name(), QString("alfa"));
+            dlg->nameEdit()->setText("Nuovo dal pulsante");
+            dlg->accept();
+        });
+        button->trigger();
+        QVERIFY(seen);
+        Project check;
+        QVERIFY(check.open(path));
+        const qint64 code = check.findCode(0, "Nuovo dal pulsante");
+        QVERIFY(code > 0);
+        const auto segs = check.segmentsForDocument(doc);
+        QCOMPARE(segs.size(), 1);
+        QCOMPARE(segs.first().codeId, code);
+        QSettings::setDefaultFormat(QSettings::NativeFormat);
     }
 
     void mediaPlayerRealFile()

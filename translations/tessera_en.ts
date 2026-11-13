@@ -4360,6 +4360,11 @@ Text only: the extracted text becomes a text document, without layout.</translat
         <translation>Code with new code</translation>
     </message>
     <message>
+        <location filename="../src/ui/MainWindow.cpp" line="452" />
+        <source>Codifica la selezione con un nuovo codice (Ctrl+Shift+E)</source>
+        <translation>Code the selection with a new code (Ctrl+Shift+E)</translation>
+    </message>
+    <message>
         <location filename="../src/ui/MainWindow.cpp" line="1029" />
         <source>Esporta codebook</source>
         <translation>Export codebook</translation>
