@@ -5354,6 +5354,16 @@ Text only: the extracted text becomes a text document, without layout.</translat
         <source>Descrizione:</source>
         <translation>Description:</translation>
     </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="146" />
+        <source>Esiste già: la selezione sarà codificata con il codice esistente.</source>
+        <translation>Already exists: the selection will be coded with the existing code.</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="147" />
+        <source>Esiste già un codice con questo nome.</source>
+        <translation>A code with this name already exists.</translation>
+    </message>
 </context>
 <context>
     <name>Project</name>

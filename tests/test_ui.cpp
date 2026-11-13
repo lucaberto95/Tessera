@@ -65,6 +65,7 @@
 #include <QTemporaryDir>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDialogButtonBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -863,6 +864,31 @@ private slots:
         dlg.parentCombo()->setCurrentIndex(0);
         QCOMPARE(dlg.parentId(), qint64(0));
         QVERIFY(dlg.color() != QColor(Qt::red));
+    }
+
+    void newCodeDialogSuggestsExisting()
+    {
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("suggest.tsra")));
+        const qint64 emozioni = p.addCode(0, "Emozioni", Qt::red);
+        const qint64 ansia = p.addCode(emozioni, "Ansia", Qt::red);
+        const qint64 lavoro = p.addCode(0, "Lavoro", Qt::blue);
+        NewCodeDialog dlg(&p, 0);
+        QVERIFY(dlg.nameEdit()->completer());
+        dlg.nameEdit()->completer()->setCompletionPrefix("ans");
+        QCOMPARE(dlg.nameEdit()->completer()->completionCount(), 1);
+        QCOMPARE(dlg.nameEdit()->completer()->currentCompletion(), QString("Ansia"));
+        dlg.nameEdit()->setText("ansia");
+        QCOMPARE(dlg.existingCodeId(), ansia);
+        dlg.nameEdit()->setText("Nuovo");
+        QCOMPARE(dlg.existingCodeId(), qint64(0));
+        dlg.setUseExisting(true);
+        auto *description = dlg.findChildren<QPlainTextEdit *>().first();
+        dlg.nameEdit()->setText("Lavoro");
+        QCOMPARE(dlg.existingCodeId(), lavoro);
+        QVERIFY(!description->isEnabled());
+        dlg.nameEdit()->setText("x");
+        QVERIFY(description->isEnabled());
     }
 
     void codeWithNewCodeButton()
