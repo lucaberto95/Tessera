@@ -1,0 +1,56 @@
+name: macOS
+
+on:
+  push:
+    branches: [main, dev, feature/macos]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: 'qtcharts qtmultimedia qtpdf qtshadertools'
+          cache: true
+
+      - name: Install Ninja
+        run: command -v ninja || brew install ninja
+
+      - name: Build
+        env:
+          QTDIR: ${{ env.QT_ROOT_DIR }}
+          TESSERA_CMAKE_ARGS: -DCMAKE_OSX_ARCHITECTURES=arm64;x86_64
+        run: ./build.sh Release
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build/Release --output-on-failure
+
+      - name: Package
+        env:
+          QTDIR: ${{ env.QT_ROOT_DIR }}
+        run: ./deploy-macos.sh dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tessera-macos
+          path: dist/*.dmg
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.dmg --clobber

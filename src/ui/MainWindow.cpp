@@ -1668,10 +1668,18 @@ void MainWindow::checkForUpdates(bool manual)
             return;
 
         const QString appDir = QCoreApplication::applicationDirPath();
-        if (!release.hasAsset() || !Update::canWriteTo(appDir)) {
-            Ui::showInfo(this, tr("Aggiornamento manuale"),
-                         tr("Tessera non può aggiornarsi da sola in questa cartella. "
-                            "Scarica la nuova versione dalla pagina della release: si aprirà nel browser."));
+#ifdef Q_OS_WIN
+        const bool manual = !release.hasAsset() || !Update::canWriteTo(appDir);
+        const QString how = tr("Tessera non può aggiornarsi da sola in questa cartella. "
+                               "Scarica la nuova versione dalla pagina della release: si aprirà nel browser.");
+#else
+        // Self-replacement exists only on Windows.
+        const bool manual = true;
+        const QString how = tr("Scarica la nuova versione dalla pagina della release (si aprirà nel browser): "
+                               "apri il file .dmg e trascina Tessera nella cartella Applicazioni.");
+#endif
+        if (manual) {
+            Ui::showInfo(this, tr("Aggiornamento manuale"), how);
             if (QUrl url(release.pageUrl); url.scheme() == QLatin1String("https"))
                 QDesktopServices::openUrl(url);
             return;

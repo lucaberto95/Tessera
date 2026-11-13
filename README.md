@@ -136,3 +136,10 @@ Tessera è distribuito con licenza [MIT](LICENSE). Crediti e componenti di terze
 - Si codificano testi e aree di immagini e PDF; audio e video non sono ancora supportati.
 - Nei PDF `Ctrl+F` non è ancora disponibile: si usa la ricerca lessicale del progetto, che porta alla pagina.
 - La cronologia di annullamento vale per la sessione e si azzera chiudendo il progetto.
+
+## macOS
+
+Compilazione con `./build.sh Release` (serve Qt 6.10 con Charts, Multimedia, Pdf e ShaderTools; imposta `QTDIR`) e pacchetto con `./deploy-macos.sh dmg`.
+Ogni release pubblicata riceve `Tessera-x.y.z-macos.dmg` dal workflow GitHub Actions.
+L'app non è notarizzata: al primo avvio usa clic destro > Apri.
+Su macOS gli aggiornamenti sono segnalati nell'app e si installano a mano dal dmg.
