@@ -143,9 +143,25 @@ QWidget *createControls(QWidget *host, bool minMax, QWidget *parent)
 
 QLabel *createLogo(QWidget *host, QWidget *parent)
 {
+    Q_UNUSED(host);
     auto *logo = new QLabel(parent);
-    logo->setPixmap(host->windowIcon().pixmap(18, 18));
-    logo->setFixedSize(18, 18);
+    const qreal dpr = logo->devicePixelRatioF();
+    QPixmap pm(QSize(20, 20) * dpr);
+    pm.setDevicePixelRatio(dpr);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    const QColor teal(0x0E, 0x6B, 0x6B), orange(0xD9, 0x8A, 0x4E);
+    p.setBrush(teal);
+    p.drawRoundedRect(QRectF(1, 1, 8, 8), 2, 2);
+    p.drawRoundedRect(QRectF(11, 11, 8, 8), 2, 2);
+    p.setBrush(orange);
+    p.drawRoundedRect(QRectF(11, 1, 8, 8), 2, 2);
+    p.drawRoundedRect(QRectF(1, 11, 8, 8), 2, 2);
+    p.end();
+    logo->setPixmap(pm);
+    logo->setFixedSize(20, 20);
     return logo;
 }
 
@@ -222,17 +238,23 @@ public:
         QMenuBar *mb = isMain && !kMac ? qobject_cast<QMainWindow *>(w)->menuBar() : nullptr;
         if (mb) {
             // Windows/Linux main window: the menu bar is the title bar.
-            mb->setCornerWidget(createLogo(w, mb), Qt::TopLeftCorner);
-            auto *right = new QWidget(mb);
-            auto *lay = new QHBoxLayout(right);
-            lay->setContentsMargins(0, 0, 0, 0);
-            lay->setSpacing(10);
-            m_menuTitle = new QLabel(w->windowTitle(), right);
+            mb->setFixedHeight(kBarHeight);
+            auto *left = new QWidget(mb);
+            auto *ll = new QHBoxLayout(left);
+            ll->setContentsMargins(14, 0, 8, 0);
+            ll->setSpacing(10);
+            ll->addWidget(createLogo(w, left));
+            auto *name = new QLabel(QStringLiteral("Tessera"), left);
+            name->setObjectName(QStringLiteral("TitleBarName"));
+            ll->addWidget(name);
+            mb->setCornerWidget(left, Qt::TopLeftCorner);
+            mb->setCornerWidget(createControls(w, true, mb), Qt::TopRightCorner);
+            // Project name, centred on the bar and kept clear of the menus.
+            m_menuTitle = new QLabel(w->windowTitle(), mb);
             m_menuTitle->setObjectName(QStringLiteral("TitleBarText"));
             m_menuTitle->setTextFormat(Qt::PlainText);
-            lay->addWidget(m_menuTitle);
-            lay->addWidget(createControls(w, true, right));
-            mb->setCornerWidget(right, Qt::TopRightCorner);
+            m_menuTitle->setAlignment(Qt::AlignCenter);
+            m_menuTitle->setAttribute(Qt::WA_TransparentForMouseEvents);
             mb->installEventFilter(this);
             m_menuBar = mb;
         } else {
@@ -245,6 +267,8 @@ protected:
     bool eventFilter(QObject *o, QEvent *e) override
     {
         if (o == m_menuBar) {
+            if (e->type() == QEvent::Resize || e->type() == QEvent::LayoutRequest || e->type() == QEvent::Show)
+                placeMenuTitle();
             if (e->type() == QEvent::MouseButtonPress || e->type() == QEvent::MouseButtonDblClick) {
                 auto *me = static_cast<QMouseEvent *>(e);
                 if (me->button() == Qt::LeftButton && !m_menuBar->actionAt(me->position().toPoint())
@@ -263,8 +287,10 @@ protected:
         case QEvent::WindowTitleChange:
             if (m_bar)
                 m_bar->setTitle(m_w->windowTitle());
-            if (m_menuTitle)
+            if (m_menuTitle) {
                 m_menuTitle->setText(m_w->windowTitle());
+                placeMenuTitle();
+            }
             break;
         case QEvent::WindowStateChange:
             applyMargins();
@@ -288,6 +314,19 @@ protected:
     }
 
 private:
+    void placeMenuTitle()
+    {
+        // Between the last menu and the window buttons, centred when there is room.
+        const QList<QAction *> acts = m_menuBar->actions();
+        int left = 0;
+        if (!acts.isEmpty())
+            left = m_menuBar->actionGeometry(acts.last()).right() + 12;
+        const int right = m_menuBar->width() - 3 * 46 - 12;
+        const int w = qMax(0, qMin(right - left, m_menuTitle->fontMetrics().horizontalAdvance(m_menuTitle->text()) + 24));
+        const int x = qBound(left, (m_menuBar->width() - w) / 2, qMax(left, right - w));
+        m_menuTitle->setGeometry(x, 0, w, kBarHeight);
+    }
+
     bool resizable() const { return !m_w->isMaximized() && !m_w->isFullScreen(); }
 
     void applyMargins()
@@ -359,17 +398,20 @@ const char *kStyleSheet = R"(
 QMainWindow { background: #ECE9E3; }
 QDialog { background: #F4F2EE; }
 #TitleBar { background: #ECE9E3; border-bottom: 1px solid #DDD9D1; }
-#TitleBarText { color: #59626B; font-size: 13px; }
+#TitleBarText { color: #1F2328; font-size: 13px; font-weight: 600; }
+QMenuBar #TitleBarText { color: #59626B; font-weight: 400; }
+#TitleBarName { color: #1F2328; font-size: 14px; font-weight: 700; }
 QMenuBar { background: #ECE9E3; border-bottom: 1px solid #DDD9D1; spacing: 2px; }
-QMenuBar::item { padding: 11px 10px; background: transparent; border-radius: 6px; }
+QMenuBar::item { padding: 5px 10px; margin: 6px 1px; background: transparent; border-radius: 6px; }
 QMenuBar::item:selected { background: #DDD9D1; }
 QMenu { background: #FFFFFF; border: 1px solid #DDD9D1; padding: 4px; }
 QMenu::item { padding: 6px 24px 6px 20px; border-radius: 6px; }
 QMenu::item:selected { background: #DCEFEE; color: #0A4F4F; }
 QMenu::separator { height: 1px; background: #EEEBE5; margin: 4px 8px; }
-QToolBar { background: #FBFAF8; border: 0; border-bottom: 1px solid #DDD9D1; padding: 6px 10px; spacing: 6px; }
-QToolBar QToolButton { padding: 6px 10px; border: 1px solid transparent; border-radius: 8px; }
-QToolBar QToolButton:hover { background: #FFFFFF; border-color: #DDD9D1; }
+QToolBar { background: #FBFAF8; border: 0; border-bottom: 1px solid #DDD9D1; padding: 8px 14px; spacing: 8px; }
+QToolBar::separator { background: #DDD9D1; width: 1px; margin: 4px 6px; }
+QToolBar QToolButton { padding: 8px 12px; background: #FFFFFF; border: 1px solid #DDD9D1; border-radius: 8px; }
+QToolBar QToolButton:hover { border-color: #0E6B6B; }
 QToolBar QToolButton:pressed { background: #EEEBE5; }
 QToolBar QToolButton#PrimaryAction { background: #0E6B6B; color: #FFFFFF; font-weight: 600; }
 QToolBar QToolButton#PrimaryAction:hover { background: #0B5A5A; border-color: #0B5A5A; }

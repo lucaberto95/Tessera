@@ -417,7 +417,7 @@ void MainWindow::createToolBar()
 {
     QToolBar *tb = addToolBar(tr("Strumenti"));
     tb->setObjectName(QStringLiteral("mainToolBar"));
-    tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    tb->setToolButtonStyle(Qt::ToolButtonTextOnly);
     tb->setMovable(false);
     tb->setIconSize(QSize(20, 20));
     tb->addAction(m_newProject);
