@@ -32,6 +32,9 @@ CodeTree::CodeTree(Project *project, QWidget *parent)
     setDragDropMode(QAbstractItemView::DragDrop);
     setDefaultDropAction(Qt::MoveAction);
     setUniformRowHeights(true);
+    // In-place rename on double click, always on the name column (#65), never on the count column.
+    setEditTriggers(QAbstractItemView::NoEditTriggers);
+    connect(this, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) { editItem(item, 0); });
 
     connect(this, &QTreeWidget::itemChanged, this, &CodeTree::onItemChanged);
     connect(this, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *cur) {
@@ -76,7 +79,8 @@ void CodeTree::rebuild()
             item->setText(0, c.name);
             item->setIcon(0, Ui::colorIcon(c.color));
             item->setData(0, IdRole, c.id);
-            item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled
+                           | Qt::ItemIsEditable);
             item->setCheckState(0, m_active.contains(c.id) ? Qt::Checked : Qt::Unchecked);
             const int own = counts.value(c.id);
             const int sub = build(item, c.id);
@@ -151,6 +155,16 @@ void CodeTree::onItemChanged(QTreeWidgetItem *item, int column)
     if (m_rebuilding || column != 0)
         return;
     const qint64 id = item->data(0, IdRole).toLongLong();
+    const QString name = item->text(0).trimmed();
+    const QString oldName = m_project->code(id).name;
+    if (name != oldName) {
+        // Queued: the rename rebuilds the tree, which must not happen inside the editor's commit.
+        QMetaObject::invokeMethod(this, [this, id, name] {
+            if (name.isEmpty() || !m_project->renameCode(id, name))
+                rebuild();
+        }, Qt::QueuedConnection);
+        return;
+    }
     const bool now = item->checkState(0) == Qt::Checked;
     if (now == m_active.contains(id))
         return;
