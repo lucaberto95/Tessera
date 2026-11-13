@@ -125,7 +125,7 @@ QString extractDistribution(const QString &zipPath, const QString &outDir, QStri
     const QString root = QDir::cleanPath(out.absolutePath()) + QLatin1Char('/');
 
     for (const QZipReader::FileInfo &fi : zip.fileInfoList()) {
-        const QString rel = QDir::fromNativeSeparators(fi.filePath);
+        const QString rel = QString(fi.filePath).replace(QLatin1Char('\\'), QLatin1Char('/')); // on every system
         const QString target = QDir::cleanPath(out.filePath(rel));
         // Zip-slip: nothing may land outside the extraction folder.
         if (rel.contains(QStringLiteral("..")) || QDir::isAbsolutePath(rel) || rel.contains(QLatin1Char(':'))

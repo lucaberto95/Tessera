@@ -5,11 +5,16 @@
 #include <QColor>
 #include <QList>
 #include <QString>
+#include <QStringDecoder>
 
 namespace TextUtils {
 
 // Converts CRLF / CR line endings to LF and strips a leading BOM.
 QString normalizeText(QString text);
+
+// Decoder for legacy 8-bit text (not UTF-8): the ANSI code page on Windows; elsewhere the system codec is
+// UTF-8, so Windows-1252 (or Latin-1 when that is unavailable) is used, as such files come from Windows.
+QStringDecoder legacyDecoder();
 
 // QDPX positions count Unicode code points; Tessera stores UTF-16 indexes.
 int utf16ToCodePoint(const QString &text, int utf16Index);
