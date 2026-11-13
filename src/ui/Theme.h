@@ -1,5 +1,9 @@
 #pragma once
 
+#include <QColor>
+#include <QIcon>
+#include <QString>
+
 class QApplication;
 class QMainWindow;
 class QWidget;
@@ -17,5 +21,9 @@ void frameWindow(QWidget *w);
 
 // Frames every dialog and main window the application shows, when it is first shown.
 void installAutoFrame(QApplication &app);
+
+// Icon from the bundled Material Symbols font (ligature name, e.g. "undo"); a null icon when the font
+// is not available (tests, missing resource).
+QIcon materialIcon(const QString &name, const QColor &color, int size = 20);
 
 } // namespace Ui

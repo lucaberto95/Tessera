@@ -125,6 +125,9 @@ if(WIN32)
     target_sources(Tessera PRIVATE src/tessera.rc)
 endif()
 qt_add_resources(Tessera icons PREFIX "/" BASE "${CMAKE_SOURCE_DIR}/installer" FILES installer/tessera.svg)
+qt_add_resources(Tessera fonts PREFIX "/fonts" BASE "${CMAKE_SOURCE_DIR}/resources/fonts" FILES
+    resources/fonts/Inter-Regular.ttf resources/fonts/Inter-SemiBold.ttf resources/fonts/Inter-Bold.ttf
+    resources/fonts/MaterialSymbolsOutlined.ttf)
 
 # Regenerates installer/*.ico from the SVG sources (not built by default).
 qt_add_executable(tessera_makeicon EXCLUDE_FROM_ALL tools/makeicon.cpp)

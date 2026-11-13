@@ -3,6 +3,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QDialog>
+#include <QFontDatabase>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -11,6 +12,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPalette>
+#include <QPixmap>
 #include <QStyleFactory>
 #include <QStyleHints>
 #include <QWindow>
@@ -409,8 +411,9 @@ QMenu::item { padding: 6px 24px 6px 20px; border-radius: 6px; }
 QMenu::item:selected { background: #DCEFEE; color: #0A4F4F; }
 QMenu::separator { height: 1px; background: #EEEBE5; margin: 4px 8px; }
 QToolBar { background: #FBFAF8; border: 0; border-bottom: 1px solid #DDD9D1; padding: 8px 14px; spacing: 8px; }
+QToolBar QToolButton:disabled { background: #FBFAF8; }
 QToolBar::separator { background: #DDD9D1; width: 1px; margin: 4px 6px; }
-QToolBar QToolButton { padding: 8px 12px; background: #FFFFFF; border: 1px solid #DDD9D1; border-radius: 8px; }
+QToolBar QToolButton { padding: 7px; background: #FFFFFF; border: 1px solid #DDD9D1; border-radius: 8px; }
 QToolBar QToolButton:hover { border-color: #0E6B6B; }
 QToolBar QToolButton:pressed { background: #EEEBE5; }
 QToolBar QToolButton#PrimaryAction { background: #0E6B6B; color: #FFFFFF; font-weight: 600; }
@@ -430,7 +433,7 @@ QComboBox QAbstractItemView { background: #FFFFFF; border: 1px solid #DDD9D1; se
 QTreeView, QListView, QTableView, QTableWidget { background: #FFFFFF; alternate-background-color: #FAF9F6;
     border: 1px solid #DDD9D1; border-radius: 8px; selection-background-color: #DCEFEE; selection-color: #0A4F4F; }
 QHeaderView::section { background: #F4F2EE; color: #59626B; border: 0; border-bottom: 1px solid #DDD9D1;
-    padding: 6px 8px; font-weight: 600; }
+    padding: 6px 10px; font-size: 12px; font-weight: 600; }
 QTabWidget::pane { border: 1px solid #DDD9D1; border-radius: 8px; background: #FFFFFF; top: -1px; }
 QTabBar::tab { padding: 8px 16px; border: 0; background: transparent; color: #59626B; }
 QTabBar::tab:selected { color: #0A4F4F; border-bottom: 2px solid #0E6B6B; font-weight: 600; }
@@ -472,10 +475,36 @@ void applyTheme(QApplication &app)
     p.setColor(QPalette::ToolTipBase, kInk);
     p.setColor(QPalette::ToolTipText, Qt::white);
     app.setPalette(p);
-    QFont f = app.font();
-    f.setPointSizeF(9.5);
-    app.setFont(f);
+    for (const char *file : {"Inter-Regular", "Inter-SemiBold", "Inter-Bold", "MaterialSymbolsOutlined"})
+        QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/%1.ttf").arg(QLatin1String(file)));
+    if (QFontDatabase::families().contains(QStringLiteral("Inter"))) {
+        QFont f(QStringLiteral("Inter"));
+        f.setPixelSize(13);
+        app.setFont(f);
+    }
     app.setStyleSheet(QString::fromUtf8(kStyleSheet));
+}
+
+QIcon materialIcon(const QString &name, const QColor &color, int size)
+{
+    if (!QFontDatabase::families().contains(QStringLiteral("Material Symbols Outlined")))
+        return QIcon();
+    QIcon icon;
+    for (const QColor &c : {color, QColor(0x8A, 0x90, 0x99)}) {
+        const int px = size * 2;
+        QPixmap pm(px, px);
+        pm.fill(Qt::transparent);
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::TextAntialiasing);
+        QFont f(QStringLiteral("Material Symbols Outlined"));
+        f.setPixelSize(px * 9 / 10);
+        p.setFont(f);
+        p.setPen(c);
+        p.drawText(QRect(0, 0, px, px), Qt::AlignCenter, name);
+        p.end();
+        icon.addPixmap(pm, c == color ? QIcon::Normal : QIcon::Disabled);
+    }
+    return icon;
 }
 
 void frameWindow(QWidget *w)
