@@ -4,6 +4,13 @@ Le modifiche rilevanti di Tessera, dalla più recente. Ogni voce rimanda alla re
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-13 — Nuovo design
+Commit `RELEASE`
+
+- Nuova identità visiva su Windows, Linux e macOS: tavolozza, stile e font Inter incorporati, icone Material Symbols a sole icone nella barra degli strumenti (i nomi restano nei tooltip), nuovo logo.
+- Barra del titolo di sistema sostituita da una barra propria in ogni finestra: sulla finestra principale (Windows/Linux) il menu sta nella barra con titolo e pulsanti di finestra; su macOS e nei dialoghi una barra con i pulsanti di chiusura (semafori su macOS). Ridimensionamento e spostamento con il sistema. QMessageBox e dialoghi di sistema restano nativi.
+- Nessuna migrazione dello schema.
+
 ## [0.30.0] - 2026-11-05 — Analisi, lavoro di gruppo e multimedia
 Commit `bc9a3b1`
 
