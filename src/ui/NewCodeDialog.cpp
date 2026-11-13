@@ -5,8 +5,10 @@
 
 #include <QColorDialog>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -25,11 +27,11 @@ NewCodeDialog::NewCodeDialog(Project *project, qint64 parentId, QWidget *parent)
     m_parent = new QComboBox;
     m_parent->addItem(tr("(livello superiore)"), qint64(0));
     // Tree order, indented by depth.
-    const QList<Code> codes = project->codesInTreeOrder();
+    m_codes = project->codesInTreeOrder();
     QHash<qint64, qint64> parentOf;
-    for (const Code &c : codes)
+    for (const Code &c : m_codes)
         parentOf.insert(c.id, c.parentId);
-    for (const Code &c : codes) {
+    for (const Code &c : m_codes) {
         int depth = 0;
         for (qint64 p = c.parentId; p && depth < 64; p = parentOf.value(p))
             ++depth;
@@ -66,8 +68,36 @@ NewCodeDialog::NewCodeDialog(Project *project, qint64 parentId, QWidget *parent)
         m_buttons->button(QDialogButtonBox::Ok)->setEnabled(!name().isEmpty());
     });
 
+    // Suggest existing code names while typing (#66).
+    QStringList names;
+    for (const Code &c : m_codes)
+        names << c.name;
+    names.removeDuplicates();
+    auto *completer = new QCompleter(names, this);
+    completer->setCaseSensitivity(Qt::CaseInsensitive);
+    completer->setFilterMode(Qt::MatchContains);
+    m_name->setCompleter(completer);
+    connect(completer, QOverload<const QString &>::of(&QCompleter::activated), this, [this](const QString &text) {
+        for (const Code &c : m_codes) {
+            if (c.name.compare(text, Qt::CaseInsensitive) == 0) {
+                const int i = m_parent->findData(c.parentId);
+                if (i >= 0)
+                    m_parent->setCurrentIndex(i);
+                break;
+            }
+        }
+    });
+
+    m_hint = new QLabel;
+    m_hint->setTextFormat(Qt::PlainText);
+    m_hint->setWordWrap(true);
+    m_hint->hide();
+    connect(m_name, &QLineEdit::textChanged, this, [this] { updateExisting(); });
+    connect(m_parent, &QComboBox::currentIndexChanged, this, [this] { updateExisting(); });
+
     auto *form = new QFormLayout(this);
     form->addRow(tr("Nome:"), m_name);
+    form->addRow(m_hint);
     form->addRow(tr("Posizione:"), m_parent);
     form->addRow(tr("Colore:"), m_colorButton);
     form->addRow(tr("Descrizione:"), m_description);
@@ -87,6 +117,37 @@ qint64 NewCodeDialog::parentId() const
 QString NewCodeDialog::description() const
 {
     return m_description->toPlainText();
+}
+
+qint64 NewCodeDialog::existingCodeId() const
+{
+    const QString n = name();
+    qint64 found = 0;
+    for (const Code &c : m_codes) {
+        if (c.name.compare(n, Qt::CaseInsensitive) != 0)
+            continue;
+        if (c.parentId == parentId())
+            return c.id;
+        if (!found)
+            found = c.id;
+    }
+    return found;
+}
+
+void NewCodeDialog::setUseExisting(bool on)
+{
+    m_useExisting = on;
+    updateExisting();
+}
+
+void NewCodeDialog::updateExisting()
+{
+    const bool exists = existingCodeId() != 0;
+    m_hint->setText(m_useExisting ? tr("Esiste già: la selezione sarà codificata con il codice esistente.")
+                                  : tr("Esiste già un codice con questo nome."));
+    m_hint->setVisible(exists);
+    m_colorButton->setEnabled(!(m_useExisting && exists));
+    m_description->setEnabled(!(m_useExisting && exists));
 }
 
 void NewCodeDialog::applyDefaultColor()

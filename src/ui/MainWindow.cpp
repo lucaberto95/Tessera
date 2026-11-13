@@ -1016,6 +1016,7 @@ void MainWindow::codeWithNewCode()
     }
     NewCodeDialog dlg(m_project, 0, this);
     dlg.setWindowTitle(tr("Codifica con un nuovo codice"));
+    dlg.setUseExisting(true);
     dlg.nameEdit()->setText(m_view->selectedText().simplified().left(40));
     dlg.nameEdit()->selectAll();
     if (dlg.exec() != QDialog::Accepted)
@@ -1023,7 +1024,7 @@ void MainWindow::codeWithNewCode()
     // Creating the code and coding the selection are undone together.
     m_project->setUndoLabel(tr("Codifica con nuovo codice"));
     m_project->beginBatch();
-    qint64 code = m_project->findCode(dlg.parentId(), dlg.name());
+    qint64 code = dlg.existingCodeId();
     if (!code) {
         code = m_project->addCode(dlg.parentId(), dlg.name(), dlg.color());
         if (code && !dlg.description().isEmpty())
