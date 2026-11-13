@@ -5270,6 +5270,59 @@ Text only: the extracted text becomes a text document, without layout.</translat
     </message>
 </context>
 <context>
+    <name>NewCodeDialog</name>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="19" />
+        <source>Nuovo sottocodice</source>
+        <translation>New subcode</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="19" />
+        <source>Nuovo codice</source>
+        <translation>New code</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="26" />
+        <source>(livello superiore)</source>
+        <translation>(top level)</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="43" />
+        <source>Scegli…</source>
+        <translation>Choose…</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="45" />
+        <source>Colore del codice</source>
+        <translation>Code color</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="59" />
+        <source>Definizione del codice, criteri di applicazione, esempi…</source>
+        <translation>Code definition, criteria for applying it, examples…</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="70" />
+        <source>Nome:</source>
+        <translation>Name:</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="71" />
+        <source>Posizione:</source>
+        <translation>Position:</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="72" />
+        <source>Colore:</source>
+        <translation>Color:</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/NewCodeDialog.cpp" line="73" />
+        <source>Descrizione:</source>
+        <translation>Description:</translation>
+    </message>
+</context>
+<context>
     <name>Project</name>
     <message>
         <location filename="../src/core/Project.cpp" line="526" />
