@@ -1,5 +1,6 @@
 #include "ui/Language.h"
 #include "ui/MainWindow.h"
+#include "ui/Theme.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -19,6 +20,9 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName(QStringLiteral("Tessera"));
     QApplication::setApplicationName(QStringLiteral("Tessera"));
     QApplication::setApplicationVersion(QStringLiteral(TESSERA_VERSION_STRING));
+
+    Ui::applyTheme(app);
+    Ui::installAutoFrame(app);
 
     // Window/taskbar icon: rendered from the embedded SVG (no icon-engine plugin needed).
     {
@@ -60,6 +64,7 @@ int main(int argc, char *argv[])
     parser.process(app);
 
     MainWindow window;
+    Ui::frameWindow(&window);
     window.show();
 
     if (parser.isSet(exampleOption)) {

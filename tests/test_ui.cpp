@@ -9,6 +9,7 @@
 #include "core/Project.h"
 #include "ui/CodeTree.h"
 #include "ui/NewCodeDialog.h"
+#include "ui/Theme.h"
 #include "ui/CodingStripe.h"
 #include "ui/AgreementDialog.h"
 #include "ui/ReportDialog.h"
@@ -76,6 +77,7 @@
 #include <QDir>
 #include <QImage>
 #include <QLineEdit>
+#include <QLabel>
 #include <QMenuBar>
 #include <QListWidget>
 #include <QMimeData>
@@ -846,6 +848,31 @@ private slots:
         QCOMPARE(saved.pointSizeF(), big.pointSizeF());
         CodingStripe::setLabelFont(old);
         QSettings::setDefaultFormat(QSettings::NativeFormat);
+    }
+
+    void themedFrame()
+    {
+        // Custom window frame: dialogs get a title bar and lose the system one; the main window keeps its menu.
+        Project p;
+        QVERIFY(p.create(m_dir.filePath("frame.tsra")));
+        NewCodeDialog dlg(&p, 0);
+        dlg.setWindowTitle(QStringLiteral("Titolo prova"));
+        Ui::frameWindow(&dlg);
+        Ui::frameWindow(&dlg); // idempotent
+        QVERIFY(dlg.windowFlags() & Qt::FramelessWindowHint);
+        auto *bar = dlg.findChild<QWidget *>(QStringLiteral("TitleBar"));
+        QVERIFY(bar);
+        QCOMPARE(dlg.findChildren<QWidget *>(QStringLiteral("TitleBar")).size(), 1);
+        QVERIFY(bar->findChild<QLabel *>(QStringLiteral("TitleBarText")));
+        QCOMPARE(bar->findChild<QLabel *>(QStringLiteral("TitleBarText"))->text(), QStringLiteral("Titolo prova"));
+        dlg.setWindowTitle(QStringLiteral("Altro"));
+        QCOMPARE(bar->findChild<QLabel *>(QStringLiteral("TitleBarText"))->text(), QStringLiteral("Altro"));
+        QVERIFY(dlg.contentsMargins().top() >= 40);
+
+        MainWindow w;
+        Ui::frameWindow(&w);
+        QVERIFY(w.windowFlags() & Qt::FramelessWindowHint);
+        QVERIFY(w.menuBar()->actions().size() > 3);
     }
 
     void newCodeDialog()

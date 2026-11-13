@@ -455,6 +455,8 @@ void MainWindow::createToolBar()
     connect(codeNewTb, &QAction::triggered, m_codeNew, &QAction::trigger);
     m_projectActions << codeNewTb;
     tb->addAction(codeNewTb);
+    if (QWidget *w = tb->widgetForAction(codeNewTb))
+        w->setObjectName(QStringLiteral("PrimaryAction"));
     tb->addSeparator();
     tb->addAction(m_search);
     QAction *matrix = new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Matrice"), this);

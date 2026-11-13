@@ -116,6 +116,7 @@ qt_add_library(tessera_ui STATIC
     src/ui/AiUi.h src/ui/AiUi.cpp
     src/ui/UiUtils.h src/ui/UiUtils.cpp
     src/ui/Language.h src/ui/Language.cpp
+    src/ui/Theme.h src/ui/Theme.cpp
 )
 target_link_libraries(tessera_ui PUBLIC tessera_core Qt6::Widgets Qt6::Charts Qt6::Svg Qt6::Concurrent Qt6::Multimedia Qt6::MultimediaWidgets)
 
