@@ -14,6 +14,7 @@
 #include "core/TextUtils.h"
 #include "core/Updater.h"
 #include "ui/CodeTree.h"
+#include "ui/CodingStripe.h"
 #include "ui/DocumentTree.h"
 #include "ui/Language.h"
 #include "ui/DocumentView.h"
@@ -379,6 +380,7 @@ void MainWindow::createMenus()
     QMenu *settings = menuBar()->addMenu(tr("&Impostazioni"));
     settings->addAction(m_userName);
     settings->addAction(m_aiSettings);
+    settings->addAction(tr("&Carattere dei codici nel testo…"), this, [this] { CodingStripe::chooseLabelFont(this); });
     createLanguageMenu(settings);
 
     QMenu *help = menuBar()->addMenu(tr("&Aiuto"));

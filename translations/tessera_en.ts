@@ -1249,6 +1249,16 @@ Every transmission starts only from an explicit action, and before sending it is
 <context>
     <name>CodingStripe</name>
     <message>
+        <location filename="../src/ui/CodingStripe.cpp" line="50" />
+        <source>Carattere dei codici nel testo</source>
+        <translation>Code label font</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/CodingStripe.cpp" line="237" />
+        <source>Carattere dei codici…</source>
+        <translation>Code label font…</translation>
+    </message>
+    <message>
         <location filename="../src/ui/CodingStripe.cpp" line="202" />
         <source>Peso: %1</source>
         <translation>Weight: %1</translation>
@@ -3496,6 +3506,11 @@ In NVivo choose File &gt; Export &gt; Export Project (REFI-QDA format, .qdpx) or
 </context>
 <context>
     <name>MainWindow</name>
+    <message>
+        <location filename="../src/ui/MainWindow.cpp" line="383" />
+        <source>&amp;Carattere dei codici nel testo…</source>
+        <translation>Code &amp;label font…</translation>
+    </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="159" />
         <source>&amp;Nuovo progetto…</source>
